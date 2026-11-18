@@ -61,6 +61,7 @@ Benötigt Rust 1.85 oder neuer (Edition 2024). Unter Linux zusätzlich die Entwi
 cargo xtask ci                      # Formatierung, Clippy ohne Warnungen, alle Tests (wie die CI)
 cargo xtask version [set 0.2.0]     # Version zeigen bzw. setzen
 packaging/linux/package.sh          # dist/release/: AppImage, tar.gz (deb/rpm mit nfpm)
+packaging/linux/install-user.sh PFAD # Startmenü-Eintrag und Icons für AppImage/cargo-Build (nur eigener Benutzer)
 ```
 
 Die CI läuft über den gemeinsamen Gate-Workflow der Craft-Familie (`storytold/craft-common-actions`). Ein Tag `v*` baut Linux-Pakete (x86_64, aarch64) und Archive für Windows und macOS als Release-Entwurf. Installer für Windows/macOS sowie FreeBSD und Web folgen.

@@ -10,5 +10,5 @@ Icon=studiocraft
 Terminal=false
 Categories=AudioVideo;Audio;Recorder;Mixer;Sequencer;Midi;
 Keywords=DAW;audio;MIDI;recording;mixing;music;
-StartupWMClass=studiocraft
+StartupWMClass=io.github.xxcrusaderxx.studiocraft
 MimeType=audio/x-wav;audio/wav;audio/flac;audio/mpeg;audio/ogg;audio/aiff;
