@@ -7,12 +7,15 @@
 
 use std::collections::HashMap;
 
+use base64::Engine as _;
 use egui::Ui;
 use studiocraft_engine::{Command, Insert, InsertChain};
-use studiocraft_plugin_host::{ClapInstance, ParamInfo, PluginInfo};
+use studiocraft_plugin_host::{ClapInstance, ParamInfo, PluginHandle, PluginInfo};
 use studiocraft_project::InsertSlot;
 
 use crate::ProjectWindow;
+
+const B64: base64::engine::GeneralPurpose = base64::engine::general_purpose::STANDARD;
 
 /// So viele Inserts hat ein Kanal (Spec: Inserts 1–8).
 pub(crate) const MAX_INSERTS: usize = 8;
@@ -23,8 +26,11 @@ const MAX_BLOCK: u32 = 8192;
 pub(crate) const INSTRUMENT: usize = usize::MAX;
 
 /// Was zuletzt an die Engine ging, je Spur.
-#[derive(Default, Clone)]
+#[derive(Default)]
 pub(crate) struct SentChain {
+    /// Hauptthread-Griffe je Modell-Slot (für Zustand und Fenster).
+    pub(crate) handles: Vec<Option<PluginHandle>>,
+    pub(crate) instrument_handle: Option<PluginHandle>,
     pub(crate) instrument: Option<InsertSlot>,
     /// Instrument läuft in der Engine (Plugin vorhanden).
     pub(crate) instrument_ok: bool,
@@ -91,6 +97,14 @@ impl ProjectWindow {
             .find_plugin(&slot.plugin_id)
             .ok_or_else(|| format!("{}: nicht installiert", slot.name))?;
         let mut inst = ClapInstance::new(&info, self.sample_rate, MAX_BLOCK)?;
+        if let Some(state) = slot.state.as_deref().and_then(|s| B64.decode(s).ok())
+            && !inst.handle().load_state(&state)
+        {
+            self.message = Some(format!(
+                "{}: gespeicherter Zustand ließ sich nicht laden",
+                slot.name
+            ));
+        }
         for &(id, v) in &slot.params {
             inst.set_param(id, v);
         }
@@ -111,7 +125,7 @@ impl ProjectWindow {
                 self.send(Command::SetInserts(i, None));
             }
         }
-        sent.resize(n, SentChain::default());
+        sent.resize_with(n, SentChain::default);
         let mut missing = Vec::new();
         for (i, have) in sent.iter_mut().enumerate() {
             let want = self.project.tracks[i].inserts.clone();
@@ -154,12 +168,46 @@ impl ProjectWindow {
                 have.instrument = want_instr;
                 continue;
             }
-            // Kette neu aufbauen.
+            // Kette neu aufbauen. Vorher die aktuellen Zustände der laufenden Plugins
+            // sichern, damit Umbauen (Insert hinzufügen, umsortieren) nichts verliert.
+            let mut old: Vec<(String, String)> = Vec::new();
+            for (slot, h) in have.slots.iter().zip(&have.handles) {
+                if let Some(state) = h.as_ref().and_then(PluginHandle::save_state) {
+                    old.push((slot.plugin_id.clone(), B64.encode(state)));
+                }
+            }
+            if let (Some(slot), Some(h)) = (&have.instrument, &have.instrument_handle)
+                && let Some(state) = h.save_state()
+            {
+                old.push((slot.plugin_id.clone(), B64.encode(state)));
+            }
+            // Griffe freigeben, bevor die alten Instanzen zerstört werden.
+            have.handles.clear();
+            have.instrument_handle = None;
+            let mut want = want;
+            let mut want_instr = want_instr;
+            for slot in want_instr.iter_mut().chain(want.iter_mut()) {
+                if let Some(k) = old.iter().position(|(id, _)| *id == slot.plugin_id) {
+                    slot.state = Some(old.remove(k).1);
+                }
+            }
+            {
+                let t = &mut self.project.tracks[i];
+                for (dst, src) in t.inserts.iter_mut().zip(&want) {
+                    dst.state.clone_from(&src.state);
+                }
+                if let (Some(dst), Some(src)) = (t.instrument.as_mut(), want_instr.as_ref()) {
+                    dst.state.clone_from(&src.state);
+                }
+            }
             let mut chain = InsertChain::default();
+            let mut handles = Vec::with_capacity(want.len());
+            let mut instrument_handle = None;
             let mut instrument_ok = false;
             if let Some(slot) = &want_instr {
                 match self.instantiate(slot) {
                     Ok(inst) => {
+                        instrument_handle = Some(inst.handle());
                         chain.instrument = Some(Insert {
                             instance: inst,
                             bypass: slot.bypass,
@@ -173,6 +221,7 @@ impl ProjectWindow {
             for slot in &want {
                 match self.instantiate(slot) {
                     Ok(inst) => {
+                        handles.push(Some(inst.handle()));
                         map.push(Some(chain.slots.len()));
                         chain.slots.push(Insert {
                             instance: inst,
@@ -181,6 +230,7 @@ impl ProjectWindow {
                     }
                     Err(e) => {
                         missing.push(e);
+                        handles.push(None);
                         map.push(None);
                     }
                 }
@@ -191,6 +241,8 @@ impl ProjectWindow {
                 t.send(Command::SetInserts(i, chain));
             }
             *have = SentChain {
+                handles,
+                instrument_handle,
                 slots: want,
                 map,
                 instrument: want_instr,
@@ -269,6 +321,7 @@ impl ProjectWindow {
             name: p.name,
             bypass: false,
             params: Vec::new(),
+            state: None,
         });
         self.selected_track = Some(t);
         self.checkpoint(before);
@@ -316,8 +369,30 @@ impl ProjectWindow {
             name: p.name,
             bypass: false,
             params: Vec::new(),
+            state: None,
         });
         self.checkpoint(before);
+    }
+
+    /// Aktuelle Zustände aller laufenden Plugins ins Projekt übernehmen (vor dem Speichern).
+    pub(crate) fn capture_plugin_states(&mut self) {
+        for (i, sent) in self.plugins.sent.iter().enumerate() {
+            let Some(track) = self.project.tracks.get_mut(i) else {
+                continue;
+            };
+            for (k, h) in sent.handles.iter().enumerate() {
+                if let (Some(h), Some(slot)) = (h, track.inserts.get_mut(k))
+                    && let Some(state) = h.save_state()
+                {
+                    slot.state = Some(B64.encode(state));
+                }
+            }
+            if let (Some(h), Some(slot)) = (&sent.instrument_handle, track.instrument.as_mut())
+                && let Some(state) = h.save_state()
+            {
+                slot.state = Some(B64.encode(state));
+            }
+        }
     }
 
     /// Insert-Bereich des Inspectors.
@@ -395,6 +470,7 @@ impl ProjectWindow {
                                     name: p.name.clone(),
                                     bypass: false,
                                     params: Vec::new(),
+                                    state: None,
                                 });
                                 self.checkpoint(before);
                                 ui.close();

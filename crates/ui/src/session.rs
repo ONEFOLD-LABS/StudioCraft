@@ -72,6 +72,7 @@ impl ProjectWindow {
 
     /// Speichert unter `path` (Datei `<Name>.studiocraft`, Ordner = Projektordner).
     pub fn save_as(&mut self, path: &Path) -> Result<(), String> {
+        self.capture_plugin_states();
         let path = with_extension(path);
         let dir = path
             .parent()

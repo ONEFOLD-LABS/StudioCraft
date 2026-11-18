@@ -1391,6 +1391,7 @@ mod tests {
                 name: fx.name.clone(),
                 bypass: false,
                 params: Vec::new(),
+                state: None,
             });
         w.checkpoint(before);
         w.sync_inserts();
@@ -1434,6 +1435,7 @@ mod tests {
                 name: "Phantom".into(),
                 bypass: false,
                 params: Vec::new(),
+                state: None,
             });
         w.sync_inserts();
         assert!(
@@ -1459,6 +1461,7 @@ mod tests {
                         name: fx.name.clone(),
                         bypass: false,
                         params: Vec::new(),
+                        state: None,
                     });
                 w.sync_inserts();
             }
@@ -1755,6 +1758,75 @@ mod tests {
         assert_eq!(w.midi_target(), Some(1));
         w.project.tracks[2].record = true;
         assert_eq!(w.midi_target(), Some(2), "aufnahmebereit geht vor");
+    }
+
+    #[test]
+    fn plugin_state_survives_rebuild_and_save_open() {
+        let tmp = temp_dir("plugin-state");
+        let (mut core, ctl) = studiocraft_engine::engine(48_000, TempoMap::default());
+        let mut w = ProjectWindow::new(Project::default(), Some(ctl), String::new());
+        let Some(fx) = w
+            .plugin_list()
+            .iter()
+            .find(|p| p.name == "ZamComp")
+            .cloned()
+        else {
+            eprintln!("ZamComp nicht installiert – übersprungen");
+            return;
+        };
+        let slot = |fx: &studiocraft_plugin_host::PluginInfo| studiocraft_project::InsertSlot {
+            plugin_id: fx.id.clone(),
+            name: fx.name.clone(),
+            bypass: false,
+            params: Vec::new(),
+            state: None,
+        };
+        w.add_audio_track();
+        w.project.tracks[0].inserts.push(slot(&fx));
+        w.sync_inserts();
+        // Parameter direkt an die Engine (wie aus einem Plugin-Fenster), dann verarbeiten.
+        let p = w.plugins.params[&fx.id][0].clone();
+        w.send(Command::SetParam(0, 0, p.id, p.max));
+        core.process(&mut [0.0; 512]);
+        let state_before = w.plugins.sent[0].handles[0]
+            .as_ref()
+            .unwrap()
+            .save_state()
+            .unwrap();
+
+        // Zweiter Insert: Kette wird neu gebaut, der erste behält seinen Zustand.
+        w.project.tracks[0].inserts.push(slot(&fx));
+        w.sync_inserts();
+        core.process(&mut [0.0; 512]);
+        if let Some(t) = &mut w.transport {
+            t.collect_garbage();
+        }
+        let first = w.plugins.sent[0].handles[0]
+            .as_ref()
+            .unwrap()
+            .save_state()
+            .unwrap();
+        assert_eq!(first, state_before, "Einstellung nach Umbau erhalten");
+
+        // Speichern und in einem neuen Fenster öffnen.
+        let file = tmp.join("P/P.studiocraft");
+        w.save_as(&file).unwrap();
+        assert!(
+            std::fs::read_to_string(&file)
+                .unwrap()
+                .contains("\"state\"")
+        );
+        let (_core2, ctl2) = studiocraft_engine::engine(48_000, TempoMap::default());
+        let mut w2 = ProjectWindow::new(Project::default(), Some(ctl2), String::new());
+        w2.open(&file).unwrap();
+        w2.sync_inserts();
+        let loaded = w2.plugins.sent[0].handles[0]
+            .as_ref()
+            .unwrap()
+            .save_state()
+            .unwrap();
+        assert_eq!(loaded, state_before, "Zustand nach Öffnen identisch");
+        assert_eq!(w2.message, None);
     }
 
     #[test]

@@ -414,6 +414,7 @@ mod tests {
             name: "X".into(),
             bypass: false,
             params: Vec::new(),
+            state: None,
         });
         let q = TICKS_PER_QUARTER;
         let id = p.create_event(t, 0, 2 * q).unwrap();

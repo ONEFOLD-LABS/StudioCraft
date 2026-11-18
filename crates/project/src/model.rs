@@ -126,6 +126,9 @@ pub struct InsertSlot {
     pub bypass: bool,
     /// Vom Standard abweichende Parameter: (Id, Wert).
     pub params: Vec<(u32, f64)>,
+    /// Kompletter Plugin-Zustand (`clap.state`), Base64. Wird beim Speichern erfasst.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub state: Option<String>,
 }
 
 impl InsertSlot {

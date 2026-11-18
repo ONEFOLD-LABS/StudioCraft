@@ -25,11 +25,13 @@ use clap_sys::{
             CLAP_EXT_PARAMS, CLAP_PARAM_IS_HIDDEN, CLAP_PARAM_IS_READONLY, clap_param_info,
             clap_plugin_params,
         },
+        state::{CLAP_EXT_STATE, clap_plugin_state},
     },
     factory::plugin_factory::{CLAP_PLUGIN_FACTORY_ID, clap_plugin_factory},
     host::clap_host,
     plugin::{clap_plugin, clap_plugin_descriptor},
     process::{CLAP_PROCESS_ERROR, clap_process},
+    stream::{clap_istream, clap_ostream},
     version::{CLAP_VERSION, clap_version_is_compatible},
 };
 
@@ -250,6 +252,84 @@ unsafe extern "C" fn out_push(_: *const clap_output_events, _: *const clap_event
 }
 
 // ---------------------------------------------------------------------------
+// Zugriff aus dem Hauptthread, während die Instanz im Audio-Thread läuft.
+
+/// Hauptthread-Zugriff auf eine laufende Instanz (Zustand, später Fenster).
+///
+/// CLAP erlaubt Hauptthread-Funktionen, während der Audio-Thread verarbeitet.
+/// Vertrag: Der Griff muss freigegeben sein, bevor die Instanz zerstört wird
+/// (StudioCraft gibt Griffe frei, bevor es eine Kette austauscht).
+pub struct PluginHandle {
+    plugin: *const clap_plugin,
+    _lib: Arc<Library>,
+}
+
+unsafe extern "C" fn ostream_write(
+    stream: *const clap_ostream,
+    buf: *const c_void,
+    size: u64,
+) -> i64 {
+    // SAFETY: `ctx` zeigt während `save` auf unseren Vec; `buf` hat `size` Bytes.
+    unsafe {
+        let out = &mut *((*stream).ctx as *mut Vec<u8>);
+        out.extend_from_slice(std::slice::from_raw_parts(buf as *const u8, size as usize));
+    }
+    size as i64
+}
+
+struct ReadCursor<'a> {
+    data: &'a [u8],
+    pos: usize,
+}
+
+unsafe extern "C" fn istream_read(stream: *const clap_istream, buf: *mut c_void, size: u64) -> i64 {
+    // SAFETY: `ctx` zeigt während `load` auf unseren Cursor; `buf` fasst `size` Bytes.
+    unsafe {
+        let cur = &mut *((*stream).ctx as *mut ReadCursor);
+        let n = (size as usize).min(cur.data.len() - cur.pos);
+        ptr::copy_nonoverlapping(cur.data.as_ptr().add(cur.pos), buf as *mut u8, n);
+        cur.pos += n;
+        n as i64
+    }
+}
+
+impl PluginHandle {
+    fn state_ext(&self) -> Option<&clap_plugin_state> {
+        // SAFETY: `plugin` lebt (Vertrag oben); Ergebnis ist null oder gültig.
+        unsafe {
+            let f = (*self.plugin).get_extension?;
+            (f(self.plugin, CLAP_EXT_STATE.as_ptr()) as *const clap_plugin_state).as_ref()
+        }
+    }
+
+    /// Kompletter Plugin-Zustand (Preset, interne Daten). Nur im Hauptthread.
+    pub fn save_state(&self) -> Option<Vec<u8>> {
+        let save = self.state_ext()?.save?;
+        let mut out = Vec::new();
+        let stream = clap_ostream {
+            ctx: &mut out as *mut Vec<u8> as *mut c_void,
+            write: Some(ostream_write),
+        };
+        // SAFETY: Strom und Plugin gültig; Aufruf im Hauptthread.
+        unsafe { save(self.plugin, &stream) }.then_some(out)
+    }
+
+    /// Zustand laden. Nur im Hauptthread.
+    pub fn load_state(&self, data: &[u8]) -> bool {
+        let Some(load) = self.state_ext().and_then(|s| s.load) else {
+            return false;
+        };
+        let mut cur = ReadCursor { data, pos: 0 };
+        let stream = clap_istream {
+            ctx: &mut cur as *mut ReadCursor as *mut c_void,
+            read: Some(istream_read),
+        };
+        // SAFETY: Strom und Plugin gültig; Aufruf im Hauptthread.
+        unsafe { load(self.plugin, &stream) }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Instanz.
 
 /// Ein Parameter eines Plugins.
@@ -386,6 +466,14 @@ impl ClapInstance {
             return Err(format!("{}: kein Audio-Ausgang", info.name));
         }
         Ok(inst)
+    }
+
+    /// Griff für Hauptthread-Aufrufe (siehe [`PluginHandle`]).
+    pub fn handle(&self) -> PluginHandle {
+        PluginHandle {
+            plugin: self.plugin,
+            _lib: self._lib.clone(),
+        }
     }
 
     fn extension<T>(&self, id: &CStr) -> *const T {
@@ -669,6 +757,28 @@ mod tests {
     /// Testet gegen echte, auf dem System installierte Plugins (falls vorhanden).
     fn installed() -> Vec<PluginInfo> {
         scan(&default_paths()).0
+    }
+
+    #[test]
+    fn state_roundtrip_with_installed_plugin() {
+        let Some(info) = installed().into_iter().find(|p| p.name == "ZamComp") else {
+            return;
+        };
+        let mut a = ClapInstance::new(&info, 48_000, 256).unwrap();
+        let p = a.params[0].clone();
+        let target = (p.min + p.max) / 2.0 + 0.123;
+        a.set_param(p.id, target);
+        let (mut l, mut r) = (vec![0.0; 64], vec![0.0; 64]);
+        a.process(&mut l, &mut r);
+        a.stop_processing();
+        let state = a
+            .handle()
+            .save_state()
+            .expect("ZamComp kann seinen Zustand speichern");
+        let b = ClapInstance::new(&info, 48_000, 256).unwrap();
+        assert!(b.handle().load_state(&state));
+        let again = b.handle().save_state().unwrap();
+        assert_eq!(again, state, "geladener Zustand ergibt denselben Zustand");
     }
 
     #[test]
