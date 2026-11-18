@@ -664,6 +664,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "clap-sys"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a76abbdb2907f6fd97fb6bc0b7be96b77d328f2dd9669d1075cc03369ed22154"
+
+[[package]]
 name = "clipboard-win"
 version = "5.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1854,6 +1860,16 @@ name = "libloading"
 version = "0.8.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d7c4b02199fee7c5d21a5ae7d8cfa79a6ef5bb2fc834d6e9058e89c825efdc55"
+dependencies = [
+ "cfg-if",
+ "windows-link",
+]
+
+[[package]]
+name = "libloading"
+version = "0.9.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a1832accd5a4ca2795ace4d05d15c4039be15b62d3b950eff99746a990e3cc10"
 dependencies = [
  "cfg-if",
  "windows-link",
@@ -3354,6 +3370,7 @@ dependencies = [
  "cpal",
  "hound",
  "rtrb",
+ "studiocraft-plugin-host",
  "studiocraft-project",
 ]
 
@@ -3364,6 +3381,10 @@ version = "0.1.0"
 [[package]]
 name = "studiocraft-plugin-host"
 version = "0.1.0"
+dependencies = [
+ "clap-sys",
+ "libloading 0.9.1",
+]
 
 [[package]]
 name = "studiocraft-project"
@@ -3382,6 +3403,7 @@ dependencies = [
  "image",
  "rfd",
  "studiocraft-engine",
+ "studiocraft-plugin-host",
  "studiocraft-project",
 ]
 

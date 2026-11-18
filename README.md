@@ -37,6 +37,8 @@ Mit dem Auswahl-Werkzeug hat jedes Event Smart-Bereiche: am Rand in der unteren 
 
 **Aufnahme:** R im Spurkopf macht eine Audio-Spur aufnahmebereit, im Inspector wählt man den Eingang (Stereopaar oder Mono-Kanal des Interfaces). ⏺ in der Transportleiste oder `*` startet und stoppt. Jede Spur bekommt eine eigene WAV-Datei in `Audio/` (vor dem ersten Speichern im temporären Ordner). Mit Cycle wird jeder Durchgang ein eigener Take, der jüngste liegt oben; Punch-In (I) und Punch-Out (O) beschränken die Aufnahme auf die Locatoren. Bei überlappenden Events klingt wie in klassischen DAWs nur das oberste. Aufnahmen werden automatisch um die vom Treiber gemeldete Ein- und Ausgabelatenz verschoben, sodass sie zum Gehörten passen.
 
+**Plugins (CLAP):** Im Inspector unter *Inserts* lassen sich bis zu acht Effekte je Audio-Spur einfügen, sortiert nach Hersteller. Gesucht wird in `CLAP_PATH` und den Standardorten (`~/.clap`, `/usr/lib/clap`, `/usr/local/lib/clap`; unter Windows und macOS die dortigen CLAP-Ordner). Jeder Insert lässt sich umgehen, entfernen und über Regler je Parameter einstellen; alles wird im Projekt gespeichert und ist rückgängig zu machen. Eigene Plugin-Fenster folgen.
+
 F3 blendet den Mixer in der unteren Zone ein und aus: je Kanal Panorama, Mute/Solo, Fader mit Pegelanzeige, rechts der Ausgang. Strg + Klick setzt Fader auf 0 dB bzw. Panorama auf Mitte, Umschalt + Ziehen stellt fein ein.
 
 Benötigt Rust 1.85 oder neuer (Edition 2024). Unter Linux zusätzlich die Entwicklerdateien von ALSA und PipeWire (`libasound`, `libpipewire-0.3`) sowie `clang`. `cargo run -- --list-hosts` zeigt die verfügbaren Audio-Hosts, `--audio-host alsa` wählt einen anderen.

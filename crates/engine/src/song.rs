@@ -139,14 +139,20 @@ impl Song {
                 }
                 events.sort_by_key(|e| e.start);
                 let (gain_l, gain_r) = t.gains();
-                PlayTrack {
-                    gain_l,
-                    gain_r,
-                    slot,
-                    events,
-                }
+                let keep = !events.is_empty() || !t.inserts.is_empty();
+                (
+                    keep,
+                    PlayTrack {
+                        gain_l,
+                        gain_r,
+                        slot,
+                        events,
+                    },
+                )
             })
-            .filter(|t| !t.events.is_empty())
+            // Spuren mit Inserts bleiben, damit Effekte (Hall, Delay) ausklingen.
+            .filter(|(keep, _)| *keep)
+            .map(|(_, t)| t)
             .collect();
         Self {
             tracks,

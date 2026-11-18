@@ -4,6 +4,7 @@
 //! Prototyp-Stand: Projektfenster mit Werkzeugzeile, Inspector, Spurliste,
 //! Lineal, Event-Anzeige und Transportleiste.
 
+mod inserts;
 mod menu;
 mod mixer;
 mod recording;
@@ -90,6 +91,7 @@ pub struct ProjectWindow {
     punch_in: bool,
     punch_out: bool,
     overruns_at_start: u64,
+    plugins: inserts::PluginState,
 }
 
 impl ProjectWindow {
@@ -137,6 +139,7 @@ impl ProjectWindow {
             punch_in: false,
             punch_out: false,
             overruns_at_start: 0,
+            plugins: inserts::PluginState::default(),
         };
         w.saved = Some(w.project.clone());
         w.send_locators();
@@ -446,6 +449,7 @@ impl ProjectWindow {
 
         if self.dirty {
             self.dirty = false;
+            self.sync_inserts();
             self.rebuild_song();
         }
 
@@ -543,7 +547,12 @@ impl ProjectWindow {
         }
         ui.label(format!("{} Events", track.events.len()));
         ui.separator();
-        for section in ["Eingang/Ausgang", "Inserts", "EQ", "Sends", "Notizen"] {
+        if self.project.tracks[idx].kind == TrackKind::Audio {
+            egui::CollapsingHeader::new("Inserts")
+                .default_open(true)
+                .show(ui, |ui| self.inserts_ui(ui, idx));
+        }
+        for section in ["EQ", "Sends", "Notizen"] {
             egui::CollapsingHeader::new(section)
                 .default_open(false)
                 .show(ui, |ui| {
@@ -1276,6 +1285,112 @@ mod tests {
                 core.process(&mut buf); // 2,5 s aufnehmen
             }
             w.recording = true;
+            w.show_mixer = false;
+        });
+    }
+
+    /// Ein installiertes CLAP-Effekt-Plugin für Tests (ZamComp bevorzugt), sonst `None`.
+    fn test_effect(w: &mut ProjectWindow) -> Option<studiocraft_plugin_host::PluginInfo> {
+        let list = w.plugin_list().to_vec();
+        list.iter()
+            .find(|p| p.name.eq_ignore_ascii_case("ZamComp"))
+            .or_else(|| {
+                list.iter()
+                    .find(|p| p.features.iter().any(|f| f == "audio-effect"))
+            })
+            .cloned()
+    }
+
+    #[test]
+    fn insert_runs_in_engine_and_undo_removes_it() {
+        let (mut core, ctl) = studiocraft_engine::engine(48_000, TempoMap::default());
+        let mut w = ProjectWindow::new(Project::default(), Some(ctl), String::new());
+        let Some(fx) = test_effect(&mut w) else {
+            eprintln!("kein CLAP-Effekt installiert – übersprungen");
+            return;
+        };
+        w.import_clip("Ton", None, tone_clip(2.0, 220.0), None)
+            .unwrap();
+        w.clear_history();
+        let before = w.project.clone();
+        w.project.tracks[0]
+            .inserts
+            .push(studiocraft_project::InsertSlot {
+                plugin_id: fx.id.clone(),
+                name: fx.name.clone(),
+                bypass: false,
+                params: Vec::new(),
+            });
+        w.checkpoint(before);
+        w.sync_inserts();
+        w.rebuild_song();
+        assert_eq!(w.message, None);
+        assert_eq!(w.plugins.sent[0].map, [Some(0)]);
+        let params = w.plugins.params[&fx.id].clone();
+        assert!(!params.is_empty(), "{} hat Parameter", fx.name);
+
+        // Parameter ändern und abspielen: das Signal läuft durch das Plugin.
+        let p = &params[0];
+        w.project.tracks[0].inserts[0].set_param(p.id, (p.min + p.max) / 2.0);
+        w.sync_inserts();
+        w.send(Command::Play);
+        let mut out = vec![0.0f32; 2 * 2048];
+        for _ in 0..4 {
+            core.process(&mut out);
+        }
+        assert!(out.iter().all(|s| s.is_finite()));
+        assert!(out.iter().any(|s| s.abs() > 1e-4), "es kommt Signal an");
+
+        // Rückgängig: Insert ist weg, die Instanz kommt zum Zerstören zurück.
+        w.undo();
+        w.sync_inserts();
+        core.process(&mut out);
+        if let Some(t) = &mut w.transport {
+            t.collect_garbage();
+        }
+        assert!(w.project.tracks[0].inserts.is_empty());
+        assert!(w.plugins.sent[0].slots.is_empty());
+    }
+
+    #[test]
+    fn missing_plugin_is_reported_not_fatal() {
+        let mut w = ProjectWindow::new(Project::default(), None, String::new());
+        let t = w.project.add_track(TrackKind::Audio, "A");
+        w.project.tracks[t]
+            .inserts
+            .push(studiocraft_project::InsertSlot {
+                plugin_id: "gibt.es.nicht".into(),
+                name: "Phantom".into(),
+                bypass: false,
+                params: Vec::new(),
+            });
+        w.sync_inserts();
+        assert!(
+            w.message
+                .as_deref()
+                .unwrap()
+                .contains("Phantom: nicht installiert")
+        );
+        assert_eq!(w.plugins.sent[0].map, [None]);
+    }
+
+    #[test]
+    fn renders_inserts_in_inspector() {
+        shot("inserts", |w| {
+            w.project = Project::default();
+            w.import_clip("Gesang", None, tone_clip(8.0, 330.0), None)
+                .unwrap();
+            if let Some(fx) = test_effect(w) {
+                w.project.tracks[0]
+                    .inserts
+                    .push(studiocraft_project::InsertSlot {
+                        plugin_id: fx.id.clone(),
+                        name: fx.name.clone(),
+                        bypass: false,
+                        params: Vec::new(),
+                    });
+                w.sync_inserts();
+            }
             w.show_mixer = false;
         });
     }

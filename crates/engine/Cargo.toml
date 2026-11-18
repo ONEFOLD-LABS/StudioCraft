@@ -8,6 +8,7 @@ license.workspace = true
 
 [dependencies]
 studiocraft-project.workspace = true
+studiocraft-plugin-host.workspace = true
 hound = "3.5"
 rtrb = "0.4"
 

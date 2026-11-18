@@ -10,14 +10,21 @@ use std::sync::{
 
 use studiocraft_project::{Position, TempoMap};
 
-use crate::{Meters, Song, Transport, TransportState};
+use crate::{InsertChain, MAX_METERED_TRACKS, Meters, Song, Transport, TransportState};
 
 /// Größter Block, den der Kern in einem Stück mischt.
 const SCRATCH_FRAMES: usize = 8192;
 
 /// Befehle von der Oberfläche an den Audio-Thread.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub enum Command {
+    /// Inserts einer Projektspur ersetzen (`None`: keine). Die alten gehen über
+    /// die Rückgabe-Queue zurück und werden im Hauptthread zerstört.
+    SetInserts(usize, Option<Box<InsertChain>>),
+    /// Parameter eines Inserts setzen: Spur, Slot, Parameter-Id, Wert.
+    SetParam(usize, usize, u32, f64),
+    /// Insert umgehen oder wieder einschalten: Spur, Slot, umgangen.
+    SetBypass(usize, usize, bool),
     /// Neue Abspielliste. Die alte geht über die Rückgabe-Queue an die
     /// Oberfläche zurück und wird dort freigegeben, nicht im Audio-Thread.
     SetSong(Arc<Song>),
@@ -72,6 +79,7 @@ impl EngineStatus {
 pub struct EngineControl {
     commands: rtrb::Producer<Command>,
     garbage: rtrb::Consumer<Arc<Song>>,
+    plugin_garbage: rtrb::Consumer<Box<InsertChain>>,
     pub status: Arc<EngineStatus>,
     pub meters: Arc<Meters>,
     pub tempo: TempoMap,
@@ -89,6 +97,8 @@ impl EngineControl {
     /// Gibt Abspiellisten frei, die der Audio-Thread nicht mehr braucht.
     pub fn collect_garbage(&mut self) {
         while self.garbage.pop().is_ok() {}
+        // Plugins werden hier, im Hauptthread, deaktiviert und zerstört.
+        while self.plugin_garbage.pop().is_ok() {}
     }
 
     pub fn frames(&self, pos: Position) -> u64 {
@@ -109,6 +119,11 @@ pub struct EngineCore {
     transport: Transport,
     commands: rtrb::Consumer<Command>,
     garbage: rtrb::Producer<Arc<Song>>,
+    plugin_garbage: rtrb::Producer<Box<InsertChain>>,
+    /// Inserts je Projektspur, vorab angelegt (Austausch ohne Allokation).
+    inserts: Vec<Option<Box<InsertChain>>>,
+    /// Getrennte Kanäle für die Insert-Verarbeitung.
+    planar: [Box<[f32]>; 2],
     status: Arc<EngineStatus>,
     meters: Arc<Meters>,
     /// Puffer für eine Spur, vorab angelegt (keine Allokation im Audio-Thread).
@@ -121,6 +136,7 @@ pub struct EngineCore {
 pub fn engine(sample_rate: u32, tempo: TempoMap) -> (EngineCore, EngineControl) {
     let (producer, consumer) = rtrb::RingBuffer::new(256);
     let (garbage_tx, garbage_rx) = rtrb::RingBuffer::new(64);
+    let (plugin_tx, plugin_rx) = rtrb::RingBuffer::new(64);
     let status = Arc::new(EngineStatus::default());
     let meters = Arc::new(Meters::default());
     let core = EngineCore {
@@ -129,6 +145,12 @@ pub fn engine(sample_rate: u32, tempo: TempoMap) -> (EngineCore, EngineControl) 
         transport: Transport::default(),
         commands: consumer,
         garbage: garbage_tx,
+        plugin_garbage: plugin_tx,
+        inserts: (0..MAX_METERED_TRACKS).map(|_| None).collect(),
+        planar: [
+            vec![0.0; SCRATCH_FRAMES].into(),
+            vec![0.0; SCRATCH_FRAMES].into(),
+        ],
         status: status.clone(),
         meters: meters.clone(),
         scratch: vec![0.0; SCRATCH_FRAMES * 2].into_boxed_slice(),
@@ -137,6 +159,7 @@ pub fn engine(sample_rate: u32, tempo: TempoMap) -> (EngineCore, EngineControl) 
     let control = EngineControl {
         commands: producer,
         garbage: garbage_rx,
+        plugin_garbage: plugin_rx,
         status,
         meters,
         tempo,
@@ -179,6 +202,29 @@ impl EngineCore {
                 t.right_locator = l.max(r);
             }
             Command::Locate(f) => t.cursor = f,
+            Command::SetInserts(track, chain) => {
+                if let Some(slot) = self.inserts.get_mut(track) {
+                    if let Some(mut old) = std::mem::replace(slot, chain) {
+                        old.stop_processing();
+                        // Volle Queue: dann bleibt nur das Freigeben hier (praktisch nie).
+                        let _ = self.plugin_garbage.push(old);
+                    }
+                }
+            }
+            Command::SetParam(track, slot, id, value) => {
+                if let Some(Some(chain)) = self.inserts.get_mut(track)
+                    && let Some(ins) = chain.slots.get_mut(slot)
+                {
+                    ins.instance.set_param(id, value);
+                }
+            }
+            Command::SetBypass(track, slot, bypass) => {
+                if let Some(Some(chain)) = self.inserts.get_mut(track)
+                    && let Some(ins) = chain.slots.get_mut(slot)
+                {
+                    ins.bypass = bypass;
+                }
+            }
         }
     }
 
@@ -203,6 +249,21 @@ impl EngineCore {
             for track in &self.song.tracks {
                 tmp.fill(0.0);
                 track.render(tmp, self.transport.cursor, run as usize);
+                if let Some(Some(chain)) = self.inserts.get_mut(track.slot)
+                    && chain.is_active()
+                {
+                    let frames = run as usize;
+                    let [pl, pr] = &mut self.planar;
+                    for (i, f) in tmp.chunks_exact(2).enumerate() {
+                        pl[i] = f[0];
+                        pr[i] = f[1];
+                    }
+                    chain.process(&mut pl[..frames], &mut pr[..frames]);
+                    for (i, f) in tmp.chunks_exact_mut(2).enumerate() {
+                        f[0] = pl[i];
+                        f[1] = pr[i];
+                    }
+                }
                 let (mut pl, mut pr) = (0.0f32, 0.0f32);
                 for (o, t) in dst.chunks_exact_mut(2).zip(tmp.chunks_exact(2)) {
                     let (l, r) = (t[0] * track.gain_l, t[1] * track.gain_r);

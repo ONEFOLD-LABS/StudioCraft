@@ -1,0 +1,656 @@
+//! CLAP über die C-Schnittstelle (`clap-sys`), Bibliotheken über `libloading`.
+
+use std::{
+    collections::HashMap,
+    ffi::{CStr, CString, c_char, c_void},
+    path::{Path, PathBuf},
+    ptr,
+    sync::{Arc, Mutex, OnceLock, Weak},
+};
+
+use clap_sys::{
+    audio_buffer::clap_audio_buffer,
+    entry::clap_plugin_entry,
+    events::{
+        CLAP_CORE_EVENT_SPACE_ID, CLAP_EVENT_PARAM_VALUE, clap_event_header,
+        clap_event_param_value, clap_input_events, clap_output_events,
+    },
+    ext::{
+        audio_ports::{
+            CLAP_AUDIO_PORT_IS_MAIN, CLAP_EXT_AUDIO_PORTS, clap_audio_port_info,
+            clap_plugin_audio_ports,
+        },
+        params::{
+            CLAP_EXT_PARAMS, CLAP_PARAM_IS_HIDDEN, CLAP_PARAM_IS_READONLY, clap_param_info,
+            clap_plugin_params,
+        },
+    },
+    factory::plugin_factory::{CLAP_PLUGIN_FACTORY_ID, clap_plugin_factory},
+    host::clap_host,
+    plugin::{clap_plugin, clap_plugin_descriptor},
+    process::{CLAP_PROCESS_ERROR, clap_process},
+    version::{CLAP_VERSION, clap_version_is_compatible},
+};
+
+use crate::scan::{PluginInfo, cstr};
+
+/// Höchstzahl Parameteränderungen pro Block (vorab angelegt, keine Allokation im Audio-Thread).
+const MAX_EVENTS: usize = 256;
+
+/// Eine geladene CLAP-Datei. Wird geteilt, solange Instanzen daraus leben;
+/// beim letzten Freigeben folgt `deinit`.
+pub(crate) struct Library {
+    entry: *const clap_plugin_entry,
+    _lib: libloading::Library,
+}
+
+// SAFETY: der Einstiegspunkt ist laut CLAP thread-sicher; Bibliothek bleibt geladen.
+unsafe impl Send for Library {}
+unsafe impl Sync for Library {}
+
+impl Drop for Library {
+    fn drop(&mut self) {
+        // SAFETY: `entry` stammt aus dieser Bibliothek, `init` war erfolgreich.
+        unsafe {
+            if let Some(deinit) = (*self.entry).deinit {
+                deinit();
+            }
+        }
+    }
+}
+
+fn library_cache() -> &'static Mutex<HashMap<PathBuf, Weak<Library>>> {
+    static CACHE: OnceLock<Mutex<HashMap<PathBuf, Weak<Library>>>> = OnceLock::new();
+    CACHE.get_or_init(Default::default)
+}
+
+/// Auf macOS ist ein `.clap` ein Bundle-Ordner; die Bibliothek liegt darin.
+fn binary_path(bundle: &Path) -> PathBuf {
+    if bundle.is_dir() {
+        let stem = bundle.file_stem().unwrap_or_default();
+        bundle.join("Contents/MacOS").join(stem)
+    } else {
+        bundle.to_path_buf()
+    }
+}
+
+impl Library {
+    /// Lädt (oder teilt) die Bibliothek und ruft `init` auf. Nur im Hauptthread.
+    pub(crate) fn load(bundle: &Path) -> Result<Arc<Self>, String> {
+        let mut cache = library_cache()
+            .lock()
+            .map_err(|_| "Plugin-Cache gesperrt".to_string())?;
+        if let Some(lib) = cache.get(bundle).and_then(Weak::upgrade) {
+            return Ok(lib);
+        }
+        // SAFETY: Laden fremden Codes ist der Zweck; Initialisierer der Bibliothek laufen hier.
+        let lib =
+            unsafe { libloading::Library::new(binary_path(bundle)) }.map_err(|e| e.to_string())?;
+        // SAFETY: `clap_entry` ist laut CLAP ein Datensymbol vom Typ `clap_plugin_entry`.
+        let entry: *const clap_plugin_entry = unsafe {
+            let sym: libloading::Symbol<*const clap_plugin_entry> = lib
+                .get(b"clap_entry\0")
+                .map_err(|_| "kein clap_entry – keine CLAP-Datei".to_string())?;
+            *sym
+        };
+        if entry.is_null() {
+            return Err("clap_entry ist leer".into());
+        }
+        // SAFETY: `entry` zeigt auf eine gültige Struktur der geladenen Bibliothek.
+        unsafe {
+            if !clap_version_is_compatible((*entry).clap_version) {
+                return Err("inkompatible CLAP-Version".into());
+            }
+            let path =
+                CString::new(bundle.to_string_lossy().as_bytes()).map_err(|e| e.to_string())?;
+            let init = (*entry).init.ok_or("init fehlt")?;
+            if !init(path.as_ptr()) {
+                return Err("Plugin-Bibliothek ließ sich nicht initialisieren".into());
+            }
+        }
+        let lib = Arc::new(Self { entry, _lib: lib });
+        cache.insert(bundle.to_path_buf(), Arc::downgrade(&lib));
+        Ok(lib)
+    }
+
+    fn factory(&self) -> Option<&clap_plugin_factory> {
+        // SAFETY: `get_factory` liefert eine Fabrik, die so lange lebt wie die Bibliothek.
+        unsafe {
+            let get = (*self.entry).get_factory?;
+            let f = get(CLAP_PLUGIN_FACTORY_ID.as_ptr()) as *const clap_plugin_factory;
+            f.as_ref()
+        }
+    }
+
+    pub(crate) fn descriptors(&self) -> Vec<PluginInfo> {
+        let Some(f) = self.factory() else {
+            return Vec::new();
+        };
+        let (Some(count), Some(get)) = (f.get_plugin_count, f.get_plugin_descriptor) else {
+            return Vec::new();
+        };
+        // SAFETY: Index im Bereich 0..count; Beschreibungen leben so lange wie die Fabrik.
+        unsafe {
+            (0..count(f))
+                .filter_map(|i| get(f, i).as_ref())
+                .map(|d| PluginInfo {
+                    id: cstr(d.id),
+                    name: cstr(d.name),
+                    vendor: cstr(d.vendor),
+                    version: cstr(d.version),
+                    features: features(d),
+                    path: PathBuf::new(),
+                })
+                .collect()
+        }
+    }
+}
+
+/// Liest die nullterminierte Feature-Liste einer Beschreibung.
+///
+/// # Safety
+/// `d` muss eine gültige CLAP-Beschreibung sein.
+unsafe fn features(d: &clap_plugin_descriptor) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut p = d.features;
+    if p.is_null() {
+        return out;
+    }
+    // SAFETY: laut CLAP endet die Liste mit einem Null-Zeiger.
+    unsafe {
+        while !(*p).is_null() {
+            out.push(cstr(*p));
+            p = p.add(1);
+        }
+    }
+    out
+}
+
+// ---------------------------------------------------------------------------
+// Host-Seite: was das Plugin von uns aufrufen darf.
+
+struct HostStrings {
+    name: CString,
+    vendor: CString,
+    url: CString,
+    version: CString,
+}
+
+fn host_strings() -> &'static HostStrings {
+    static S: OnceLock<HostStrings> = OnceLock::new();
+    S.get_or_init(|| HostStrings {
+        name: CString::new("StudioCraft").unwrap_or_default(),
+        vendor: CString::new("StudioCraft contributors").unwrap_or_default(),
+        url: CString::new("").unwrap_or_default(),
+        version: CString::new(env!("CARGO_PKG_VERSION")).unwrap_or_default(),
+    })
+}
+
+unsafe extern "C" fn host_get_extension(_: *const clap_host, _: *const c_char) -> *const c_void {
+    ptr::null()
+}
+unsafe extern "C" fn host_request(_: *const clap_host) {}
+
+fn new_host() -> Box<clap_host> {
+    let s = host_strings();
+    Box::new(clap_host {
+        clap_version: CLAP_VERSION,
+        host_data: ptr::null_mut(),
+        name: s.name.as_ptr(),
+        vendor: s.vendor.as_ptr(),
+        url: s.url.as_ptr(),
+        version: s.version.as_ptr(),
+        get_extension: Some(host_get_extension),
+        request_restart: Some(host_request),
+        request_process: Some(host_request),
+        request_callback: Some(host_request),
+    })
+}
+
+// ---------------------------------------------------------------------------
+// Ereignislisten für `process`.
+
+struct EventList {
+    events: Vec<clap_event_param_value>,
+}
+
+unsafe extern "C" fn in_size(list: *const clap_input_events) -> u32 {
+    // SAFETY: `ctx` zeigt während `process` auf unsere `EventList`.
+    unsafe { (*((*list).ctx as *const EventList)).events.len() as u32 }
+}
+unsafe extern "C" fn in_get(list: *const clap_input_events, i: u32) -> *const clap_event_header {
+    // SAFETY: wie oben; Index wird geprüft.
+    unsafe {
+        let l = &*((*list).ctx as *const EventList);
+        l.events
+            .get(i as usize)
+            .map_or(ptr::null(), |e| &e.header as *const _)
+    }
+}
+unsafe extern "C" fn out_push(_: *const clap_output_events, _: *const clap_event_header) -> bool {
+    // Ausgabe-Ereignisse (z. B. Parameteränderungen aus der Plugin-GUI) später.
+    true
+}
+
+// ---------------------------------------------------------------------------
+// Instanz.
+
+/// Ein Parameter eines Plugins.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ParamInfo {
+    pub id: u32,
+    pub name: String,
+    pub module: String,
+    pub min: f64,
+    pub max: f64,
+    pub default: f64,
+    /// Wert beim Anlegen der Instanz.
+    pub value: f64,
+    pub stepped: bool,
+}
+
+/// Puffer für alle Audio-Anschlüsse einer Richtung. Laut CLAP muss der Host
+/// für jeden gemeldeten Anschluss Puffer liefern (auch Sidechains). Alles wird
+/// beim Erzeugen angelegt; die Zeiger bleiben gültig, weil die Daten auf dem
+/// Heap liegen und nicht mehr wachsen.
+struct PortSet {
+    bufs: Vec<Vec<Vec<f32>>>,
+    /// Kanalzeiger-Tabellen, auf die `clap[i].data32` zeigt; müssen so lange leben.
+    _ptrs: Vec<Vec<*mut f32>>,
+    clap: Vec<clap_audio_buffer>,
+    /// Index des Hauptanschlusses.
+    main: Option<usize>,
+}
+
+impl PortSet {
+    fn new(channels: &[u32], main: Option<usize>, max_frames: usize) -> Self {
+        let mut bufs: Vec<Vec<Vec<f32>>> = channels
+            .iter()
+            .map(|&c| (0..c).map(|_| vec![0.0; max_frames]).collect())
+            .collect();
+        let mut ptrs: Vec<Vec<*mut f32>> = bufs
+            .iter_mut()
+            .map(|port| port.iter_mut().map(|ch| ch.as_mut_ptr()).collect())
+            .collect();
+        let clap = ptrs
+            .iter_mut()
+            .map(|p| clap_audio_buffer {
+                data32: p.as_mut_ptr(),
+                data64: ptr::null_mut(),
+                channel_count: p.len() as u32,
+                latency: 0,
+                constant_mask: 0,
+            })
+            .collect();
+        Self {
+            bufs,
+            _ptrs: ptrs,
+            clap,
+            main,
+        }
+    }
+
+    fn main_channels(&self) -> usize {
+        self.main.and_then(|m| self.bufs.get(m)).map_or(0, Vec::len)
+    }
+}
+
+/// Eine laufende Plugin-Instanz mit Stereo-Ein- und -Ausgang.
+pub struct ClapInstance {
+    plugin: *const clap_plugin,
+    _host: Box<clap_host>,
+    _lib: Arc<Library>,
+    pub info: PluginInfo,
+    pub params: Vec<ParamInfo>,
+    params_ext: *const clap_plugin_params,
+    processing: bool,
+    max_frames: usize,
+    steady_time: i64,
+    // Vorab angelegte Puffer für den Audio-Thread.
+    inputs: PortSet,
+    outputs: PortSet,
+    pending: EventList,
+}
+
+// SAFETY: CLAP erlaubt, eine Instanz zwischen Threads weiterzugeben, solange
+// die Thread-Regeln je Funktion eingehalten werden (siehe Crate-Doku).
+unsafe impl Send for ClapInstance {}
+
+impl ClapInstance {
+    /// Erzeugt, initialisiert und aktiviert das Plugin. Nur im Hauptthread.
+    pub fn new(info: &PluginInfo, sample_rate: u32, max_frames: u32) -> Result<Self, String> {
+        let lib = Library::load(&info.path)?;
+        let factory = lib.factory().ok_or("Plugin-Fabrik fehlt")?;
+        let create = factory.create_plugin.ok_or("create_plugin fehlt")?;
+        let host = new_host();
+        let id = CString::new(info.id.as_bytes()).map_err(|e| e.to_string())?;
+        // SAFETY: Fabrik, Host und Id sind gültig; der Host lebt so lange wie die Instanz.
+        let plugin = unsafe { create(factory, &*host, id.as_ptr()) };
+        if plugin.is_null() {
+            return Err(format!("{}: Plugin ließ sich nicht erzeugen", info.name));
+        }
+        let mut inst = Self {
+            plugin,
+            _host: host,
+            _lib: lib,
+            info: info.clone(),
+            params: Vec::new(),
+            params_ext: ptr::null(),
+            processing: false,
+            max_frames: max_frames as usize,
+            steady_time: 0,
+            inputs: PortSet::new(&[], None, 0),
+            outputs: PortSet::new(&[], None, 0),
+            pending: EventList {
+                events: Vec::with_capacity(MAX_EVENTS),
+            },
+        };
+        // SAFETY: `plugin` ist gültig; Aufrufe im Hauptthread in der CLAP-Reihenfolge.
+        unsafe {
+            let p = &*plugin;
+            if !p.init.is_some_and(|f| f(plugin)) {
+                // Ohne erfolgreiches init nur destroy (Drop würde deactivate versuchen).
+                if let Some(d) = p.destroy {
+                    d(plugin);
+                }
+                inst.plugin = ptr::null();
+                return Err(format!("{}: init fehlgeschlagen", info.name));
+            }
+            inst.read_ports();
+            inst.read_params();
+            if !p
+                .activate
+                .is_some_and(|f| f(plugin, f64::from(sample_rate), 1, max_frames))
+            {
+                return Err(format!("{}: Aktivieren fehlgeschlagen", info.name));
+            }
+        }
+        if inst.outputs.main_channels() == 0 {
+            return Err(format!("{}: kein Audio-Ausgang", info.name));
+        }
+        Ok(inst)
+    }
+
+    fn extension<T>(&self, id: &CStr) -> *const T {
+        // SAFETY: `plugin` ist gültig; das Ergebnis ist null oder eine Struktur vom Typ T.
+        unsafe {
+            (*self.plugin)
+                .get_extension
+                .map_or(ptr::null(), |f| f(self.plugin, id.as_ptr()) as *const T)
+        }
+    }
+
+    /// Alle Audio-Anschlüsse lesen und Puffer dafür anlegen
+    /// (ohne Erweiterung: ein Stereo-Ein- und -Ausgang).
+    fn read_ports(&mut self) {
+        let ports: *const clap_plugin_audio_ports = self.extension(CLAP_EXT_AUDIO_PORTS);
+        // SAFETY: Erweiterung gültig, Aufruf im Hauptthread.
+        let list = |is_input: bool| unsafe {
+            let Some(ports) = ports.as_ref() else {
+                return (vec![2], Some(0));
+            };
+            let (Some(count), Some(get)) = (ports.count, ports.get) else {
+                return (vec![2], Some(0));
+            };
+            let mut channels = Vec::new();
+            let mut main = None;
+            for i in 0..count(self.plugin, is_input) {
+                let mut info: clap_audio_port_info = std::mem::zeroed();
+                if !get(self.plugin, i, is_input, &mut info) {
+                    info.channel_count = 0;
+                }
+                if main.is_none() && info.flags & CLAP_AUDIO_PORT_IS_MAIN != 0 {
+                    main = Some(channels.len());
+                }
+                channels.push(info.channel_count);
+            }
+            let main = main.or((!channels.is_empty()).then_some(0));
+            (channels, main)
+        };
+        let (ic, im) = list(true);
+        let (oc, om) = list(false);
+        self.inputs = PortSet::new(&ic, im, self.max_frames);
+        self.outputs = PortSet::new(&oc, om, self.max_frames);
+    }
+
+    fn read_params(&mut self) {
+        self.params_ext = self.extension(CLAP_EXT_PARAMS);
+        // SAFETY: Erweiterung gültig, Aufruf im Hauptthread.
+        unsafe {
+            let Some(ext) = self.params_ext.as_ref() else {
+                return;
+            };
+            let (Some(count), Some(get_info)) = (ext.count, ext.get_info) else {
+                return;
+            };
+            for i in 0..count(self.plugin) {
+                let mut info: clap_param_info = std::mem::zeroed();
+                if !get_info(self.plugin, i, &mut info) {
+                    continue;
+                }
+                if info.flags & (CLAP_PARAM_IS_HIDDEN | CLAP_PARAM_IS_READONLY) != 0 {
+                    continue;
+                }
+                let mut value = info.default_value;
+                if let Some(get_value) = ext.get_value {
+                    get_value(self.plugin, info.id, &mut value);
+                }
+                self.params.push(ParamInfo {
+                    id: info.id,
+                    name: cstr(info.name.as_ptr()),
+                    module: cstr(info.module.as_ptr()),
+                    min: info.min_value,
+                    max: info.max_value,
+                    default: info.default_value,
+                    value,
+                    stepped: info.flags & clap_sys::ext::params::CLAP_PARAM_IS_STEPPED != 0,
+                });
+            }
+        }
+    }
+
+    /// Text zu einem Parameterwert, wie das Plugin ihn anzeigt. Nur im Hauptthread.
+    pub fn value_text(&self, id: u32, value: f64) -> Option<String> {
+        // SAFETY: Erweiterung gültig; Puffer groß genug und nullterminiert.
+        unsafe {
+            let ext = self.params_ext.as_ref()?;
+            let f = ext.value_to_text?;
+            let mut buf = [0 as c_char; 64];
+            f(self.plugin, id, value, buf.as_mut_ptr(), buf.len() as u32)
+                .then(|| cstr(buf.as_ptr()))
+        }
+    }
+
+    /// Parameteränderung für den nächsten Block vormerken. Echtzeitsicher;
+    /// ist der Vorrat voll, gewinnt beim nächsten Block der neueste Wert nicht.
+    pub fn set_param(&mut self, id: u32, value: f64) {
+        if let Some(e) = self.pending.events.iter_mut().find(|e| e.param_id == id) {
+            e.value = value;
+            return;
+        }
+        if self.pending.events.len() < MAX_EVENTS {
+            self.pending.events.push(clap_event_param_value {
+                header: clap_event_header {
+                    size: std::mem::size_of::<clap_event_param_value>() as u32,
+                    time: 0,
+                    space_id: CLAP_CORE_EVENT_SPACE_ID,
+                    type_: CLAP_EVENT_PARAM_VALUE,
+                    flags: 0,
+                },
+                param_id: id,
+                cookie: ptr::null_mut(),
+                note_id: -1,
+                port_index: -1,
+                channel: -1,
+                key: -1,
+                value,
+            });
+        }
+    }
+
+    /// Bearbeitet Stereo an Ort und Stelle. Nur im Audio-Thread, echtzeitsicher.
+    pub fn process(&mut self, left: &mut [f32], right: &mut [f32]) {
+        let n = left.len().min(right.len());
+        for (l, r) in left[..n]
+            .chunks_mut(self.max_frames)
+            .zip(right[..n].chunks_mut(self.max_frames))
+        {
+            self.process_block(l, r);
+        }
+    }
+
+    fn process_block(&mut self, left: &mut [f32], right: &mut [f32]) {
+        let n = left.len();
+        // SAFETY: `plugin` ist aktiviert; Aufrufe im Audio-Thread.
+        unsafe {
+            let p = &*self.plugin;
+            if !self.processing {
+                self.processing = p.start_processing.is_none_or(|f| f(self.plugin));
+                if !self.processing {
+                    return;
+                }
+            }
+            // Haupteingang füllen (Mono-Plugins bekommen die Summe); andere Eingänge bleiben still.
+            if let Some(main) = self.inputs.main.and_then(|m| self.inputs.bufs.get_mut(m)) {
+                match main.len() {
+                    0 => {}
+                    1 => {
+                        for i in 0..n {
+                            main[0][i] = (left[i] + right[i]) * 0.5;
+                        }
+                    }
+                    _ => {
+                        main[0][..n].copy_from_slice(left);
+                        main[1][..n].copy_from_slice(right);
+                    }
+                }
+            }
+            let in_events = clap_input_events {
+                ctx: &mut self.pending as *mut EventList as *mut c_void,
+                size: Some(in_size),
+                get: Some(in_get),
+            };
+            let out_events = clap_output_events {
+                ctx: ptr::null_mut(),
+                try_push: Some(out_push),
+            };
+            let process = clap_process {
+                steady_time: self.steady_time,
+                frames_count: n as u32,
+                transport: ptr::null(),
+                audio_inputs: self.inputs.clap.as_ptr(),
+                audio_outputs: self.outputs.clap.as_mut_ptr(),
+                audio_inputs_count: self.inputs.clap.len() as u32,
+                audio_outputs_count: self.outputs.clap.len() as u32,
+                in_events: &in_events,
+                out_events: &out_events,
+            };
+            let status = p
+                .process
+                .map_or(CLAP_PROCESS_ERROR, |f| f(self.plugin, &process));
+            self.pending.events.clear();
+            self.steady_time += n as i64;
+            if status == CLAP_PROCESS_ERROR {
+                return; // Signal unverändert durchlassen.
+            }
+        }
+        let Some(out) = self.outputs.main.and_then(|m| self.outputs.bufs.get(m)) else {
+            return;
+        };
+        if let Some(l) = out.first() {
+            left.copy_from_slice(&l[..n]);
+            right.copy_from_slice(&out.get(1).unwrap_or(l)[..n]);
+        }
+    }
+
+    /// Verarbeitung beenden. Im Audio-Thread aufrufen, bevor die Instanz zurück
+    /// an den Hauptthread geht.
+    pub fn stop_processing(&mut self) {
+        if self.processing {
+            // SAFETY: `plugin` gültig und in Verarbeitung.
+            unsafe {
+                if let Some(f) = (*self.plugin).stop_processing {
+                    f(self.plugin);
+                }
+            }
+            self.processing = false;
+        }
+    }
+}
+
+impl Drop for ClapInstance {
+    /// Deaktivieren und zerstören. Gehört in den Hauptthread.
+    fn drop(&mut self) {
+        if self.plugin.is_null() {
+            return;
+        }
+        self.stop_processing();
+        // SAFETY: `plugin` gültig und aktiviert; danach wird es nicht mehr benutzt.
+        unsafe {
+            let p = &*self.plugin;
+            if let Some(f) = p.deactivate {
+                f(self.plugin);
+            }
+            if let Some(f) = p.destroy {
+                f(self.plugin);
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::scan::{default_paths, scan};
+
+    /// Testet gegen echte, auf dem System installierte Plugins (falls vorhanden).
+    fn installed() -> Vec<PluginInfo> {
+        scan(&default_paths()).0
+    }
+
+    #[test]
+    fn scan_and_process_installed_effects() {
+        let plugins = installed();
+        if plugins.is_empty() {
+            eprintln!("keine CLAP-Plugins installiert – übersprungen");
+            return;
+        }
+        eprintln!("{} CLAP-Plugins gefunden", plugins.len());
+        // Ein paar Effekte laden und ein Signal durchschicken.
+        let effects: Vec<&PluginInfo> = plugins
+            .iter()
+            .filter(|p| p.features.iter().any(|f| f == "audio-effect"))
+            .take(5)
+            .collect();
+        for info in effects {
+            let mut inst = match ClapInstance::new(info, 48_000, 512) {
+                Ok(i) => i,
+                Err(e) => {
+                    eprintln!("{e}");
+                    continue;
+                }
+            };
+            let mut l = vec![0.0f32; 1024];
+            let mut r = vec![0.0f32; 1024];
+            l[0] = 1.0;
+            r[0] = 1.0;
+            if let Some(p) = inst.params.first().cloned() {
+                inst.set_param(p.id, p.default);
+            }
+            inst.process(&mut l, &mut r);
+            assert!(
+                l.iter().chain(&r).all(|s| s.is_finite()),
+                "{}: Ausgabe nicht endlich",
+                info.name
+            );
+            inst.stop_processing();
+            eprintln!(
+                "ok: {} ({} Parameter, {}→{} Kanäle)",
+                info.name,
+                inst.params.len(),
+                inst.inputs.main_channels(),
+                inst.outputs.main_channels()
+            );
+        }
+    }
+}

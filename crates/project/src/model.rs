@@ -87,7 +87,36 @@ pub struct Track {
     /// Aufnahme-Eingang (Audio-Spuren).
     #[serde(default)]
     pub input: TrackInput,
+    /// Insert-Effekte in Signalfluss-Reihenfolge.
+    #[serde(default)]
+    pub inserts: Vec<InsertSlot>,
     pub events: Vec<Event>,
+}
+
+/// Ein Insert-Effekt: welches Plugin, ob umgangen, gesetzte Parameter.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct InsertSlot {
+    /// CLAP-Plugin-Id, z. B. `in.lsp-plug.para_equalizer_x8_stereo`.
+    pub plugin_id: String,
+    /// Anzeigename (auch wenn das Plugin fehlt).
+    pub name: String,
+    pub bypass: bool,
+    /// Vom Standard abweichende Parameter: (Id, Wert).
+    pub params: Vec<(u32, f64)>,
+}
+
+impl InsertSlot {
+    pub fn set_param(&mut self, id: u32, value: f64) {
+        match self.params.iter_mut().find(|(i, _)| *i == id) {
+            Some(p) => p.1 = value,
+            None => self.params.push((id, value)),
+        }
+    }
+
+    /// Gleiches Plugin an gleicher Stelle (Parameter und Bypass dürfen abweichen).
+    pub fn same_plugin(&self, other: &Self) -> bool {
+        self.plugin_id == other.plugin_id
+    }
 }
 
 /// Welche Eingangskanäle eine Audio-Spur aufnimmt.
@@ -218,6 +247,7 @@ impl Project {
                 volume_db: 0.0,
                 pan: 0.0,
                 input: TrackInput::default(),
+                inserts: Vec::new(),
                 events: Vec::new(),
             };
             if kind.holds_events() {
@@ -457,6 +487,7 @@ impl Project {
             volume_db: 0.0,
             pan: 0.0,
             input: TrackInput::default(),
+            inserts: Vec::new(),
             events: Vec::new(),
         });
         i
