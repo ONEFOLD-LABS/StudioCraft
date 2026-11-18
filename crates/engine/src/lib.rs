@@ -8,9 +8,9 @@ pub mod clip;
 pub mod core;
 pub mod transport;
 
-#[cfg(feature = "pipewire")]
-pub mod pipewire_backend;
+pub mod output;
 
 pub use clip::{AudioClip, ClipError};
 pub use core::{Command, EngineControl, EngineCore, EngineStatus, engine};
+pub use output::{AudioOutput, OutputInfo, PreparedOutput};
 pub use transport::{Transport, TransportState};

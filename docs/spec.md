@@ -6,7 +6,7 @@ Stand: 2026-11-18 · Lebende Fassung: https://claude.ai/artifact/JPZqqo7GT4DvJsx
 
 ## Zweck und Cleanroom-Regeln
 
-Diese Spezifikation beschreibt das Bedienkonzept von StudioCraft, einer nativen Linux-DAW in Rust, deren Workflow sich an klassischen DAWs orientiert. Sie ist die einzige Vorlage für die Implementierung: Wer Code schreibt, arbeitet nur gegen dieses Dokument.
+Diese Spezifikation beschreibt das Bedienkonzept von StudioCraft, einer plattformübergreifenden DAW in Rust, deren Workflow sich an klassischen DAWs orientiert. Sie ist die einzige Vorlage für die Implementierung: Wer Code schreibt, arbeitet nur gegen dieses Dokument.
 
 **Erlaubte Quellen**
 
@@ -341,15 +341,15 @@ Der MVP ist erreicht, wenn man ein Lied mit Audio- und Instrument-Spuren aufnehm
 | Thema | Vorbild | Hier |
 | --- | --- | --- |
 | Fensternamen | Mixer-Fenster, Medien-Browser, Inspector | Mixer, Browser, Inspector (allgemeiner Begriff, bleibt) |
-| Plugin-Formate | VST2/VST3 | CLAP zuerst, dann VST3 und LV2; kein VST2 |
-| Audio-Backend | ASIO | PipeWire nativ, JACK und ALSA als Fallback |
+| Plugin-Formate | VST2/VST3 | CLAP zuerst, dann VST3, AU (nur macOS) und LV2; kein VST2 |
+| Audio-Backend | ASIO | cpal: PipeWire, ALSA, JACK (Linux, FreeBSD), WASAPI, ASIO (Windows), CoreAudio (macOS), Web Audio (WASM) |
 | Lizenzierung | Online-Aktivierung | keine |
 | Projektformat | binär, proprietär | offenes, versioniertes Textformat plus Audio-Ordner; diff- und git-freundlich |
-| Plattform | Windows, macOS | Linux zuerst |
+| Plattform | Windows, macOS | Linux, Windows, macOS, FreeBSD und Web (WASM), Pakete wie die Craft-Familie |
 
 **MVP-Umfang**
 
-- [ ] Audio-Engine mit PipeWire, Latenz ≤ 10 ms bei 48 kHz / 256 Samples
+- [ ] Audio-Engine über cpal auf allen Systemen, Latenz ≤ 10 ms bei 48 kHz / 256 Samples
 - [ ] Projektfenster mit Spurliste, Event-Anzeige, Lineal, Inspector, Transportleiste
 - [ ] Spurtypen Audio, Instrument, MIDI, Gruppe, FX, Ordner, Marker, Tempo
 - [ ] Werkzeuge 1 bis 9, Snap, Raster, Fades, Crossfades
@@ -364,7 +364,7 @@ Der MVP ist erreicht, wenn man ein Lied mit Audio- und Instrument-Spuren aufnehm
 **Offene Fragen**
 
 - [ ] Projektname: entschieden, StudioCraft (Repo unter Dokumente/GitHub/StudioCraft). Verworfen: SoundCraft (in der Familie vergeben), AudioCraft (Meta), MixCraft (bestehende DAW), RecordCraft (Rust-Recorder kaptaindieter/RecordCraft). Markenrecherche steht noch aus.
-- [ ] GUI-Toolkit: vizia, egui, iced oder slint? Entscheidung nach einem Prototyp des Projektfensters mit 100 Spuren
+- [ ] GUI-Toolkit: entschieden, egui/eframe mit craft-ui wie die übrigen Craft-Apps (nativ und Web). Offen bleibt nur, ob das Projektfenster mit 100 Spuren flüssig läuft (Prototyp)
 - [ ] Plugin-GUIs unter Wayland: Fremdfenster einbetten geht nur über X11/XWayland; als eigene Fenster öffnen?
 - [ ] Soll ein Standard-MIDI-File- und AAF/OMF-Import für den Umstieg von anderen DAWs ins MVP?
 - [ ] Wer übernimmt die Spec-Autor-Rolle, wer implementiert (Cleanroom-Trennung)?

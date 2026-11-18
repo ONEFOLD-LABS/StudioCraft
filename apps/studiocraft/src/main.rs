@@ -1,4 +1,5 @@
-//! Audio-Durchstich: spielt eine WAV-Datei über PipeWire mit Transport und Cycle.
+//! Audio-Durchstich: spielt eine WAV-Datei mit Transport und Cycle ab.
+//! Läuft über cpal auf Linux, FreeBSD, Windows und macOS.
 
 use std::{
     io::{self, BufRead, Write},
@@ -8,16 +9,20 @@ use std::{
 };
 
 use studiocraft_engine::{
-    AudioClip, Command, EngineControl, TransportState, engine, pipewire_backend::PipeWireOutput,
+    AudioClip, Command, EngineControl, PreparedOutput, TransportState, engine, output,
 };
 use studiocraft_project::TempoMap;
 
 const USAGE: &str = "\
 Aufruf: studiocraft <datei.wav> [--bpm <tempo>] [--loop <von_takt> <bis_takt>] [--seconds <s>]
+                   [--audio-host <name>]
+       studiocraft --list-hosts
 
   --bpm      Projekttempo für die Takt-Anzeige (Standard 120)
   --loop     Locatoren auf Takt A bis B setzen und Cycle einschalten
   --seconds  sofort starten, nach s Sekunden beenden (ohne Eingabe)
+  --audio-host  Audio-Host wählen, z. B. PipeWire, ALSA, JACK, WASAPI, ASIO, CoreAudio
+  --list-hosts  einkompilierte Audio-Hosts anzeigen
 
 Befehle im laufenden Programm (jeweils mit Enter):
   <Enter>    Start/Stopp
@@ -32,12 +37,14 @@ struct Args {
     bpm: f64,
     loop_bars: Option<(u64, u64)>,
     seconds: Option<f64>,
+    host: Option<String>,
 }
 
 fn parse_args() -> Result<Args, String> {
     let mut it = std::env::args().skip(1);
     let mut file = None;
-    let mut args = Args { file: String::new(), bpm: 120.0, loop_bars: None, seconds: None };
+    let mut args =
+        Args { file: String::new(), bpm: 120.0, loop_bars: None, seconds: None, host: None };
     let num = |v: Option<String>, what: &str| -> Result<f64, String> {
         v.ok_or(format!("{what} fehlt"))?.parse().map_err(|_| format!("{what} ist keine Zahl"))
     };
@@ -45,6 +52,11 @@ fn parse_args() -> Result<Args, String> {
         match a.as_str() {
             "-h" | "--help" => return Err(String::new()),
             "--bpm" => args.bpm = num(it.next(), "--bpm")?,
+            "--audio-host" => args.host = Some(it.next().ok_or("--audio-host: Name fehlt")?),
+            "--list-hosts" => {
+                println!("{}", output::available_hosts().join("\n"));
+                std::process::exit(0);
+            }
             "--seconds" => args.seconds = Some(num(it.next(), "--seconds")?),
             "--loop" => {
                 let a = num(it.next(), "--loop von")? as u64;
@@ -103,9 +115,27 @@ fn main() -> ExitCode {
     let length = clip.frames() as f64 / f64::from(clip.sample_rate);
     println!("{}: {:.2} s, {} Hz", args.file, length, clip.sample_rate);
 
+    let prepared = match PreparedOutput::open(args.host.as_deref(), clip.sample_rate) {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("Fehler: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let info = prepared.info.clone();
+    let block = info.block_frames.map_or("Treiber-Standard".into(), |b| format!("{b} Frames"));
+    println!(
+        "Ausgabe: {} über {}, {} Hz, {} Kanäle, {}, Block {block}",
+        info.device, info.host, info.sample_rate, info.channels, info.sample_format
+    );
+    if info.sample_rate != clip.sample_rate {
+        println!("Datei wird von {} auf {} Hz umgerechnet", clip.sample_rate, info.sample_rate);
+    }
+    let clip = clip.resampled(info.sample_rate);
+
     let tempo = TempoMap { bpm: args.bpm, ..TempoMap::default() };
     let (core, mut ctl) = engine(clip, tempo);
-    let output = match PipeWireOutput::start(core, "StudioCraft") {
+    let output = match prepared.start(core) {
         Ok(o) => o,
         Err(e) => {
             eprintln!("Fehler: {e}");
@@ -125,7 +155,7 @@ fn main() -> ExitCode {
         thread::sleep(Duration::from_millis(100));
         println!("{}", status_line(&ctl));
         println!("{} Blöcke gerendert", ctl.status.blocks());
-        output.stop();
+        drop(output);
         return ExitCode::SUCCESS;
     }
 
@@ -176,6 +206,6 @@ fn main() -> ExitCode {
         let _ = io::stdout().flush();
     }
 
-    output.stop();
+    drop(output);
     ExitCode::SUCCESS
 }
