@@ -30,6 +30,10 @@ cargo run -p studiocraft-cli -- <datei.wav> --loop 1 5  # Kommandozeile: Enter =
 
 Bedienung im Projektfenster: Tasten 1–0 wählen Werkzeuge (Auswahl, Trennen, Löschen, Stumm, Zeichnen, Zoom, Wiedergabe sind aktiv), Leertaste Start/Stopp, `/` Cycle, J Snap, H/G Zoom, Strg + Mausrad Zoom, Umschalt + Mausrad horizontal. Im Lineal: Klick setzt den Cursor, Ziehen den Cycle-Bereich, Strg/Alt + Klick den linken/rechten Locator. Events mit Strg + Ziehen kopieren, Alt hebt Snap auf. WAV-Dateien lassen sich ins Projektfenster ziehen: auf eine Audio-Spur an die Mausposition, sonst auf eine neue Spur. Mute und Solo wirken sofort auf die Wiedergabe.
 
+Mit dem Auswahl-Werkzeug hat jedes Event Smart-Bereiche: am Rand in der unteren Hälfte die Länge ändern, in der oberen Hälfte Fade-In/Fade-Out ziehen (auch an den Griffen des ausgewählten Events). Strg+Z macht rückgängig, Strg+Umschalt+Z (oder Strg+Y) stellt wieder her.
+
+F3 blendet den Mixer in der unteren Zone ein und aus: je Kanal Panorama, Mute/Solo, Fader mit Pegelanzeige, rechts der Ausgang. Strg + Klick setzt Fader auf 0 dB bzw. Panorama auf Mitte, Umschalt + Ziehen stellt fein ein.
+
 Benötigt Rust 1.85 oder neuer (Edition 2024). Unter Linux zusätzlich die Entwicklerdateien von ALSA und PipeWire (`libasound`, `libpipewire-0.3`) sowie `clang`. `cargo run -- --list-hosts` zeigt die verfügbaren Audio-Hosts, `--audio-host alsa` wählt einen anderen.
 
 ## Lizenz

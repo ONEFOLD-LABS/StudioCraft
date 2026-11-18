@@ -4,6 +4,7 @@
 //! Prototyp-Stand: Projektfenster mit Werkzeugzeile, Inspector, Spurliste,
 //! Lineal, Event-Anzeige und Transportleiste.
 
+mod mixer;
 mod timeline;
 mod tools;
 pub mod waveform;
@@ -53,6 +54,17 @@ pub struct ProjectWindow {
     dirty: bool,
     /// Letzte Meldung (z. B. Importfehler) für die Statuszeile.
     message: Option<String>,
+    show_mixer: bool,
+    /// Angezeigte Pegel je Spur und Ausgang (linear, mit Abfall).
+    meter_levels: Vec<[f32; 2]>,
+    master_meter: [f32; 2],
+    /// Undo- und Redo-Verlauf (ganze Projektstände; Spec „Undo“).
+    undo: Vec<Project>,
+    redo: Vec<Project>,
+    /// Projektstand zu Beginn eines Ziehvorgangs.
+    drag_before: Option<Project>,
+    /// Lage der Event-Anzeige im letzten Frame (für Tests mit Mauseingaben).
+    lanes_rect: egui::Rect,
 }
 
 impl ProjectWindow {
@@ -80,6 +92,13 @@ impl ProjectWindow {
             sample_rate,
             dirty: true,
             message: None,
+            show_mixer: true,
+            meter_levels: Vec::new(),
+            master_meter: [0.0; 2],
+            undo: Vec::new(),
+            redo: Vec::new(),
+            drag_before: None,
+            lanes_rect: egui::Rect::NOTHING,
         };
         w.send_locators();
         w
@@ -196,6 +215,49 @@ impl ProjectWindow {
         Ok(ev)
     }
 
+    /// Legt `before` im Undo-Verlauf ab, falls sich das Projekt seitdem geändert hat.
+    pub(crate) fn checkpoint(&mut self, before: Project) {
+        if before == self.project {
+            return;
+        }
+        self.undo.push(before);
+        if self.undo.len() > UNDO_STEPS {
+            self.undo.remove(0);
+        }
+        self.redo.clear();
+        self.dirty = true;
+    }
+
+    pub fn undo(&mut self) {
+        if let Some(prev) = self.undo.pop() {
+            self.redo.push(std::mem::replace(&mut self.project, prev));
+            self.after_history_step();
+        }
+    }
+
+    pub fn redo(&mut self) {
+        if let Some(next) = self.redo.pop() {
+            self.undo.push(std::mem::replace(&mut self.project, next));
+            self.after_history_step();
+        }
+    }
+
+    fn after_history_step(&mut self) {
+        let p = &self.project;
+        self.selection.retain(|&id| p.event(id).is_some());
+        if self.selected_track.is_some_and(|t| t >= p.tracks.len()) {
+            self.selected_track = p.tracks.len().checked_sub(1);
+        }
+        self.drag = None;
+        self.dirty = true;
+    }
+
+    /// Verlauf leeren, z. B. nach dem Laden der Startdateien.
+    pub fn clear_history(&mut self) {
+        self.undo.clear();
+        self.redo.clear();
+    }
+
     pub(crate) fn clip(&self, id: ClipId) -> Option<&LoadedClip> {
         self.clips.get(&id)
     }
@@ -222,7 +284,7 @@ impl ProjectWindow {
         if ui.ctx().egui_wants_keyboard_input() {
             return;
         }
-        let (keys, alt) = ui.input(|i| {
+        let (keys, mods) = ui.input(|i| {
             let mut pressed = Vec::new();
             for k in [
                 Key::Num1,
@@ -245,14 +307,30 @@ impl ProjectWindow {
                 Key::I,
                 Key::Comma,
                 Key::Slash,
+                Key::F3,
+                Key::Z,
+                Key::Y,
             ] {
                 if i.key_pressed(k) {
                     pressed.push(k);
                 }
             }
-            (pressed, i.modifiers.alt)
+            (pressed, i.modifiers)
         });
+        let alt = mods.alt;
         for k in keys {
+            // Strg+Z / Strg+Umschalt+Z (und Strg+Y) vor allem anderen.
+            if mods.command && (k == Key::Z || k == Key::Y) {
+                if k == Key::Y || mods.shift {
+                    self.redo();
+                } else {
+                    self.undo();
+                }
+                continue;
+            }
+            if mods.command {
+                continue;
+            }
             if let Some(tool) = Tool::from_key(k) {
                 self.tool = tool;
                 continue;
@@ -263,11 +341,13 @@ impl ProjectWindow {
                 Key::G => self.view.zoom(0.8, None),
                 Key::Space => self.toggle_play(),
                 Key::Slash => self.toggle_cycle(),
+                Key::F3 => self.show_mixer = !self.show_mixer,
                 Key::Delete | Key::Backspace => {
-                    self.dirty = true;
+                    let before = self.project.clone();
                     for id in std::mem::take(&mut self.selection) {
                         self.project.delete(id);
                     }
+                    self.checkpoint(before);
                 }
                 Key::Home | Key::Comma => self.locate(0),
                 Key::I if alt => self.show_inspector = !self.show_inspector,
@@ -283,7 +363,9 @@ impl ProjectWindow {
             t.collect_garbage();
         }
         self.handle_keys(ui);
-        let dt = ui.input(|i| i.unstable_dt) * 1000.0;
+        let dt_s = ui.input(|i| i.unstable_dt);
+        mixer::update_meters(self, dt_s);
+        let dt = dt_s * 1000.0;
         self.frame_ms = if self.frame_ms == 0.0 {
             dt
         } else {
@@ -292,6 +374,13 @@ impl ProjectWindow {
 
         egui::Panel::top("werkzeugzeile").show(ui, |ui| self.toolbar(ui));
         egui::Panel::bottom("transportleiste").show(ui, |ui| self.transport_bar(ui));
+        if self.show_mixer {
+            egui::Panel::bottom("mixer")
+                .resizable(true)
+                .default_size(300.0)
+                .min_size(200.0)
+                .show(ui, |ui| mixer::show(self, ui));
+        }
         if self.show_inspector {
             egui::Panel::left("inspector")
                 .resizable(true)
@@ -305,7 +394,9 @@ impl ProjectWindow {
             self.rebuild_song();
         }
 
-        if self.is_playing() {
+        let meters_moving = self.master_meter.iter().any(|&v| v > 1e-4)
+            || self.meter_levels.iter().flatten().any(|&v| v > 1e-4);
+        if self.is_playing() || meters_moving {
             ui.ctx().request_repaint();
         }
     }
@@ -357,6 +448,21 @@ impl ProjectWindow {
             if track.kind.holds_events() {
                 ui.toggle_value(&mut track.record, "R");
             }
+        });
+        ui.horizontal(|ui| {
+            let r = ui.add(
+                egui::Slider::new(
+                    &mut track.volume_db,
+                    studiocraft_project::MIN_DB..=studiocraft_project::MAX_DB,
+                )
+                .text("dB")
+                .custom_formatter(|v, _| mixer::db_label(v as f32)),
+            );
+            self.dirty |= r.changed();
+        });
+        ui.horizontal(|ui| {
+            let r = ui.add(egui::Slider::new(&mut track.pan, -1.0..=1.0).text("Pan"));
+            self.dirty |= r.changed();
         });
         let mut c = Color32::from_rgb(track.color[0], track.color[1], track.color[2]);
         if ui.color_edit_button_srgba(&mut c).changed() {
@@ -447,6 +553,9 @@ impl ProjectWindow {
 /// Ticks pro Viertel als `f64`, für Umrechnungen in Pixel.
 pub(crate) const TPQ: f64 = TICKS_PER_QUARTER as f64;
 
+/// So viele Schritte lassen sich rückgängig machen.
+const UNDO_STEPS: usize = 200;
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -460,9 +569,13 @@ mod tests {
         setup(&mut w);
         let mut harness = Harness::builder()
             .with_size(egui::vec2(1400.0, 860.0))
+            .with_step_dt(1.0 / 60.0)
             .wgpu()
             .build_ui(move |ui| w.ui(ui));
-        harness.run();
+        // Pegelanzeigen klingen ab und fordern weitere Frames an: feste Schrittzahl,
+        // danach die Barrierefreiheit ausdrücklich prüfen.
+        harness.run_steps(4);
+        harness.check_accessibility();
         let Ok(img) = harness.render() else {
             eprintln!("kein GPU-Renderer verfügbar, Bild übersprungen");
             return;
@@ -513,7 +626,11 @@ mod tests {
                 calls.get() - before >= frames,
                 "Oberfläche wurde nicht jede Frame gebaut"
             );
-            let art = if audio { "Audio-Spuren mit Wellenform" } else { "Spuren" };
+            let art = if audio {
+                "Audio-Spuren mit Wellenform"
+            } else {
+                "Spuren"
+            };
             println!(
                 "{n} {art}: {ms:.2} ms CPU pro Frame ({} Durchläufe)",
                 calls.get() - before
@@ -595,6 +712,173 @@ mod tests {
             w.project.tracks[1].events[0].muted = true;
             w.view.zoom(2.0, None);
             w.selection = vec![right];
+        });
+    }
+
+    #[test]
+    fn renders_mixer_with_meters() {
+        shot("mixer", |w| {
+            w.project = Project::default();
+            for (name, hz) in [
+                ("Kick", 55.0),
+                ("Bass", 82.0),
+                ("Gitarre", 196.0),
+                ("Gesang", 440.0),
+            ] {
+                w.import_clip(name, None, tone_clip(8.0, hz), None).unwrap();
+            }
+            w.project.tracks[1].volume_db = -6.0;
+            w.project.tracks[2].pan = -0.4;
+            w.project.tracks[3].volume_db = 3.0;
+            w.project.tracks[3].solo = true;
+            w.project.master_db = -2.5;
+            w.meter_levels = vec![[0.9, 0.85], [0.4, 0.38], [0.6, 0.2], [1.2, 1.1]];
+            w.master_meter = [0.7, 0.65];
+        });
+    }
+
+    /// Fenster mit einer Audio-Spur und einem Event von Takt 2 bis 6.
+    fn one_event_window() -> (ProjectWindow, EventId) {
+        let mut w = ProjectWindow::new(Project::default(), None, String::new());
+        let bar = w.bar_ticks();
+        let id = w
+            .import_clip("Take", None, tone_clip(8.0, 220.0), Some((usize::MAX, bar)))
+            .unwrap();
+        w.clear_history();
+        w.selection.clear();
+        (w, id)
+    }
+
+    /// Zieht mit der Maus von `from` nach `to` (in Ticks, relativ zur Zeile 0).
+    fn drag(
+        harness: &mut Harness<'_, ProjectWindow>,
+        from: (u64, f32),
+        to: (u64, f32),
+        shift_x: f32,
+    ) {
+        let pos = |h: &Harness<'_, ProjectWindow>, (t, y): (u64, f32)| {
+            let w = h.state();
+            let r = w.lanes_rect;
+            let x =
+                r.left() + ((t as f64 - w.view.scroll_ticks) / TPQ) as f32 * w.view.px_per_quarter;
+            egui::pos2(x + shift_x, r.top() + y * w.view.row_h)
+        };
+        let a = pos(harness, from);
+        let b = pos(harness, to);
+        let button = |pos, pressed| egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        harness.event(egui::Event::PointerMoved(a));
+        harness.run_steps(1);
+        harness.event(button(a, true));
+        harness.run_steps(1);
+        for i in 1..=5 {
+            harness.event(egui::Event::PointerMoved(a + (b - a) * (i as f32 / 5.0)));
+            harness.run_steps(1);
+        }
+        harness.event(button(b, false));
+        harness.run_steps(2);
+    }
+
+    fn window_harness(w: ProjectWindow) -> Harness<'static, ProjectWindow> {
+        let mut h = Harness::builder()
+            .with_size(egui::vec2(1400.0, 860.0))
+            .with_step_dt(1.0 / 60.0)
+            .build_ui_state(|ui, w: &mut ProjectWindow| w.ui(ui), w);
+        h.run_steps(2);
+        h
+    }
+
+    #[test]
+    fn mouse_trims_edges_and_drags_fades() {
+        let (w, id) = one_event_window();
+        let bar = w.bar_ticks();
+        let beat = w.beat_ticks();
+        let mut h = window_harness(w);
+
+        // Das Event reicht von Tick `bar` bis `5·bar`, also von Takt 2 bis Takt 6.
+        assert_eq!(h.state().project.event(id).unwrap().end(), 5 * bar);
+        // Untere Hälfte am rechten Rand: Ende von Takt 6 auf Takt 5.
+        drag(&mut h, (5 * bar, 0.8), (4 * bar, 0.8), -2.0);
+        assert_eq!(
+            h.state().project.event(id).unwrap().end(),
+            4 * bar,
+            "Ende auf Takt 5"
+        );
+
+        // Untere Hälfte am linken Rand: Anfang eine Zählzeit nach rechts.
+        drag(&mut h, (bar, 0.8), (bar + beat, 0.8), 2.0);
+        let ev = h.state().project.event(id).unwrap().clone();
+        assert_eq!(ev.start.0, bar + beat);
+        assert_eq!(ev.offset, 24_000, "Inhalt bleibt an seiner Stelle");
+
+        // Obere Hälfte am linken Rand: Fade-In über eine Zählzeit.
+        drag(&mut h, (bar + beat, 0.4), (bar + 2 * beat, 0.4), 1.0);
+        let fade = h.state().project.event(id).unwrap().fade_in;
+        assert!(
+            fade.abs_diff(beat) < beat / 8,
+            "Fade-In etwa eine Zählzeit: {fade}"
+        );
+
+        // Drei Schritte rückgängig, dann einer wiederhergestellt.
+        let w = h.state_mut();
+        w.undo();
+        w.undo();
+        w.undo();
+        assert_eq!(w.project.event(id).unwrap().end(), 5 * bar);
+        assert_eq!(w.project.event(id).unwrap().fade_in, 0);
+        w.redo();
+        assert_eq!(w.project.event(id).unwrap().end(), 4 * bar);
+    }
+
+    #[test]
+    fn undo_redo_split_and_delete() {
+        let (mut w, id) = one_event_window();
+        let original = w.project.clone();
+        let before = w.project.clone();
+        let right = w.project.split(id, 3 * w.bar_ticks()).unwrap();
+        w.checkpoint(before);
+        let before = w.project.clone();
+        w.project.delete(right);
+        w.checkpoint(before);
+        w.undo();
+        assert!(w.project.event(right).is_some());
+        w.undo();
+        assert_eq!(w.project, original);
+        w.redo();
+        w.redo();
+        assert!(w.project.event(right).is_none());
+        // Unveränderter Stand erzeugt keinen Undo-Schritt.
+        let n = w.undo.len();
+        w.checkpoint(w.project.clone());
+        assert_eq!(w.undo.len(), n);
+    }
+
+    #[test]
+    fn renders_fades_and_handles() {
+        shot("fades", |w| {
+            w.project = Project::default();
+            let bar = w.bar_ticks();
+            let a = w
+                .import_clip("Fade-In", None, tone_clip(8.0, 110.0), None)
+                .unwrap();
+            let b = w
+                .import_clip(
+                    "Fade-Out",
+                    None,
+                    tone_clip(8.0, 220.0),
+                    Some((usize::MAX, bar)),
+                )
+                .unwrap();
+            w.project.set_fades(a, 2 * bar, 0);
+            w.project.set_fades(b, bar / 2, bar + bar / 2);
+            w.project.trim_end(b, 3 * bar + bar / 2);
+            w.selection = vec![b];
+            w.view.zoom(2.0, None);
+            w.show_mixer = false;
         });
     }
 

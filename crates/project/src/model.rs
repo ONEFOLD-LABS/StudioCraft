@@ -57,6 +57,9 @@ pub struct Event {
     pub clip: Option<ClipId>,
     /// Audio-Events: Startpunkt im Clip in Frames des Clips.
     pub offset: u64,
+    /// Fade-In und Fade-Out in Ticks (nicht-destruktiv, linear).
+    pub fade_in: u64,
+    pub fade_out: u64,
 }
 
 impl Event {
@@ -77,14 +80,45 @@ pub struct Track {
     pub mute: bool,
     pub solo: bool,
     pub record: bool,
+    /// Fader in dB; [`MIN_DB`] und darunter gilt als −∞.
+    pub volume_db: f32,
+    /// Panorama: −1 links, 0 Mitte, +1 rechts (Stereo-Balance).
+    pub pan: f32,
     pub events: Vec<Event>,
 }
 
-#[derive(Debug, Clone)]
+/// Untere Grenze des Faders; darunter ist der Kanal stumm (−∞).
+pub const MIN_DB: f32 = -60.0;
+/// Obere Grenze des Faders.
+pub const MAX_DB: f32 = 6.0;
+
+/// dB in linearen Faktor; [`MIN_DB`] und darunter ergibt 0.
+pub fn db_to_gain(db: f32) -> f32 {
+    if db <= MIN_DB {
+        0.0
+    } else {
+        10f32.powf(db / 20.0)
+    }
+}
+
+impl Track {
+    /// Faktoren für links und rechts aus Fader und Stereo-Balance.
+    pub fn gains(&self) -> (f32, f32) {
+        let g = db_to_gain(self.volume_db);
+        let p = self.pan.clamp(-1.0, 1.0);
+        let l = if p > 0.0 { 1.0 - p } else { 1.0 };
+        let r = if p < 0.0 { 1.0 + p } else { 1.0 };
+        (g * l, g * r)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct Project {
     pub tracks: Vec<Track>,
     pub tempo: TempoMap,
     pub pool: Vec<PoolClip>,
+    /// Fader des Ausgangsbusses in dB.
+    pub master_db: f32,
     next_id: EventId,
 }
 
@@ -104,6 +138,7 @@ impl Default for Project {
         Self {
             tracks: Vec::new(),
             pool: Vec::new(),
+            master_db: 0.0,
             tempo: TempoMap::default(),
             next_id: 1,
         }
@@ -135,6 +170,8 @@ impl Project {
                 mute: false,
                 solo: false,
                 record: false,
+                volume_db: 0.0,
+                pan: 0.0,
                 events: Vec::new(),
             };
             if kind.holds_events() {
@@ -152,6 +189,8 @@ impl Project {
                         muted: false,
                         clip: None,
                         offset: 0,
+                        fade_in: 0,
+                        fade_out: 0,
                     });
                     at += len + ((i as u64 + 2 * k) % 3) * bar;
                     k += 1;
@@ -205,6 +244,11 @@ impl Project {
         right.start = Position(at);
         right.length = ev.end() - at;
         ev.length = at - ev.start.0;
+        // Fade-In bleibt links, Fade-Out wandert nach rechts.
+        right.fade_in = 0;
+        ev.fade_out = 0;
+        ev.fade_in = ev.fade_in.min(ev.length);
+        right.fade_out = right.fade_out.min(right.length);
         self.tracks[t].events.insert(i + 1, right);
         self.next_id += 1;
         Some(new_id)
@@ -273,9 +317,86 @@ impl Project {
                 muted: false,
                 clip: None,
                 offset: 0,
+                fade_in: 0,
+                fade_out: 0,
             },
         );
         Some(id)
+    }
+
+    /// Wie weit ein Audio-Event höchstens nach links (Start früher) und
+    /// insgesamt reichen darf, in Ticks: begrenzt durch den Clip.
+    fn clip_bounds(&self, ev: &Event) -> Option<(u64, u64)> {
+        let c = self.pool.get(ev.clip? as usize)?;
+        let before = self.tempo.ticks(ev.offset, c.sample_rate);
+        let total = self.tempo.ticks(c.frames, c.sample_rate);
+        Some((before, total))
+    }
+
+    /// Verschiebt den Anfang eines Events (Länge ändern am linken Rand).
+    /// Bei Audio bleibt der Inhalt an seiner Stelle; der Offset wandert mit.
+    pub fn trim_start(&mut self, id: EventId, new_start: u64) -> bool {
+        let Some(ev) = self.event(id) else {
+            return false;
+        };
+        let end = ev.end();
+        let mut start = new_start.min(end.saturating_sub(1));
+        let bounds = self.clip_bounds(ev);
+        let rate = ev
+            .clip
+            .and_then(|c| self.pool.get(c as usize))
+            .map(|c| c.sample_rate);
+        if let Some((before, _)) = bounds {
+            start = start.max(ev.start.0.saturating_sub(before));
+        }
+        let old_start = ev.start.0;
+        let tempo = self.tempo.clone();
+        let Some(ev) = self.event_mut(id) else {
+            return false;
+        };
+        if let Some(rate) = rate {
+            if start >= old_start {
+                ev.offset += tempo.frames(start - old_start, rate);
+            } else {
+                ev.offset = ev
+                    .offset
+                    .saturating_sub(tempo.frames(old_start - start, rate));
+            }
+        }
+        ev.start = Position(start);
+        ev.length = end - start;
+        ev.fade_in = ev.fade_in.min(ev.length);
+        ev.fade_out = ev.fade_out.min(ev.length - ev.fade_in);
+        true
+    }
+
+    /// Verschiebt das Ende eines Events (Länge ändern am rechten Rand).
+    pub fn trim_end(&mut self, id: EventId, new_end: u64) -> bool {
+        let Some(ev) = self.event(id) else {
+            return false;
+        };
+        let mut end = new_end.max(ev.start.0 + 1);
+        if let Some((before, total)) = self.clip_bounds(ev) {
+            // Rest des Clips ab dem Event-Anfang.
+            end = end.min(ev.start.0 + total.saturating_sub(before));
+        }
+        let Some(ev) = self.event_mut(id) else {
+            return false;
+        };
+        ev.length = end - ev.start.0;
+        ev.fade_out = ev.fade_out.min(ev.length);
+        ev.fade_in = ev.fade_in.min(ev.length - ev.fade_out);
+        true
+    }
+
+    /// Setzt die Fades; zusammen höchstens so lang wie das Event.
+    pub fn set_fades(&mut self, id: EventId, fade_in: u64, fade_out: u64) -> bool {
+        let Some(ev) = self.event_mut(id) else {
+            return false;
+        };
+        ev.fade_in = fade_in.min(ev.length);
+        ev.fade_out = fade_out.min(ev.length - ev.fade_in);
+        true
     }
 
     pub fn add_track(&mut self, kind: TrackKind, name: impl Into<String>) -> usize {
@@ -287,6 +408,8 @@ impl Project {
             mute: false,
             solo: false,
             record: false,
+            volume_db: 0.0,
+            pan: 0.0,
             events: Vec::new(),
         });
         i
@@ -318,6 +441,8 @@ impl Project {
                 muted: false,
                 clip: Some(clip),
                 offset: 0,
+                fade_in: 0,
+                fade_out: 0,
             },
         );
         Some(id)
@@ -429,6 +554,73 @@ mod tests {
         assert!(!p.audible(1));
         p.tracks[2].solo = true;
         assert!(!p.audible(0) && !p.audible(1) && p.audible(2));
+    }
+
+    #[test]
+    fn fader_and_balance_gains() {
+        let mut p = Project::default();
+        p.add_track(TrackKind::Audio, "a");
+        let t = &mut p.tracks[0];
+        assert_eq!(t.gains(), (1.0, 1.0));
+        t.volume_db = -6.0;
+        let (l, r) = t.gains();
+        assert!((l - 0.501).abs() < 0.001 && l == r);
+        t.volume_db = 0.0;
+        t.pan = -0.5;
+        assert_eq!(t.gains(), (1.0, 0.5), "links: rechter Kanal leiser");
+        t.volume_db = MIN_DB;
+        assert_eq!(t.gains(), (0.0, 0.0));
+    }
+
+    #[test]
+    fn trimming_keeps_audio_in_place_and_respects_clip() {
+        let (mut p, c) = pool_project(); // Clip = 1 Takt
+        let bar = p.tempo.signature.bar_ticks();
+        let q = TICKS_PER_QUARTER;
+        let id = p.add_audio_event(0, bar, c).unwrap();
+        // Anfang eine Viertel nach rechts: Offset wächst um 0,5 s.
+        assert!(p.trim_start(id, bar + q));
+        let ev = p.event(id).unwrap();
+        assert_eq!(
+            (ev.start.0, ev.length, ev.offset),
+            (bar + q, bar - q, 24_000)
+        );
+        // Zurück nach links geht nur bis zum Clip-Anfang.
+        p.trim_start(id, 0);
+        let ev = p.event(id).unwrap();
+        assert_eq!((ev.start.0, ev.offset), (bar, 0));
+        // Ende nicht über das Clip-Ende hinaus.
+        p.trim_end(id, 10 * bar);
+        assert_eq!(p.event(id).unwrap().end(), 2 * bar);
+        p.trim_end(id, bar + q);
+        assert_eq!(p.event(id).unwrap().length, q);
+    }
+
+    #[test]
+    fn fades_are_clamped_and_split_correctly() {
+        let (mut p, c) = pool_project();
+        let bar = p.tempo.signature.bar_ticks();
+        let id = p.add_audio_event(0, 0, c).unwrap();
+        p.set_fades(id, bar, bar);
+        let ev = p.event(id).unwrap();
+        assert_eq!(
+            (ev.fade_in, ev.fade_out),
+            (bar, 0),
+            "zusammen höchstens Event-Länge"
+        );
+        p.set_fades(id, 960, 960);
+        let right = p.split(id, bar / 2).unwrap();
+        assert_eq!(
+            (p.event(id).unwrap().fade_in, p.event(id).unwrap().fade_out),
+            (960, 0)
+        );
+        assert_eq!(
+            (
+                p.event(right).unwrap().fade_in,
+                p.event(right).unwrap().fade_out
+            ),
+            (0, 960)
+        );
     }
 
     #[test]

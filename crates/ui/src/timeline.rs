@@ -46,11 +46,83 @@ impl View {
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum Drag {
     /// Auswahl verschieben; `grab` = Abstand Mauszeiger zu Event-Start in Ticks.
-    Move { id: EventId, grab: f64, row: usize },
+    Move {
+        id: EventId,
+        grab: f64,
+        row: usize,
+    },
     /// Neues Event aufziehen.
-    Draw { row: usize, start: u64 },
+    Draw {
+        row: usize,
+        start: u64,
+    },
     /// Cycle-Bereich im Lineal aufziehen.
-    Ruler { start: u64 },
+    Ruler {
+        start: u64,
+    },
+    /// Länge am linken bzw. rechten Rand ändern (untere Hälfte des Rands).
+    TrimStart {
+        id: EventId,
+    },
+    TrimEnd {
+        id: EventId,
+    },
+    /// Fade-Griffe (obere Hälfte des Rands bzw. am Griff).
+    FadeIn {
+        id: EventId,
+    },
+    FadeOut {
+        id: EventId,
+    },
+}
+
+/// Fangbereich um Ränder und Fade-Griffe in Pixel.
+const EDGE: f32 = 7.0;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Zone {
+    Body,
+    TrimStart,
+    TrimEnd,
+    FadeIn,
+    FadeOut,
+}
+
+/// Smart-Bereiche eines Events unter dem Mauszeiger (Spec „Werkzeuge“):
+/// obere Hälfte am Rand bzw. am Griff = Fade, untere Hälfte am Rand = Länge.
+fn smart_zone(w: &ProjectWindow, g: &Geo, p: Pos2) -> Option<(EventId, usize, Zone)> {
+    if !g.lanes.contains(p) {
+        return None;
+    }
+    let row = g.row_at(p.y)?;
+    let px = |dx: f32| f64::from(dx / g.view.px_per_quarter) * TPQ;
+    // Etwas Toleranz, damit man den Rand auch knapp außerhalb trifft.
+    let t = g.ticks(p.x);
+    let id = w
+        .project
+        .event_at(row, t.max(0.0) as u64)
+        .or_else(|| w.project.event_at(row, (t - px(EDGE)).max(0.0) as u64))
+        .or_else(|| w.project.event_at(row, (t + px(EDGE)).max(0.0) as u64))?;
+    let ev = w.project.event(id)?;
+    let x0 = g.x(ev.start.0 as f64);
+    let x1 = g.x(ev.end() as f64);
+    let upper = p.y < g.row_top(row) + g.view.row_h * 0.5;
+    let fin = g.x((ev.start.0 + ev.fade_in) as f64);
+    let fout = g.x((ev.end() - ev.fade_out) as f64);
+    let zone = if upper && (p.x - fin).abs() <= EDGE && (p.x - fin).abs() <= (p.x - fout).abs() {
+        Zone::FadeIn
+    } else if upper && (p.x - fout).abs() <= EDGE {
+        Zone::FadeOut
+    } else if !upper && (p.x - x0).abs() <= EDGE {
+        Zone::TrimStart
+    } else if !upper && (x1 - p.x).abs() <= EDGE {
+        Zone::TrimEnd
+    } else if p.x >= x0 && p.x <= x1 {
+        Zone::Body
+    } else {
+        return None;
+    };
+    Some((id, row, zone))
 }
 
 struct Geo {
@@ -105,6 +177,7 @@ pub(crate) fn show(w: &mut ProjectWindow, ui: &mut Ui) {
     );
     let lanes = Rect::from_min_max(pos2(r.left() + HEADER_W, r.top() + RULER_H), r.max);
     let rows = w.project.tracks.len();
+    w.lanes_rect = lanes;
 
     scroll_and_zoom(w, ui, &resp, lanes, rows);
     follow_cursor(w, lanes);
@@ -164,6 +237,7 @@ fn file_drop(w: &mut ProjectWindow, ui: &Ui, g: &Geo) -> Option<(Option<usize>, 
         (row, w.snap_ticks(g.ticks(p.x)))
     });
     if !dropped.is_empty() {
+        let before = w.project.clone();
         let (row, at) = target.unwrap_or((None, 0));
         let mut errors = Vec::new();
         for (i, path) in dropped.iter().enumerate() {
@@ -175,6 +249,7 @@ fn file_drop(w: &mut ProjectWindow, ui: &Ui, g: &Geo) -> Option<(Option<usize>, 
             }
         }
         w.message = (!errors.is_empty()).then(|| errors.join("; "));
+        w.checkpoint(before);
         return None;
     }
     if hovering { target } else { None }
@@ -257,28 +332,89 @@ fn interact(w: &mut ProjectWindow, ui: &Ui, resp: &egui::Response, g: &Geo) {
     if resp.drag_started()
         && let Some(p) = press
     {
+        w.drag_before = Some(w.project.clone());
         w.drag = start_drag(w, g, p);
     }
     if resp.dragged()
-        && let (Some(Drag::Ruler { start }), Some(p)) = (w.drag, now)
+        && let (Some(d), Some(p)) = (w.drag, now)
     {
-        let t = w.snap_ticks(g.ticks(p.x));
-        w.left_locator = start.min(t);
-        w.right_locator = start.max(t);
+        live_drag(w, g, d, p, mods);
     }
     if resp.drag_stopped() {
         if let (Some(d), Some(p)) = (w.drag.take(), now) {
             finish_drag(w, g, d, p, mods);
-            w.dirty = true;
+        }
+        if let Some(before) = w.drag_before.take() {
+            w.checkpoint(before);
         }
         return;
     }
     if resp.clicked()
         && let Some(p) = resp.interact_pointer_pos()
     {
+        let before = w.project.clone();
         click(w, g, p, mods);
-        w.dirty = true;
+        w.checkpoint(before);
     }
+
+    // Mauszeiger zeigt den Smart-Bereich an.
+    if w.tool == Tool::Select
+        && let Some(p) = resp.hover_pos()
+    {
+        let zone = match w.drag {
+            Some(Drag::TrimStart { .. } | Drag::TrimEnd { .. }) => Some(Zone::TrimStart),
+            Some(Drag::FadeIn { .. } | Drag::FadeOut { .. }) => Some(Zone::FadeIn),
+            Some(_) => None,
+            None => smart_zone(w, g, p).map(|(_, _, z)| z),
+        };
+        match zone {
+            Some(Zone::TrimStart | Zone::TrimEnd) => {
+                ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal)
+            }
+            Some(Zone::FadeIn | Zone::FadeOut) => ui.ctx().set_cursor_icon(egui::CursorIcon::Grab),
+            _ => {}
+        }
+    }
+}
+
+/// Änderungen, die schon während des Ziehens sichtbar und hörbar sind.
+fn live_drag(w: &mut ProjectWindow, g: &Geo, d: Drag, p: Pos2, mods: egui::Modifiers) {
+    let raw = g.ticks(p.x).max(0.0);
+    let snapped = if mods.alt {
+        raw.round() as u64
+    } else {
+        w.snap_ticks(raw)
+    };
+    match d {
+        Drag::Ruler { start } => {
+            let t = w.snap_ticks(raw);
+            w.left_locator = start.min(t);
+            w.right_locator = start.max(t);
+            return;
+        }
+        Drag::TrimStart { id } => {
+            w.project.trim_start(id, snapped);
+        }
+        Drag::TrimEnd { id } => {
+            w.project.trim_end(id, snapped);
+        }
+        Drag::FadeIn { id } => {
+            if let Some(ev) = w.project.event(id) {
+                let len = (raw as u64).saturating_sub(ev.start.0);
+                let out = ev.fade_out;
+                w.project.set_fades(id, len, out);
+            }
+        }
+        Drag::FadeOut { id } => {
+            if let Some(ev) = w.project.event(id) {
+                let len = ev.end().saturating_sub(raw as u64);
+                let fin = ev.fade_in;
+                w.project.set_fades(id, fin, len.min(ev.length - fin));
+            }
+        }
+        Drag::Move { .. } | Drag::Draw { .. } => return,
+    }
+    w.dirty = true;
 }
 
 fn start_drag(w: &mut ProjectWindow, g: &Geo, p: Pos2) -> Option<Drag> {
@@ -294,16 +430,22 @@ fn start_drag(w: &mut ProjectWindow, g: &Geo, p: Pos2) -> Option<Drag> {
     let ticks = g.ticks(p.x);
     match w.tool {
         Tool::Select => {
-            let id = w.project.event_at(row, ticks.max(0.0) as u64)?;
+            let (id, row, zone) = smart_zone(w, g, p)?;
             if !w.selection.contains(&id) {
                 w.selection = vec![id];
             }
             w.selected_track = Some(row);
             let start = w.project.event(id)?.start.0 as f64;
-            Some(Drag::Move {
-                id,
-                grab: ticks - start,
-                row,
+            Some(match zone {
+                Zone::Body => Drag::Move {
+                    id,
+                    grab: ticks - start,
+                    row,
+                },
+                Zone::TrimStart => Drag::TrimStart { id },
+                Zone::TrimEnd => Drag::TrimEnd { id },
+                Zone::FadeIn => Drag::FadeIn { id },
+                Zone::FadeOut => Drag::FadeOut { id },
             })
         }
         Tool::Draw if w.project.tracks[row].kind.holds_events() => Some(Drag::Draw {
@@ -343,6 +485,11 @@ fn move_delta(
 fn finish_drag(w: &mut ProjectWindow, g: &Geo, d: Drag, p: Pos2, mods: egui::Modifiers) {
     match d {
         Drag::Ruler { .. } => w.send_locators(),
+        // Schon während des Ziehens angewendet.
+        Drag::TrimStart { .. }
+        | Drag::TrimEnd { .. }
+        | Drag::FadeIn { .. }
+        | Drag::FadeOut { .. } => {}
         Drag::Draw { row, start } => {
             let end = w.snap_ticks(g.ticks(p.x));
             let min = w.grid.ticks(&w.project);
@@ -622,8 +769,9 @@ fn paint_event(
         };
         paint_waveform(w, painter, g, ev, clip, body.intersect(g.lanes), wave);
     }
-
     let selected = w.selection.contains(&ev.id);
+    paint_fades(painter, g, ev, body, selected);
+
     let stroke = if selected {
         Stroke::new(2.0, Color32::WHITE)
     } else {
@@ -642,6 +790,58 @@ fn paint_event(
                 FontId::proportional(10.5),
                 Color32::from_gray(if ev.muted { 200 } else { 10 }),
             );
+    }
+}
+
+/// Linearer Fade-Faktor an Tick `k` relativ zum Event-Anfang (wie in der Engine).
+fn fade_gain(ev: &Event, k: f64) -> f32 {
+    let mut g = 1.0f32;
+    if (ev.fade_in as f64) > 0.0 && k < ev.fade_in as f64 {
+        g = (k / ev.fade_in as f64).max(0.0) as f32;
+    }
+    let rest = ev.length as f64 - k;
+    if (ev.fade_out as f64) > 0.0 && rest < ev.fade_out as f64 {
+        g *= (rest / ev.fade_out as f64).max(0.0) as f32;
+    }
+    g
+}
+
+/// Fade-Bereiche abdunkeln, Kurve zeichnen, Griffe am ausgewählten Event.
+fn paint_fades(painter: &Painter, g: &Geo, ev: &Event, body: Rect, selected: bool) {
+    let shade = Color32::from_black_alpha(120);
+    let line = Stroke::new(1.2, Color32::from_white_alpha(200));
+    let (top, bottom) = (body.top(), body.bottom());
+    let fin = g.x((ev.start.0 + ev.fade_in) as f64);
+    let fout = g.x((ev.end() - ev.fade_out) as f64);
+    if ev.fade_in > 0 {
+        let pts = vec![
+            pos2(body.left(), top),
+            pos2(fin, top),
+            pos2(body.left(), bottom),
+        ];
+        painter.add(egui::Shape::convex_polygon(pts, shade, Stroke::NONE));
+        painter.line_segment([pos2(body.left(), bottom), pos2(fin, top)], line);
+    }
+    if ev.fade_out > 0 {
+        let pts = vec![
+            pos2(fout, top),
+            pos2(body.right(), top),
+            pos2(body.right(), bottom),
+        ];
+        painter.add(egui::Shape::convex_polygon(pts, shade, Stroke::NONE));
+        painter.line_segment([pos2(fout, top), pos2(body.right(), bottom)], line);
+    }
+    if selected {
+        for x in [fin, fout] {
+            let handle = Rect::from_center_size(pos2(x, top + 1.0), egui::vec2(7.0, 7.0));
+            painter.rect_filled(handle, 1.0, Color32::WHITE);
+            painter.rect_stroke(
+                handle,
+                1.0,
+                Stroke::new(1.0, Color32::BLACK),
+                StrokeKind::Inside,
+            );
+        }
     }
 }
 
@@ -668,6 +868,8 @@ fn paint_waveform(
         let f0 = ev.offset as f64 + (g.ticks(x) - ev.start.0 as f64) * fpt;
         let f1 = ev.offset as f64 + (g.ticks(x + 1.0) - ev.start.0 as f64) * fpt;
         let (lo, hi) = clip.peaks.range(f0, f1.max(f0 + 1.0));
+        let fade = fade_gain(ev, g.ticks(x + 0.5) - ev.start.0 as f64);
+        let (lo, hi) = (lo * fade, hi * fade);
         let (y0, y1) = (
             mid - hi.clamp(-1.0, 1.0) * half,
             mid - lo.clamp(-1.0, 1.0) * half,

@@ -93,6 +93,7 @@ fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     }
+    window.clear_history();
 
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()

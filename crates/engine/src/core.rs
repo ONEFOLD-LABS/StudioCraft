@@ -10,7 +10,10 @@ use std::sync::{
 
 use studiocraft_project::{Position, TempoMap};
 
-use crate::{Song, Transport, TransportState};
+use crate::{Meters, Song, Transport, TransportState};
+
+/// Größter Block, den der Kern in einem Stück mischt.
+const SCRATCH_FRAMES: usize = 8192;
 
 /// Befehle von der Oberfläche an den Audio-Thread.
 #[derive(Debug, Clone)]
@@ -57,6 +60,7 @@ pub struct EngineControl {
     commands: rtrb::Producer<Command>,
     garbage: rtrb::Consumer<Arc<Song>>,
     pub status: Arc<EngineStatus>,
+    pub meters: Arc<Meters>,
     pub tempo: TempoMap,
     pub sample_rate: u32,
 }
@@ -93,6 +97,9 @@ pub struct EngineCore {
     commands: rtrb::Consumer<Command>,
     garbage: rtrb::Producer<Arc<Song>>,
     status: Arc<EngineStatus>,
+    meters: Arc<Meters>,
+    /// Puffer für eine Spur, vorab angelegt (keine Allokation im Audio-Thread).
+    scratch: Box<[f32]>,
 }
 
 /// Erzeugt das zusammengehörige Paar aus Kern und Steuerung.
@@ -100,6 +107,7 @@ pub fn engine(sample_rate: u32, tempo: TempoMap) -> (EngineCore, EngineControl) 
     let (producer, consumer) = rtrb::RingBuffer::new(256);
     let (garbage_tx, garbage_rx) = rtrb::RingBuffer::new(64);
     let status = Arc::new(EngineStatus::default());
+    let meters = Arc::new(Meters::default());
     let core = EngineCore {
         song: Arc::new(Song::default()),
         sample_rate,
@@ -107,11 +115,14 @@ pub fn engine(sample_rate: u32, tempo: TempoMap) -> (EngineCore, EngineControl) 
         commands: consumer,
         garbage: garbage_tx,
         status: status.clone(),
+        meters: meters.clone(),
+        scratch: vec![0.0; SCRATCH_FRAMES * 2].into_boxed_slice(),
     };
     let control = EngineControl {
         commands: producer,
         garbage: garbage_rx,
         status,
+        meters,
         tempo,
         sample_rate,
     };
@@ -154,17 +165,40 @@ impl EngineCore {
         let mut frames_left = (out.len() / 2) as u64;
         let mut offset = 0usize;
         while frames_left > 0 && self.transport.is_running() {
-            let run = self.transport.frames_until_wrap(frames_left);
+            let run = self
+                .transport
+                .frames_until_wrap(frames_left)
+                .min(SCRATCH_FRAMES as u64);
             let n = run as usize * 2;
-            self.song.mix(
-                &mut out[offset..offset + n],
-                self.transport.cursor,
-                run as usize,
-            );
+            let dst = &mut out[offset..offset + n];
+            let tmp = &mut self.scratch[..n];
+            for track in &self.song.tracks {
+                tmp.fill(0.0);
+                track.render(tmp, self.transport.cursor, run as usize);
+                let (mut pl, mut pr) = (0.0f32, 0.0f32);
+                for (o, t) in dst.chunks_exact_mut(2).zip(tmp.chunks_exact(2)) {
+                    let (l, r) = (t[0] * track.gain_l, t[1] * track.gain_r);
+                    pl = pl.max(l.abs());
+                    pr = pr.max(r.abs());
+                    o[0] += l;
+                    o[1] += r;
+                }
+                self.meters.feed_track(track.slot, pl, pr);
+            }
             self.transport.advance(run);
             offset += n;
             frames_left -= run;
         }
+
+        let master = self.song.master;
+        let (mut pl, mut pr) = (0.0f32, 0.0f32);
+        for o in out.chunks_exact_mut(2) {
+            o[0] *= master;
+            o[1] *= master;
+            pl = pl.max(o[0].abs());
+            pr = pr.max(o[1].abs());
+        }
+        self.meters.feed_master(pl, pr);
 
         let s = &self.status;
         s.cursor.store(self.transport.cursor, Ordering::Relaxed);
@@ -244,6 +278,29 @@ mod tests {
         assert_eq!(ctl.garbage.slots(), 1);
         ctl.collect_garbage();
         assert_eq!(ctl.garbage.slots(), 0);
+    }
+
+    #[test]
+    fn meters_report_track_and_master_peaks() {
+        let (mut core, mut ctl) = ramp(100);
+        let mut song = Song::single(
+            (0..100)
+                .flat_map(|_| [0.5f32, 0.25])
+                .collect::<Vec<_>>()
+                .into(),
+        );
+        song.tracks[0].gain_r = 2.0;
+        song.master = 0.5;
+        ctl.send(Command::SetSong(Arc::new(song)));
+        ctl.send(Command::Play);
+        core.process(&mut [0.0; 16]);
+        assert_eq!(ctl.meters.take_track(0), [0.5, 0.5]);
+        assert_eq!(ctl.meters.take_master(), [0.25, 0.25]);
+        assert_eq!(
+            ctl.meters.take_master(),
+            [0.0, 0.0],
+            "abgeholt ist abgeholt"
+        );
     }
 
     #[test]
