@@ -9,6 +9,7 @@ mod keyeditor;
 mod menu;
 mod mixer;
 mod recording;
+mod routing;
 mod session;
 mod timeline;
 mod tools;
@@ -703,15 +704,18 @@ impl ProjectWindow {
                 .default_open(true)
                 .show(ui, |ui| self.instrument_ui(ui, idx));
         }
-        if matches!(
-            self.project.tracks[idx].kind,
-            TrackKind::Audio | TrackKind::Instrument
-        ) {
+        if crate::mixer::has_channel(self.project.tracks[idx].kind) {
             egui::CollapsingHeader::new("Inserts")
                 .default_open(true)
                 .show(ui, |ui| self.inserts_ui(ui, idx));
         }
-        for section in ["EQ", "Sends", "Notizen"] {
+        if crate::mixer::has_channel(self.project.tracks[idx].kind) {
+            self.output_ui(ui, idx);
+            egui::CollapsingHeader::new("Sends")
+                .default_open(true)
+                .show(ui, |ui| self.sends_ui(ui, idx));
+        }
+        for section in ["EQ", "Notizen"] {
             egui::CollapsingHeader::new(section)
                 .default_open(false)
                 .show(ui, |ui| {
@@ -1976,6 +1980,57 @@ mod tests {
             120.0,
             "Undo erreicht die Engine"
         );
+    }
+
+    #[test]
+    fn renders_sends_and_fx_channel() {
+        shot("sends", |w| {
+            w.project = Project::default();
+            w.import_clip("Gesang", None, tone_clip(8.0, 330.0), None)
+                .unwrap();
+            w.add_bus_track(TrackKind::Fx);
+            w.add_bus_track(TrackKind::Group);
+            let (fx, g) = (w.project.tracks[1].id, w.project.tracks[2].id);
+            w.project.tracks[1].name = "Hall".into();
+            w.project.tracks[0]
+                .sends
+                .push(studiocraft_project::SendSlot {
+                    target: fx,
+                    level_db: -8.0,
+                    pre_fader: false,
+                    on: true,
+                });
+            w.project.tracks[0].output = Some(g);
+            if let Some(verb) = w
+                .plugin_list()
+                .iter()
+                .find(|p| p.name == "ZamVerb")
+                .cloned()
+            {
+                w.project.tracks[1]
+                    .inserts
+                    .push(studiocraft_project::InsertSlot {
+                        plugin_id: verb.id,
+                        name: verb.name,
+                        bypass: false,
+                        params: Vec::new(),
+                        state: None,
+                    });
+            }
+            w.selected_track = Some(0);
+        });
+    }
+
+    #[test]
+    fn output_menu_offers_no_loops() {
+        let mut w = ProjectWindow::new(Project::default(), None, String::new());
+        w.add_bus_track(TrackKind::Group);
+        w.add_bus_track(TrackKind::Group);
+        let (a, b) = (w.project.tracks[0].id, w.project.tracks[1].id);
+        w.project.tracks[1].output = Some(a);
+        assert!(!w.project.can_route(a, b), "A → B wäre eine Schleife");
+        w.undo();
+        assert_eq!(w.project.tracks.len(), 1);
     }
 
     #[test]

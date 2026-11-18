@@ -65,7 +65,35 @@ pub struct PlayTrack {
     pub events: Vec<PlayEvent>,
     /// Instrument-Spuren: Noten in Frames, nach `start` sortiert.
     pub notes: Vec<PlayNote>,
+    /// Gruppen und FX-Kanäle: Nummer des Bus-Puffers, aus dem diese Spur liest.
+    pub bus: Option<usize>,
+    /// Wohin das Signal nach dem Fader geht.
+    pub output: Output,
+    pub sends: Vec<PlaySend>,
 }
+
+/// Ziel des Ausgangs einer Spur.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Output {
+    /// Ausgangsbus (Summe).
+    #[default]
+    Master,
+    /// Bus-Puffer einer Gruppe.
+    Bus(usize),
+    /// Ziel ist stummgeschaltet: Signal geht nirgendwohin.
+    Nowhere,
+}
+
+/// Ein Send in der Abspielliste.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PlaySend {
+    pub bus: usize,
+    pub gain: f32,
+    pub pre_fader: bool,
+}
+
+/// Höchstzahl Gruppen und FX-Kanäle (Bus-Puffer werden vorab angelegt).
+pub const MAX_BUSES: usize = 64;
 
 /// Eine Note, wie der Audio-Thread sie braucht (Projektpositionen in Frames).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -81,6 +109,8 @@ pub struct Song {
     pub tracks: Vec<PlayTrack>,
     /// Faktor des Ausgangsbusses.
     pub master: f32,
+    /// Anzahl benutzter Bus-Puffer.
+    pub buses: usize,
 }
 
 impl Default for Song {
@@ -88,6 +118,7 @@ impl Default for Song {
         Self {
             tracks: Vec::new(),
             master: 1.0,
+            buses: 0,
         }
     }
 }
@@ -103,8 +134,10 @@ impl Song {
                 slot: 0,
                 events: vec![PlayEvent::new(0, length, 0, samples)],
                 notes: Vec::new(),
+                ..Default::default()
             }],
             master: 1.0,
+            buses: 0,
         }
     }
 
@@ -117,7 +150,10 @@ impl Song {
             .iter()
             .enumerate()
             .filter(|(i, t)| {
-                matches!(t.kind, TrackKind::Audio | TrackKind::Instrument) && project.audible(*i)
+                matches!(
+                    t.kind,
+                    TrackKind::Audio | TrackKind::Instrument | TrackKind::Group | TrackKind::Fx
+                ) && project.audible(*i)
             })
             .map(|(slot, t)| {
                 // Wie in klassischen DAWs klingt auf einer Audiospur bei Überlappung nur das
@@ -171,7 +207,10 @@ impl Song {
                     notes.sort_by_key(|n| n.start);
                 }
                 let (gain_l, gain_r) = t.gains();
-                let keep = !events.is_empty() || !t.inserts.is_empty() || t.instrument.is_some();
+                let keep = !events.is_empty()
+                    || !t.inserts.is_empty()
+                    || t.instrument.is_some()
+                    || Project::is_bus(t.kind);
                 (
                     keep,
                     PlayTrack {
@@ -180,6 +219,7 @@ impl Song {
                         slot,
                         events,
                         notes,
+                        ..Default::default()
                     },
                 )
             })
@@ -187,10 +227,102 @@ impl Song {
             .filter(|(keep, _)| *keep)
             .map(|(_, t)| t)
             .collect();
-        Self {
+        let mut song = Self {
             tracks,
             master: db_to_gain(project.master_db),
+            buses: 0,
+        };
+        song.route(project);
+        song
+    }
+
+    /// Busse vergeben, Ausgänge und Sends auflösen und die Reihenfolge so
+    /// festlegen, dass jede Spur nach allen Spuren läuft, die in sie speisen.
+    fn route(&mut self, project: &Project) {
+        let is_bus = |slot: usize| {
+            project
+                .tracks
+                .get(slot)
+                .is_some_and(|t| Project::is_bus(t.kind))
+        };
+        // Bus-Nummern für die Busse in der Liste (stumme Busse fehlen hier).
+        let mut bus_of: HashMap<u32, usize> = HashMap::new();
+        for t in &mut self.tracks {
+            if is_bus(t.slot) && bus_of.len() < MAX_BUSES {
+                let id = project.tracks[t.slot].id;
+                t.bus = Some(bus_of.len());
+                bus_of.insert(id, bus_of.len());
+            }
         }
+        self.buses = bus_of.len();
+        let target = |id: u32| -> Output {
+            match bus_of.get(&id) {
+                Some(&b) => Output::Bus(b),
+                // Ziel stumm oder (noch) nicht hörbar: Signal verwerfen.
+                None if project.track_index(id).is_some() => Output::Nowhere,
+                None => Output::Master,
+            }
+        };
+        for t in &mut self.tracks {
+            let pt = &project.tracks[t.slot];
+            t.output = pt.output.map_or(Output::Master, target);
+            if t.output == Output::Bus(t.bus.unwrap_or(usize::MAX)) {
+                t.output = Output::Master; // Spur auf sich selbst: zur Summe
+            }
+            t.sends = pt
+                .sends
+                .iter()
+                .filter(|s| s.on)
+                .filter_map(|s| match target(s.target) {
+                    Output::Bus(b) if Some(b) != t.bus => Some(PlaySend {
+                        bus: b,
+                        gain: db_to_gain(s.level_db),
+                        pre_fader: s.pre_fader,
+                    }),
+                    _ => None,
+                })
+                .collect();
+        }
+        // Reihenfolge: Quellen zuerst, dann Busse so, dass ein Bus nach allen
+        // Bussen läuft, die in ihn speisen. Schleifen (sollte die Oberfläche
+        // verhindern) werden aufgelöst, indem die schließende Verbindung entfällt.
+        let (mut order, mut buses): (Vec<PlayTrack>, Vec<PlayTrack>) =
+            std::mem::take(&mut self.tracks)
+                .into_iter()
+                .partition(|t| t.bus.is_none());
+        let feeds = |t: &PlayTrack| -> Vec<usize> {
+            let mut v: Vec<usize> = t.sends.iter().map(|s| s.bus).collect();
+            if let Output::Bus(b) = t.output {
+                v.push(b);
+            }
+            v
+        };
+        while !buses.is_empty() {
+            // Ein Bus ist bereit, wenn kein anderer verbleibender Bus in ihn speist.
+            let ready = (0..buses.len()).find(|&i| {
+                let me = buses[i].bus;
+                !buses
+                    .iter()
+                    .enumerate()
+                    .any(|(j, o)| j != i && feeds(o).iter().any(|b| Some(*b) == me))
+            });
+            match ready {
+                Some(i) => order.push(buses.remove(i)),
+                None => {
+                    // Schleife: Verbindungen zwischen den restlichen Bussen kappen.
+                    let rest: Vec<Option<usize>> = buses.iter().map(|b| b.bus).collect();
+                    for b in &mut buses {
+                        b.sends.retain(|s| !rest.contains(&Some(s.bus)));
+                        if let Output::Bus(x) = b.output
+                            && rest.contains(&Some(x))
+                        {
+                            b.output = Output::Master;
+                        }
+                    }
+                }
+            }
+        }
+        self.tracks = order;
     }
 
     /// Mischt alle Spuren mit ihren Faktoren und dem Ausgangsfader in `out`
@@ -287,6 +419,7 @@ mod tests {
             slot,
             events,
             notes: Vec::new(),
+            ..Default::default()
         }
     }
 
@@ -298,6 +431,7 @@ mod tests {
                 track(0.5, 1, vec![PlayEvent::new(0, 3, 0, ones(10, 1.0))]),
             ],
             master: 1.0,
+            buses: 0,
         };
         let mut out = vec![0.0; 16];
         song.mix(&mut out, 0, 8);
@@ -314,6 +448,7 @@ mod tests {
         let song = Song {
             tracks: vec![track(1.0, 0, vec![PlayEvent::new(10, 5, 3, samples)])],
             master: 1.0,
+            buses: 0,
         };
         let mut out = vec![0.0; 8];
         song.mix(&mut out, 12, 4);
@@ -332,6 +467,7 @@ mod tests {
         let song = Song {
             tracks: vec![track(1.0, 0, vec![ev])],
             master: 1.0,
+            buses: 0,
         };
         let mut out = vec![0.0; 16];
         song.mix(&mut out, 0, 8);

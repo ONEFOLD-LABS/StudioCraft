@@ -9,7 +9,7 @@ pub mod model;
 pub mod time;
 
 pub use model::{
-    ClipId, Event, EventId, InsertSlot, MAX_DB, MIN_DB, Note, PoolClip, Project, Track, TrackInput,
-    TrackKind, db_to_gain,
+    ClipId, Event, EventId, InsertSlot, MAX_DB, MIN_DB, Note, PoolClip, Project, SendSlot, Track,
+    TrackId, TrackInput, TrackKind, db_to_gain,
 };
 pub use time::{Position, TICKS_PER_QUARTER, TempoMap, TimeSignature};

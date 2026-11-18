@@ -11,6 +11,7 @@ use std::sync::{
 use studiocraft_project::{Position, TempoMap};
 
 use crate::midi::{MidiMsg, MidiSender, RecordedMidi};
+use crate::song::Output;
 use crate::{InsertChain, MAX_METERED_TRACKS, Meters, Song, Transport, TransportState};
 
 /// Größter Block, den der Kern in einem Stück mischt.
@@ -146,6 +147,8 @@ pub struct EngineCore {
     midi_in: rtrb::Consumer<MidiMsg>,
     midi_rec: rtrb::Producer<RecordedMidi>,
     midi_target: Option<usize>,
+    /// Puffer der Gruppen und FX-Kanäle, vorab angelegt.
+    bus_bufs: Vec<Box<[f32]>>,
     /// Metronom: Frames pro Zählzeit, Zählzeiten pro Takt, ein/aus, Klänge
     /// (0 = Takt-Eins, 1 = übrige Zählzeiten) und der gerade klingende Klick.
     beat_frames: f64,
@@ -202,6 +205,9 @@ pub fn engine(sample_rate: u32, tempo: TempoMap) -> (EngineCore, EngineControl) 
         midi_in: midi_rx,
         midi_rec: rec_tx,
         midi_target: None,
+        bus_bufs: (0..crate::song::MAX_BUSES)
+            .map(|_| vec![0.0; SCRATCH_FRAMES * 2].into_boxed_slice())
+            .collect(),
         beat_frames: f64::from(sample_rate) * 60.0 / tempo.bpm * 4.0
             / f64::from(tempo.signature.denominator),
         beats_per_bar: u64::from(tempo.signature.numerator.max(1)),
@@ -461,17 +467,23 @@ impl EngineCore {
             let panic = std::mem::take(&mut self.panic);
             let dst = &mut out[offset..offset + n];
             let tmp = &mut self.scratch[..n];
+            for b in self.bus_bufs.iter_mut().take(self.song.buses) {
+                b[..n].fill(0.0);
+            }
             for track in &self.song.tracks {
                 let chain = self
                     .inserts
                     .get_mut(track.slot)
                     .and_then(|c| c.as_deref_mut())
                     .filter(|c| c.is_active());
-                if !running && chain.is_none() {
+                // Busse laufen immer (sie sammeln, was andere Spuren schicken).
+                if !running && chain.is_none() && track.bus.is_none() {
                     continue;
                 }
                 tmp.fill(0.0);
-                if running {
+                if let Some(b) = track.bus {
+                    tmp.copy_from_slice(&self.bus_bufs[b][..n]);
+                } else if running {
                     track.render(tmp, pos, frames);
                 }
                 if let Some(chain) = chain {
@@ -520,15 +532,38 @@ impl EngineCore {
                         f[1] = pr[i];
                     }
                 }
+                // Sends vor dem Fader.
+                for send in track.sends.iter().filter(|s| s.pre_fader) {
+                    for (o, t) in self.bus_bufs[send.bus][..n].iter_mut().zip(tmp.iter()) {
+                        *o += t * send.gain;
+                    }
+                }
+                // Fader und Panorama an Ort und Stelle; Pegel messen.
                 let (mut pl, mut pr) = (0.0f32, 0.0f32);
-                for (o, t) in dst.chunks_exact_mut(2).zip(tmp.chunks_exact(2)) {
-                    let (l, r) = (t[0] * track.gain_l, t[1] * track.gain_r);
-                    pl = pl.max(l.abs());
-                    pr = pr.max(r.abs());
-                    o[0] += l;
-                    o[1] += r;
+                for t in tmp.chunks_exact_mut(2) {
+                    t[0] *= track.gain_l;
+                    t[1] *= track.gain_r;
+                    pl = pl.max(t[0].abs());
+                    pr = pr.max(t[1].abs());
                 }
                 self.meters.feed_track(track.slot, pl, pr);
+                // Sends nach dem Fader.
+                for send in track.sends.iter().filter(|s| !s.pre_fader) {
+                    for (o, t) in self.bus_bufs[send.bus][..n].iter_mut().zip(tmp.iter()) {
+                        *o += t * send.gain;
+                    }
+                }
+                // Ausgang.
+                let target: Option<&mut [f32]> = match track.output {
+                    Output::Master => Some(&mut dst[..]),
+                    Output::Bus(b) => Some(&mut self.bus_bufs[b][..n]),
+                    Output::Nowhere => None,
+                };
+                if let Some(target) = target {
+                    for (o, t) in target.iter_mut().zip(tmp.iter()) {
+                        *o += t;
+                    }
+                }
             }
             if running {
                 self.render_click(dst, pos, frames);
@@ -776,6 +811,109 @@ mod tests {
         let mut quiet = vec![0.0f32; 2 * 30_000];
         core.process(&mut quiet);
         assert!(quiet.iter().all(|v| *v == 0.0));
+    }
+
+    /// Projekt mit einer Audio-Spur, deren Clip konstant 1,0 liefert, plus Bussen.
+    fn routed(setup: impl FnOnce(&mut studiocraft_project::Project)) -> f32 {
+        use std::collections::HashMap;
+        use studiocraft_project::{PoolClip, Project, TrackKind};
+        let mut p = Project::default();
+        p.add_track(TrackKind::Audio, "Quelle");
+        let c = p.add_clip(PoolClip {
+            name: "c".into(),
+            path: None,
+            sample_rate: 48_000,
+            frames: 48_000,
+        });
+        p.add_audio_event(0, 0, c).unwrap();
+        setup(&mut p);
+        let clips = HashMap::from([(c, vec![1.0f32; 96_000].into())]);
+        let song = Song::build(&p, &clips, 48_000);
+        let (mut core, mut ctl) = engine(48_000, TempoMap::default());
+        ctl.send(Command::SetSong(Arc::new(song)));
+        ctl.send(Command::Play);
+        let mut out = [0.0f32; 64];
+        core.process(&mut out);
+        out[10]
+    }
+
+    #[test]
+    fn sends_groups_and_solo_safe_buses() {
+        use studiocraft_project::{SendSlot, TrackKind};
+        assert_eq!(routed(|_| {}), 1.0);
+        // Post-Fader-Send 0 dB an einen FX-Kanal mit −6 dB: 1 + 0,5.
+        let v = routed(|p| {
+            let fx = p.add_track(TrackKind::Fx, "Hall");
+            p.tracks[fx].volume_db = -6.0206;
+            let id = p.tracks[fx].id;
+            p.tracks[0].sends.push(SendSlot {
+                target: id,
+                level_db: 0.0,
+                pre_fader: false,
+                on: true,
+            });
+        });
+        assert!((v - 1.5).abs() < 1e-3, "{v}");
+        // Pre-Fader: Quell-Fader ganz zu, Send bleibt.
+        let v = routed(|p| {
+            let fx = p.add_track(TrackKind::Fx, "Hall");
+            let id = p.tracks[fx].id;
+            p.tracks[0].volume_db = studiocraft_project::MIN_DB;
+            p.tracks[0].sends.push(SendSlot {
+                target: id,
+                level_db: 0.0,
+                pre_fader: true,
+                on: true,
+            });
+        });
+        assert_eq!(v, 1.0, "nur der Pre-Fader-Send ist zu hören");
+        // Ausgang auf eine Gruppe mit −6 dB.
+        let v = routed(|p| {
+            let g = p.add_track(TrackKind::Group, "Gruppe");
+            p.tracks[g].volume_db = -6.0206;
+            p.tracks[0].output = Some(p.tracks[g].id);
+        });
+        assert!((v - 0.5).abs() < 1e-3, "{v}");
+        // Gruppe stumm: nichts zu hören (nicht an der Gruppe vorbei zur Summe).
+        let v = routed(|p| {
+            let g = p.add_track(TrackKind::Group, "Gruppe");
+            p.tracks[g].mute = true;
+            p.tracks[0].output = Some(p.tracks[g].id);
+        });
+        assert_eq!(v, 0.0);
+        // Solo auf der Quelle: FX-Kanal bleibt hörbar.
+        let v = routed(|p| {
+            let fx = p.add_track(TrackKind::Fx, "Hall");
+            let id = p.tracks[fx].id;
+            p.add_track(TrackKind::Audio, "andere");
+            p.tracks[0].solo = true;
+            p.tracks[0].sends.push(SendSlot {
+                target: id,
+                level_db: 0.0,
+                pre_fader: false,
+                on: true,
+            });
+        });
+        assert_eq!(v, 2.0);
+        // Verschachtelt: Quelle → Gruppe A → Gruppe B → Summe (Reihenfolge stimmt).
+        let v = routed(|p| {
+            let a = p.add_track(TrackKind::Group, "B (später angelegt, aber Ziel)");
+            let b = p.add_track(TrackKind::Group, "A");
+            let (ia, ib) = (p.tracks[a].id, p.tracks[b].id);
+            p.tracks[0].output = Some(ib);
+            p.tracks[b].output = Some(ia);
+        });
+        assert_eq!(v, 1.0);
+        // Schleife (sollte die Oberfläche verhindern): kein Hänger, Signal kommt an.
+        let v = routed(|p| {
+            let a = p.add_track(TrackKind::Group, "A");
+            let b = p.add_track(TrackKind::Group, "B");
+            let (ia, ib) = (p.tracks[a].id, p.tracks[b].id);
+            p.tracks[0].output = Some(ia);
+            p.tracks[a].output = Some(ib);
+            p.tracks[b].output = Some(ia);
+        });
+        assert!(v.is_finite());
     }
 
     #[test]

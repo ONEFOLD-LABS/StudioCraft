@@ -114,6 +114,12 @@ impl ProjectWindow {
                 if ui.add(audio).clicked() {
                     self.add_audio_track();
                 }
+                if ui.button("Gruppen-Spur hinzufügen").clicked() {
+                    self.add_bus_track(studiocraft_project::TrackKind::Group);
+                }
+                if ui.button("FX-Kanal hinzufügen").clicked() {
+                    self.add_bus_track(studiocraft_project::TrackKind::Fx);
+                }
                 ui.menu_button("Instrument-Spur hinzufügen", |ui| {
                     if let Some(info) = self.instrument_menu(ui) {
                         self.add_instrument_track(info);

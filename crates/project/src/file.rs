@@ -72,7 +72,9 @@ pub fn from_json(text: &str) -> Result<Project, FileError> {
         return Err(FileError::NewerVersion(header.version));
     }
     let file: FileV1 = serde_json::from_str(text).map_err(FileError::Json)?;
-    Ok(file.project)
+    let mut project = file.project;
+    project.ensure_track_ids();
+    Ok(project)
 }
 
 #[cfg(test)]

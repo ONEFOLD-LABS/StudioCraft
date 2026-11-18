@@ -94,6 +94,9 @@ impl Event {
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Track {
+    /// Feste Kennung (für Routing-Ziele); bleibt beim Umsortieren gleich.
+    #[serde(default)]
+    pub id: TrackId,
     pub name: String,
     pub kind: TrackKind,
     pub color: [u8; 3],
@@ -113,7 +116,26 @@ pub struct Track {
     /// Instrument-Spuren: das Instrument-Plugin.
     #[serde(default)]
     pub instrument: Option<InsertSlot>,
+    /// Ausgang: `None` = Summe (Ausgangsbus), sonst eine Gruppen-Spur.
+    #[serde(default)]
+    pub output: Option<TrackId>,
+    /// Sends an FX-Kanäle oder Gruppen (Spec: Sends 1–8).
+    #[serde(default)]
+    pub sends: Vec<SendSlot>,
     pub events: Vec<Event>,
+}
+
+/// Kennung einer Spur.
+pub type TrackId = u32;
+
+/// Ein Send: ein Teil des Signals an einen FX-Kanal oder eine Gruppe.
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct SendSlot {
+    pub target: TrackId,
+    pub level_db: f32,
+    /// Vor dem Fader abgreifen (sonst danach).
+    pub pre_fader: bool,
+    pub on: bool,
 }
 
 /// Ein Insert-Effekt: welches Plugin, ob umgangen, gesetzte Parameter.
@@ -220,6 +242,8 @@ pub struct Project {
     /// Fader des Ausgangsbusses in dB.
     pub master_db: f32,
     next_id: EventId,
+    #[serde(default)]
+    next_track_id: TrackId,
 }
 
 const PALETTE: [[u8; 3]; 8] = [
@@ -241,11 +265,66 @@ impl Default for Project {
             master_db: 0.0,
             tempo: TempoMap::default(),
             next_id: 1,
+            next_track_id: 1,
         }
     }
 }
 
 impl Project {
+    fn new_track_id(&mut self) -> TrackId {
+        self.next_track_id = self.next_track_id.max(1);
+        let id = self.next_track_id;
+        self.next_track_id += 1;
+        id
+    }
+
+    /// Fehlende oder doppelte Spur-Kennungen vergeben (ältere Dateien).
+    pub fn ensure_track_ids(&mut self) {
+        let mut seen = std::collections::HashSet::new();
+        self.next_track_id = self
+            .next_track_id
+            .max(self.tracks.iter().map(|t| t.id).max().unwrap_or(0) + 1);
+        for i in 0..self.tracks.len() {
+            if self.tracks[i].id == 0 || !seen.insert(self.tracks[i].id) {
+                self.tracks[i].id = self.new_track_id();
+                seen.insert(self.tracks[i].id);
+            }
+        }
+    }
+
+    pub fn track_index(&self, id: TrackId) -> Option<usize> {
+        self.tracks.iter().position(|t| t.id == id)
+    }
+
+    /// Ob eine Spur ein Bus ist (Gruppe oder FX-Kanal): Ziel für Sends bzw. Ausgänge.
+    pub fn is_bus(kind: TrackKind) -> bool {
+        matches!(kind, TrackKind::Group | TrackKind::Fx)
+    }
+
+    /// Ob ein Signal von `from` nach `to` geführt werden darf, ohne eine
+    /// Rückkopplungsschleife zu bilden (über Ausgänge und Sends).
+    pub fn can_route(&self, from: TrackId, to: TrackId) -> bool {
+        if from == to {
+            return false;
+        }
+        // Erreicht `to` (über seine Wege) wieder `from`? Dann Schleife.
+        let mut stack = vec![to];
+        let mut seen = std::collections::HashSet::new();
+        while let Some(id) = stack.pop() {
+            if id == from {
+                return false;
+            }
+            if !seen.insert(id) {
+                continue;
+            }
+            if let Some(t) = self.track_index(id).map(|i| &self.tracks[i]) {
+                stack.extend(t.output);
+                stack.extend(t.sends.iter().filter(|s| s.on).map(|s| s.target));
+            }
+        }
+        true
+    }
+
     pub fn next_event_id(&mut self) -> EventId {
         let id = self.next_id;
         self.next_id += 1;
@@ -264,6 +343,7 @@ impl Project {
                 _ => TrackKind::Group,
             };
             let mut track = Track {
+                id: 0,
                 name: format!("{} {}", kind.label(), i + 1),
                 kind,
                 color: PALETTE[i % PALETTE.len()],
@@ -275,6 +355,8 @@ impl Project {
                 input: TrackInput::default(),
                 inserts: Vec::new(),
                 instrument: None,
+                output: None,
+                sends: Vec::new(),
                 events: Vec::new(),
             };
             if kind.holds_events() {
@@ -300,6 +382,7 @@ impl Project {
                     k += 1;
                 }
             }
+            track.id = p.new_track_id();
             p.tracks.push(track);
         }
         p
@@ -523,7 +606,9 @@ impl Project {
 
     pub fn add_track(&mut self, kind: TrackKind, name: impl Into<String>) -> usize {
         let i = self.tracks.len();
+        let id = self.new_track_id();
         self.tracks.push(Track {
+            id,
             name: name.into(),
             kind,
             color: PALETTE[i % PALETTE.len()],
@@ -535,6 +620,8 @@ impl Project {
             input: TrackInput::default(),
             inserts: Vec::new(),
             instrument: None,
+            output: None,
+            sends: Vec::new(),
             events: Vec::new(),
         });
         i
@@ -651,11 +738,12 @@ impl Project {
     }
 
     /// Ob eine Spur zu hören ist: nicht stumm, und bei aktivem Solo selbst Solo.
+    /// Gruppen und FX-Kanäle sind solo-sicher (sonst fehlte bei Solo der Hall).
     pub fn audible(&self, track: usize) -> bool {
         let any_solo = self.tracks.iter().any(|t| t.solo);
         self.tracks
             .get(track)
-            .is_some_and(|t| !t.mute && (!any_solo || t.solo))
+            .is_some_and(|t| !t.mute && (!any_solo || t.solo || Self::is_bus(t.kind)))
     }
 
     /// Ende des letzten Events in Ticks (mindestens ein Takt).
@@ -894,6 +982,40 @@ mod tests {
             "MIDI-Part bleibt bei Takt 2"
         );
         assert_eq!(secs(&p, part), (4.0, 4.0), "… und dauert nun 4 s");
+    }
+
+    #[test]
+    fn track_ids_and_loop_free_routing() {
+        let mut p = Project::default();
+        let a = p.add_track(TrackKind::Audio, "Gesang");
+        let fx = p.add_track(TrackKind::Fx, "Hall");
+        let g = p.add_track(TrackKind::Group, "Gruppe");
+        let (ia, ifx, ig) = (p.tracks[a].id, p.tracks[fx].id, p.tracks[g].id);
+        assert!(ia != ifx && ifx != ig && ia > 0);
+        assert!(p.can_route(ia, ifx));
+        p.tracks[fx].output = Some(ig);
+        assert!(
+            !p.can_route(ig, ifx),
+            "Gruppe → Hall → Gruppe wäre eine Schleife"
+        );
+        assert!(!p.can_route(ig, ig));
+        // Ältere Dateien ohne Kennung bekommen eine.
+        p.tracks[a].id = 0;
+        p.tracks[g].id = ifx;
+        p.ensure_track_ids();
+        let ids: std::collections::HashSet<_> = p.tracks.iter().map(|t| t.id).collect();
+        assert_eq!(ids.len(), 3);
+        assert!(!ids.contains(&0));
+    }
+
+    #[test]
+    fn buses_stay_audible_under_solo() {
+        let mut p = Project::default();
+        p.add_track(TrackKind::Audio, "a");
+        p.add_track(TrackKind::Audio, "b");
+        p.add_track(TrackKind::Fx, "Hall");
+        p.tracks[0].solo = true;
+        assert!(p.audible(0) && !p.audible(1) && p.audible(2));
     }
 
     #[test]
