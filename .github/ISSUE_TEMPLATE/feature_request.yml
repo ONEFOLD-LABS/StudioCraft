@@ -1,0 +1,15 @@
+name: Feature request
+description: Behaviour StudioCraft should have
+labels: [enhancement]
+body:
+  - type: textarea
+    id: behaviour
+    attributes:
+      label: Desired behaviour
+      description: Describe how it should work from the user's point of view. If it mirrors how klassischen DAWs behaves, describe the observed behaviour in your own words (no screenshots or text copied from anderer Hersteller material).
+    validations:
+      required: true
+  - type: textarea
+    id: why
+    attributes:
+      label: Why is it useful?

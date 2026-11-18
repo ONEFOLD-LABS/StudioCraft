@@ -1,0 +1,105 @@
+name: Release
+
+# A tag v* builds packages for every platform that has packaging today and publishes them as a
+# draft GitHub release. workflow_dispatch runs the same builds without publishing.
+# Switch to storytold/craft-common-actions release.yml once packaging/ covers Windows, macOS,
+# FreeBSD and the web.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  linux:
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-22.04, ubuntu-22.04-arm]
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: System packages
+        run: |
+          echo 'deb [trusted=yes] https://repo.goreleaser.com/apt/ /' | sudo tee /etc/apt/sources.list.d/goreleaser.list
+          sudo apt-get update
+          sudo apt-get install -y nfpm zsync desktop-file-utils appstream pkg-config \
+            libasound2-dev libpipewire-0.3-dev libclang-dev libxkbcommon-dev libwayland-dev \
+            libx11-dev libxcb1-dev libxcursor-dev libxrandr-dev libxi-dev libfontconfig1-dev \
+            libfreetype-dev libgl1-mesa-dev
+      - run: packaging/linux/package.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-${{ matrix.runner }}
+          path: dist/release/*
+
+  desktop:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: windows-latest
+            target: x86_64-pc-windows-msvc
+            os: windows-x86_64
+          - runner: macos-latest
+            target: aarch64-apple-darwin
+            os: macos-aarch64
+          - runner: macos-13
+            target: x86_64-apple-darwin
+            os: macos-x86_64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+      - name: Build
+        run: cargo build --release --locked --target ${{ matrix.target }} -p studiocraft -p studiocraft-cli
+      - name: Archive
+        shell: bash
+        run: |
+          version=$(cargo xtask version)
+          name="studiocraft-$version-${{ matrix.os }}"
+          mkdir -p "dist/$name" dist/release
+          cp target/${{ matrix.target }}/release/studiocraft* "dist/$name/" 2>/dev/null || true
+          rm -f dist/$name/*.d dist/$name/*.pdb
+          cp README.md NOTICE LICENSE-MIT LICENSE-APACHE "dist/$name/"
+          if [[ "${{ runner.os }}" == "Windows" ]]; then
+            (cd dist && 7z a "release/$name.zip" "$name")
+          else
+            tar -C dist -czf "dist/release/$name.tar.gz" "$name"
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.os }}
+          path: dist/release/*
+
+  publish:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [linux, desktop]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Checksums
+        run: cd dist && sha256sum * > SHA256SUMS
+      - name: Draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" --draft --generate-notes --title "StudioCraft ${GITHUB_REF_NAME#v}"

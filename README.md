@@ -63,7 +63,11 @@ cargo xtask version [set 0.2.0]     # Version zeigen bzw. setzen
 packaging/linux/package.sh          # dist/release/: AppImage, tar.gz (deb/rpm mit nfpm)
 ```
 
-Die CI läuft über den gemeinsamen Gate-Workflow der Craft-Familie (`storytold/craft-common-actions`). Pakete für Windows, macOS, FreeBSD und das Web folgen.
+Die CI läuft über den gemeinsamen Gate-Workflow der Craft-Familie (`storytold/craft-common-actions`). Ein Tag `v*` baut Linux-Pakete (x86_64, aarch64) und Archive für Windows und macOS als Release-Entwurf. Installer für Windows/macOS sowie FreeBSD und Web folgen.
+
+## Mitmachen
+
+Siehe [CONTRIBUTING.md](CONTRIBUTING.md). Wer mit KI-Agenten arbeitet, liest zusätzlich [AGENTS.md](AGENTS.md). Änderungen an `main` nur per Pull Request.
 
 ## Lizenz
 
