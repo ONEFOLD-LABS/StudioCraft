@@ -162,7 +162,7 @@ impl ProjectWindow {
             };
             let abs = dir.join(&rel);
             clip.path = Some(abs.to_string_lossy().into_owned());
-            match AudioClip::load_wav(&abs) {
+            match AudioClip::load(&abs) {
                 Ok(loaded) => {
                     let loaded = loaded.resampled(self.sample_rate);
                     let peaks = Peaks::new(&loaded.samples);
@@ -208,7 +208,7 @@ impl ProjectWindow {
         let tempo = &self.project.tempo;
         let frames =
             |t: u64| (tempo.seconds(Position(t)) * f64::from(self.sample_rate)).round() as u64;
-        let peak = export::render_wav(&song, self.sample_rate, frames(a), frames(b), path)?;
+        let peak = export::render_file(&song, self.sample_rate, frames(a), frames(b), path)?;
         self.message = (peak > 1.0).then(|| {
             format!(
                 "Export übersteuert (Spitze {:+.1} dBFS) – Ausgang leiser stellen",

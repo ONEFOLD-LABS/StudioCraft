@@ -242,7 +242,7 @@ impl ProjectWindow {
         path: &Path,
         target: Option<(usize, u64)>,
     ) -> Result<EventId, String> {
-        let clip = AudioClip::load_wav(path).map_err(|e| format!("{}: {e}", path.display()))?;
+        let clip = AudioClip::load(path).map_err(|e| format!("{}: {e}", path.display()))?;
         let name = path
             .file_stem()
             .map_or("Audio".into(), |s| s.to_string_lossy().into_owned());
@@ -2092,11 +2092,8 @@ mod tests {
         h.run_steps(1);
         let w = h.state_mut();
         for (t, track) in w.project.tracks.iter().enumerate() {
-            let spans: Vec<(u64, u64)> = track
-                .events
-                .iter()
-                .map(|e| (e.start.0, e.end()))
-                .collect();
+            let spans: Vec<(u64, u64)> =
+                track.events.iter().map(|e| (e.start.0, e.end())).collect();
             assert_eq!(spans, [(0, bar), (2 * bar, 4 * bar)], "Spur {t}");
         }
         assert_eq!(w.range, None);

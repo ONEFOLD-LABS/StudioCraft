@@ -45,6 +45,43 @@ pub fn render_wav(
     Ok(peak)
 }
 
+/// Rendert wie [`render_wav`], das Format folgt der Dateiendung: `.wav`
+/// (24 Bit), `.flac` (24 Bit) oder `.aif`/`.aiff` (24 Bit). Gibt die Spitze zurück.
+pub fn render_file(
+    song: &Song,
+    rate: u32,
+    start: u64,
+    end: u64,
+    path: &Path,
+) -> Result<f32, String> {
+    let ext = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(str::to_ascii_lowercase);
+    let format = match ext.as_deref() {
+        Some("flac") => craft_audio::EncodeFormat::Flac,
+        Some("aif" | "aiff") => craft_audio::EncodeFormat::Aiff,
+        _ => return render_wav(song, rate, start, end, path),
+    };
+    let frames = (end.saturating_sub(start)) as usize;
+    let mut inter = vec![0.0f32; frames * 2];
+    let mut pos = 0usize;
+    while pos < frames {
+        let n = (frames - pos).min(BLOCK);
+        song.mix(&mut inter[pos * 2..(pos + n) * 2], start + pos as u64, n);
+        pos += n;
+    }
+    let peak = inter.iter().fold(0.0f32, |m, s| m.max(s.abs()));
+    for s in &mut inter {
+        *s = s.clamp(-1.0, 1.0);
+    }
+    let buf = craft_audio::AudioBuffer::from_interleaved(rate, 2, &inter);
+    let bytes = craft_audio::encode(&buf, &craft_audio::EncodeOptions::new(format))
+        .map_err(|e| format!("{}: {e}", path.display()))?;
+    std::fs::write(path, bytes).map_err(|e| format!("{}: {e}", path.display()))?;
+    Ok(peak)
+}
+
 /// Speichert verschachteltes Stereo als 32-Bit-Float-WAV (verlustfrei).
 pub fn write_wav_f32(samples: &[f32], rate: u32, path: &Path) -> Result<(), String> {
     write_wav_f32_channels(samples, 2, rate, path)
@@ -98,6 +135,31 @@ mod tests {
         assert!((clip.samples[0] - 0.5).abs() < 1e-5);
         assert!((clip.samples[1] + 0.25).abs() < 1e-5);
         assert_eq!(clip.samples[1800], 0.0, "nach Clip-Ende (Frame 1000) still");
+    }
+
+    #[test]
+    fn flac_and_aiff_export_load_back() {
+        let samples: Arc<[f32]> = (0..4800)
+            .flat_map(|i| {
+                let v = (i as f32 * 0.05).sin() * 0.5;
+                [v, -v]
+            })
+            .collect::<Vec<_>>()
+            .into();
+        let song = Song::single(samples.clone());
+        for ext in ["flac", "aif"] {
+            let path = temp(&format!("mix.{ext}"));
+            render_file(&song, 48_000, 0, 4800, &path).unwrap();
+            let clip = AudioClip::load(&path).unwrap();
+            assert_eq!((clip.sample_rate, clip.frames()), (48_000, 4800), "{ext}");
+            let err = clip
+                .samples
+                .iter()
+                .zip(samples.iter())
+                .map(|(a, b)| (a - b).abs())
+                .fold(0.0f32, f32::max);
+            assert!(err < 1e-5, "{ext}: 24 Bit verlustfrei, Abweichung {err}");
+        }
     }
 
     #[test]

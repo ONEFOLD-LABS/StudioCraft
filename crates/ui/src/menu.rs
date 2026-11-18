@@ -221,7 +221,7 @@ impl ProjectWindow {
 
     fn import_dialog(&mut self) {
         let Some(files) = dialog()
-            .add_filter("WAV-Audio", &["wav", "WAV"])
+            .add_filter("Audiodateien", studiocraft_engine::AudioClip::extensions())
             .pick_files()
         else {
             return;
@@ -243,7 +243,9 @@ impl ProjectWindow {
             .and_then(|p| p.file_stem())
             .map_or("Mixdown".into(), |n| n.to_string_lossy().into_owned());
         match dialog()
-            .add_filter("WAV-Audio (24 Bit)", &["wav"])
+            .add_filter("WAV (24 Bit)", &["wav"])
+            .add_filter("FLAC (24 Bit, verlustfrei komprimiert)", &["flac"])
+            .add_filter("AIFF (24 Bit)", &["aif", "aiff"])
             .set_file_name(format!("{name}.wav"))
             .save_file()
         {

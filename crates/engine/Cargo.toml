@@ -10,6 +10,7 @@ license.workspace = true
 studiocraft-project.workspace = true
 studiocraft-plugin-host.workspace = true
 hound = "3.5"
+craft-audio.workspace = true
 rtrb = "0.4"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]

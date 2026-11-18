@@ -14,18 +14,17 @@ pub struct AudioClip {
 pub enum ClipError {
     Wav(hound::Error),
     UnsupportedChannels(u16),
+    Io(std::io::Error),
+    Decode(String),
 }
 
 impl fmt::Display for ClipError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Wav(e) => write!(f, "WAV-Datei nicht lesbar: {e}"),
-            Self::UnsupportedChannels(n) => {
-                write!(
-                    f,
-                    "{n} Kanäle werden nicht unterstützt (nur Mono und Stereo)"
-                )
-            }
+            Self::UnsupportedChannels(n) => write!(f, "{n} Kanäle werden nicht unterstützt"),
+            Self::Io(e) => write!(f, "Datei nicht lesbar: {e}"),
+            Self::Decode(e) => write!(f, "Audioformat nicht lesbar: {e}"),
         }
     }
 }
@@ -39,6 +38,35 @@ impl From<hound::Error> for ClipError {
 }
 
 impl AudioClip {
+    /// Lädt eine Audiodatei über craft-audio: WAV, AIFF, FLAC, MP3, Ogg/Vorbis,
+    /// Opus, AAC/M4A, CAF u. a. Mono wird auf beide Seiten gelegt, bei mehr als
+    /// zwei Kanälen gelten die ersten beiden.
+    pub fn load(path: impl AsRef<Path>) -> Result<Self, ClipError> {
+        let path = path.as_ref();
+        let bytes = std::fs::read(path).map_err(ClipError::Io)?;
+        let ext = path
+            .extension()
+            .and_then(|e| e.to_str())
+            .map(str::to_ascii_lowercase);
+        let (_, buf) = craft_audio::decode(&bytes, ext.as_deref())
+            .map_err(|e| ClipError::Decode(e.to_string()))?;
+        let l = buf
+            .channels
+            .first()
+            .ok_or(ClipError::UnsupportedChannels(0))?;
+        let r = buf.channels.get(1).unwrap_or(l);
+        let samples: Vec<f32> = l.iter().zip(r).flat_map(|(&a, &b)| [a, b]).collect();
+        Ok(Self {
+            sample_rate: buf.sample_rate,
+            samples: samples.into(),
+        })
+    }
+
+    /// Dateiendungen, die [`Self::load`] kennt (für Dateidialoge).
+    pub fn extensions() -> &'static [&'static str] {
+        craft_audio::DECODE_EXTENSIONS
+    }
+
     /// Lädt eine WAV-Datei (8–32 Bit Integer oder 32 Bit Float, Mono oder Stereo).
     pub fn load_wav(path: impl AsRef<Path>) -> Result<Self, ClipError> {
         let reader = hound::WavReader::open(path)?;
@@ -126,5 +154,21 @@ mod tests {
             samples: vec![0.5; 8].into(),
         };
         assert_eq!(clip.resampled(48_000).samples, clip.samples);
+    }
+}
+
+#[cfg(test)]
+mod any_file {
+    /// Lädt eine beliebige Datei: `STUDIOCRAFT_LOAD=<pfad> cargo test load_any_file -- --ignored --nocapture`
+    #[test]
+    #[ignore = "braucht eine Datei von außen"]
+    fn load_any_file() {
+        let Some(p) = std::env::var_os("STUDIOCRAFT_LOAD") else {
+            return;
+        };
+        match super::AudioClip::load(&p) {
+            Ok(c) => println!("geladen: {} Frames, {} Hz", c.frames(), c.sample_rate),
+            Err(e) => println!("Fehler: {e}"),
+        }
     }
 }
