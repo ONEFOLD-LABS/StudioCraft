@@ -57,6 +57,10 @@ fn main() -> ExitCode {
                 }
             },
             "--audio-host" => host = args.next(),
+            "-V" | "--version" => {
+                println!("studiocraft {}", env!("CARGO_PKG_VERSION"));
+                return ExitCode::SUCCESS;
+            }
             "-h" | "--help" => {
                 println!("{USAGE}");
                 return ExitCode::SUCCESS;

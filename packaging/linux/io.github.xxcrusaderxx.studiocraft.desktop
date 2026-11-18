@@ -1,0 +1,14 @@
+[Desktop Entry]
+Type=Application
+Name=StudioCraft
+GenericName=Digital Audio Workstation
+GenericName[de]=Audio-Workstation
+Comment=Record, arrange and mix music
+Comment[de]=Musik aufnehmen, arrangieren und mischen
+Exec=studiocraft %F
+Icon=studiocraft
+Terminal=false
+Categories=AudioVideo;Audio;Recorder;Mixer;Sequencer;Midi;
+Keywords=DAW;audio;MIDI;recording;mixing;music;
+StartupWMClass=studiocraft
+MimeType=audio/x-wav;audio/wav;audio/flac;audio/mpeg;audio/ogg;audio/aiff;

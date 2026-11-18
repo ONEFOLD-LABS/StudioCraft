@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.xxcrusaderxx.studiocraft</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT OR Apache-2.0</project_license>
+  <name>StudioCraft</name>
+  <summary>Record, arrange and mix music</summary>
+  <summary xml:lang="de">Musik aufnehmen, arrangieren und mischen</summary>
+  <developer id="io.github.xxcrusaderxx">
+    <name>StudioCraft contributors</name>
+  </developer>
+  <description>
+    <p>StudioCraft is a digital audio workstation written in Rust. It records audio and MIDI,
+      arranges events on tracks, mixes with groups, effect channels and CLAP plugins, and exports
+      the mix as WAV, FLAC or AIFF.</p>
+    <p xml:lang="de">StudioCraft ist eine Audio-Workstation in Rust. Sie nimmt Audio und MIDI auf,
+      arrangiert Events auf Spuren, mischt mit Gruppen, FX-Kanälen und CLAP-Plugins und exportiert
+      den Mix als WAV, FLAC oder AIFF.</p>
+  </description>
+  <launchable type="desktop-id">io.github.xxcrusaderxx.studiocraft.desktop</launchable>
+  <icon type="stock">studiocraft</icon>
+  <categories>
+    <category>AudioVideo</category>
+    <category>Audio</category>
+  </categories>
+  <content_rating type="oars-1.1"/>
+  <releases>
+    <release version="@VERSION@" date="@DATE@"/>
+  </releases>
+</component>

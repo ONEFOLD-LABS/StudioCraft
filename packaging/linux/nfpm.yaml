@@ -1,0 +1,16 @@
+# deb und rpm aus dem vorbereiteten Verzeichnisbaum (packaging/linux/package.sh setzt ${STAGE}).
+name: studiocraft
+arch: ${NFPM_ARCH}
+version: ${VERSION}
+maintainer: StudioCraft contributors
+description: Digital audio workstation – record, arrange and mix music
+homepage: https://github.com/xXCrusaderXx/StudioCraft
+license: MIT OR Apache-2.0
+section: sound
+priority: optional
+depends:
+  - libasound2 | alsa-lib
+contents:
+  - src: ${STAGE}/usr/
+    dst: /usr/
+    type: tree

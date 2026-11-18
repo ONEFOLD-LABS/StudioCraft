@@ -55,6 +55,16 @@ F3 blendet den Mixer in der unteren Zone ein und aus: je Kanal Panorama, Mute/So
 
 Benötigt Rust 1.85 oder neuer (Edition 2024). Unter Linux zusätzlich die Entwicklerdateien von ALSA und PipeWire (`libasound`, `libpipewire-0.3`) sowie `clang`. `cargo run -- --list-hosts` zeigt die verfügbaren Audio-Hosts, `--audio-host alsa` wählt einen anderen.
 
+## Prüfen und Pakete bauen
+
+```sh
+cargo xtask ci                      # Formatierung, Clippy ohne Warnungen, alle Tests (wie die CI)
+cargo xtask version [set 0.2.0]     # Version zeigen bzw. setzen
+packaging/linux/package.sh          # dist/release/: AppImage, tar.gz (deb/rpm mit nfpm)
+```
+
+Die CI läuft über den gemeinsamen Gate-Workflow der Craft-Familie (`storytold/craft-common-actions`). Pakete für Windows, macOS, FreeBSD und das Web folgen.
+
 ## Lizenz
 
 Wahlweise unter [MIT](LICENSE-MIT) oder [Apache 2.0](LICENSE-APACHE) lizenziert, wie die anderen Craft-Apps. Siehe [`NOTICE`](NOTICE).

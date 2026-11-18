@@ -1,0 +1,8 @@
+[package]
+name = "xtask"
+description = "Entwicklungsaufgaben: cargo xtask ci | version [set X.Y.Z]"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false

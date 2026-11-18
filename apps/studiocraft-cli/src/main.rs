@@ -59,6 +59,10 @@ fn parse_args() -> Result<Args, String> {
     while let Some(a) = it.next() {
         match a.as_str() {
             "-h" | "--help" => return Err(String::new()),
+            "-V" | "--version" => {
+                println!("studiocraft-cli {}", env!("CARGO_PKG_VERSION"));
+                std::process::exit(0);
+            }
             "--bpm" => args.bpm = num(it.next(), "--bpm")?,
             "--audio-host" => args.host = Some(it.next().ok_or("--audio-host: Name fehlt")?),
             "--list-hosts" => {
