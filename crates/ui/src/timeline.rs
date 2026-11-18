@@ -60,6 +60,11 @@ pub(crate) enum Drag {
     Ruler {
         start: u64,
     },
+    /// Bereichsauswahl aufziehen (Werkzeug 2).
+    Range {
+        row: usize,
+        start: u64,
+    },
     /// Länge am linken bzw. rechten Rand ändern (untere Hälfte des Rands).
     TrimStart {
         id: EventId,
@@ -429,6 +434,18 @@ fn live_drag(w: &mut ProjectWindow, g: &Geo, d: Drag, p: Pos2, mods: egui::Modif
                 w.project.set_fades(id, fin, len.min(ev.length - fin));
             }
         }
+        Drag::Range { row, start } => {
+            let r = g
+                .row_at(p.y.clamp(g.lanes.top(), g.lanes.bottom() - 1.0))
+                .unwrap_or(row);
+            w.range = Some((
+                row.min(r),
+                row.max(r),
+                start.min(snapped),
+                start.max(snapped),
+            ));
+            return;
+        }
         Drag::Move { .. } | Drag::Draw { .. } => return,
     }
     w.dirty = true;
@@ -464,6 +481,11 @@ fn start_drag(w: &mut ProjectWindow, g: &Geo, p: Pos2) -> Option<Drag> {
                 Zone::FadeIn => Drag::FadeIn { id },
                 Zone::FadeOut => Drag::FadeOut { id },
             })
+        }
+        Tool::Range => {
+            let t = w.snap_ticks(ticks);
+            w.range = Some((row, row, t, t));
+            Some(Drag::Range { row, start: t })
         }
         Tool::Draw if w.project.tracks[row].kind.holds_events() => Some(Drag::Draw {
             row,
@@ -503,6 +525,11 @@ fn finish_drag(w: &mut ProjectWindow, g: &Geo, d: Drag, p: Pos2, mods: egui::Mod
     match d {
         Drag::Ruler { .. } => w.send_locators(),
         // Schon während des Ziehens angewendet.
+        Drag::Range { .. } => {
+            if w.range.is_some_and(|(_, _, a, b)| b <= a) {
+                w.range = None;
+            }
+        }
         Drag::TrimStart { .. }
         | Drag::TrimEnd { .. }
         | Drag::FadeIn { .. }
@@ -596,7 +623,23 @@ fn click(w: &mut ProjectWindow, g: &Geo, p: Pos2, mods: egui::Modifiers) {
                 w.selection = vec![id];
             }
         }
-        (Tool::Select, None) => w.selection.clear(),
+        (Tool::Select, None) => {
+            w.selection.clear();
+            w.range = None;
+        }
+        (Tool::Range, _) => w.range = None,
+        (Tool::Glue, Some(id)) => {
+            // Alt: alle folgenden Events dieser Spur ankleben.
+            let mut result = w.project.glue(id);
+            while mods.alt && result.is_ok() {
+                result = w.project.glue(id);
+            }
+            match result {
+                Ok(_) => w.selection = vec![id],
+                Err(e) if !mods.alt => w.message = Some(e.to_owned()),
+                Err(_) => {}
+            }
+        }
         (Tool::Split, Some(id)) => {
             let at = if mods.alt {
                 ticks as u64
@@ -738,6 +781,26 @@ fn paint_lanes(w: &ProjectWindow, painter: &Painter, g: &Geo) {
         }
     }
     paint_recording(w, painter, g);
+    if let Some((r0, r1, a, b)) = w.range {
+        let rect = Rect::from_min_max(
+            pos2(g.x(a as f64), g.row_top(r0)),
+            pos2(
+                g.x(b as f64).max(g.x(a as f64) + 1.0),
+                g.row_top(r1) + g.view.row_h,
+            ),
+        );
+        painter.rect_filled(
+            rect,
+            0.0,
+            Color32::from_rgba_unmultiplied(120, 170, 255, 50),
+        );
+        painter.rect_stroke(
+            rect,
+            0.0,
+            Stroke::new(1.0, Color32::from_rgb(140, 185, 255)),
+            StrokeKind::Inside,
+        );
+    }
     paint_drag_preview(w, painter, g);
 }
 

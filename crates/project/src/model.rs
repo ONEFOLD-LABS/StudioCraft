@@ -713,6 +713,88 @@ impl Project {
         Some(id)
     }
 
+    /// Das zeitlich nächste Event auf derselben Spur (beginnt am oder nach dem Start von `id`).
+    fn next_on_track(&self, id: EventId) -> Option<EventId> {
+        let (t, i) = self.find(id)?;
+        let me = &self.tracks[t].events[i];
+        self.tracks[t]
+            .events
+            .iter()
+            .filter(|e| e.id != id && (e.start.0, e.id) > (me.start.0, me.id))
+            .min_by_key(|e| (e.start.0, e.id))
+            .map(|e| e.id)
+    }
+
+    /// Kleben (Werkzeug 4): verbindet ein Event mit dem nächsten auf der Spur.
+    /// MIDI-Parts werden zu einem Part mit allen Noten (Lücken bleiben leer).
+    /// Audio nur, wenn das Material direkt anschließt (gleicher Clip, nahtlos).
+    /// Gibt das verbleibende Event zurück.
+    pub fn glue(&mut self, id: EventId) -> Result<EventId, &'static str> {
+        let next = self
+            .next_on_track(id)
+            .ok_or("kein folgendes Event auf der Spur")?;
+        let (a, b) = (
+            self.event(id).cloned().ok_or("Event fehlt")?,
+            self.event(next).cloned().ok_or("Event fehlt")?,
+        );
+        let midi = a.clip.is_none() && b.clip.is_none();
+        if !midi {
+            let rate = a
+                .clip
+                .and_then(|c| self.pool.get(c as usize))
+                .map(|c| c.sample_rate)
+                .ok_or("Clip fehlt")?;
+            let seamless = a.clip == b.clip
+                && b.start.0 == a.end()
+                && b.offset == a.offset + self.tempo.frames(a.length, rate);
+            if !seamless {
+                return Err("Audio lässt sich nur kleben, wenn das Material direkt anschließt");
+            }
+        }
+        let shift = (b.start.0 - a.start.0) as i64;
+        let end = a.end().max(b.end());
+        let ev = self.event_mut(id).ok_or("Event fehlt")?;
+        ev.length = end - ev.start.0;
+        ev.fade_out = b.fade_out;
+        ev.notes.extend(b.notes.iter().map(|n| Note {
+            start: n.start + shift,
+            ..*n
+        }));
+        self.delete(next);
+        Ok(id)
+    }
+
+    /// Löscht alles im Zeitbereich `t0..t1` auf den Spuren `rows` (Bereichsauswahl
+    /// + Entf). Angeschnittene Events werden an den Rändern geteilt.
+    pub fn delete_range(&mut self, rows: std::ops::RangeInclusive<usize>, t0: u64, t1: u64) {
+        if t1 <= t0 {
+            return;
+        }
+        for t in rows {
+            let Some(track) = self.tracks.get(t) else {
+                continue;
+            };
+            let hit: Vec<EventId> = track
+                .events
+                .iter()
+                .filter(|e| e.start.0 < t1 && e.end() > t0)
+                .map(|e| e.id)
+                .collect();
+            for id in hit {
+                let mut cur = id;
+                if self.event(cur).is_some_and(|e| e.start.0 < t0)
+                    && let Some(right) = self.split(cur, t0)
+                {
+                    cur = right;
+                }
+                if self.event(cur).is_some_and(|e| e.end() > t1) {
+                    self.split(cur, t1);
+                }
+                self.delete(cur);
+            }
+        }
+    }
+
     /// Neues Tempo. Wie in klassischen DAWs: Audio-Events behalten ihre Zeitposition
     /// (lineare Zeitbasis), MIDI-Parts ihre Taktposition (musikalisch).
     pub fn set_tempo(&mut self, bpm: f64) {
@@ -1016,6 +1098,73 @@ mod tests {
         p.add_track(TrackKind::Fx, "Hall");
         p.tracks[0].solo = true;
         assert!(p.audible(0) && !p.audible(1) && p.audible(2));
+    }
+
+    #[test]
+    fn delete_range_cuts_out_the_middle() {
+        let q = TICKS_PER_QUARTER;
+        let (mut p, c) = pool_project(); // Clip = 1 Takt = 4 Viertel
+        let id = p.add_audio_event(0, 0, c).unwrap();
+        p.delete_range(0..=0, q, 2 * q);
+        let spans: Vec<(u64, u64, u64)> = p.tracks[0]
+            .events
+            .iter()
+            .map(|e| (e.start.0, e.length, e.offset))
+            .collect();
+        assert_eq!(
+            spans,
+            [(0, q, 0), (2 * q, 2 * q, 48_000)],
+            "Mitte weg, rechter Teil passt zum Material"
+        );
+        assert_eq!(p.tracks[0].events[0].id, id);
+        // Ganz umschlossen: verschwindet.
+        p.delete_range(0..=0, 0, 10 * q);
+        assert!(p.tracks[0].events.is_empty());
+    }
+
+    #[test]
+    fn glue_parts_and_seamless_audio() {
+        let q = TICKS_PER_QUARTER;
+        // MIDI: zwei Parts mit Lücke werden einer, Noten an ihrer Stelle.
+        let mut p = Project::default();
+        let t = p.add_track(TrackKind::Instrument, "Synth");
+        let a = p.create_event(t, 0, 2 * q).unwrap();
+        let b = p.create_event(t, 4 * q, 2 * q).unwrap();
+        p.event_mut(a).unwrap().notes.push(Note {
+            pitch: 60,
+            velocity: 100,
+            start: 0,
+            length: q,
+        });
+        p.event_mut(b).unwrap().notes.push(Note {
+            pitch: 64,
+            velocity: 100,
+            start: 0,
+            length: q,
+        });
+        assert_eq!(p.glue(a), Ok(a));
+        let ev = p.event(a).unwrap();
+        assert_eq!(ev.length, 6 * q);
+        assert_eq!(
+            ev.notes
+                .iter()
+                .map(|n| (n.pitch, n.start))
+                .collect::<Vec<_>>(),
+            [(60, 0), (64, 4 * q as i64)]
+        );
+        assert!(p.event(b).is_none());
+        assert!(p.glue(a).is_err(), "nichts mehr dahinter");
+        // Audio: Teilen und wieder kleben ergibt das Original.
+        let (mut p, c) = pool_project();
+        let id = p.add_audio_event(0, 0, c).unwrap();
+        let original = p.event(id).unwrap().clone();
+        p.split(id, q);
+        assert_eq!(p.glue(id), Ok(id));
+        assert_eq!(p.event(id).unwrap(), &original);
+        // Audio mit Lücke: nicht klebbar.
+        let r = p.split(id, q).unwrap();
+        p.move_event(r, 0, 3 * q, false);
+        assert!(p.glue(id).is_err());
     }
 
     #[test]

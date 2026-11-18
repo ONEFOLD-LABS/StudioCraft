@@ -107,6 +107,8 @@ pub struct ProjectWindow {
     /// Die laufende Aufnahme schreibt auch Audio.
     audio_recording: bool,
     metronome: bool,
+    /// Bereichsauswahl (Werkzeug 2): erste/letzte Spur, Anfang/Ende in Ticks.
+    range: Option<(usize, usize, u64, u64)>,
     /// Zuletzt an die Engine gemeldetes Tempo.
     sent_tempo: Option<studiocraft_project::TempoMap>,
     /// Projektstand vor einer laufenden Tempo-Eingabe (ein Undo-Schritt pro Eingabe).
@@ -174,6 +176,7 @@ impl ProjectWindow {
             midi_take: Vec::new(),
             audio_recording: false,
             metronome: false,
+            range: None,
             sent_tempo: None,
             tempo_before: None,
         };
@@ -405,7 +408,37 @@ impl ProjectWindow {
         }
     }
 
+    /// P: Locatoren auf die Bereichsauswahl bzw. die ausgewählten Events setzen.
+    pub(crate) fn locators_to_selection(&mut self) {
+        let span = match self.range {
+            Some((_, _, a, b)) => Some((a, b)),
+            None => {
+                let evs: Vec<_> = self
+                    .selection
+                    .iter()
+                    .filter_map(|&id| self.project.event(id))
+                    .collect();
+                let a = evs.iter().map(|e| e.start.0).min();
+                let b = evs.iter().map(|e| e.end()).max();
+                a.zip(b)
+            }
+        };
+        if let Some((a, b)) = span.filter(|(a, b)| b > a) {
+            self.left_locator = a;
+            self.right_locator = b;
+            self.send_locators();
+        }
+    }
+
     pub(crate) fn delete_selection(&mut self) {
+        if let Some((r0, r1, a, b)) = self.range.take() {
+            let before = self.project.clone();
+            self.project.delete_range(r0..=r1, a, b);
+            self.selection
+                .retain(|&id| self.project.event(id).is_some());
+            self.checkpoint(before);
+            return;
+        }
         let before = self.project.clone();
         for id in std::mem::take(&mut self.selection) {
             self.project.delete(id);
@@ -480,6 +513,7 @@ impl ProjectWindow {
                 Key::F3,
                 Key::O,
                 Key::C,
+                Key::P,
                 Key::Z,
                 Key::Y,
             ] {
@@ -536,6 +570,7 @@ impl ProjectWindow {
                 Key::I => self.punch_in = !self.punch_in,
                 Key::O => self.punch_out = !self.punch_out,
                 Key::C => self.toggle_metronome(),
+                Key::P => self.locators_to_selection(),
                 _ => {}
             }
         }
@@ -2031,6 +2066,76 @@ mod tests {
         assert!(!w.project.can_route(a, b), "A → B wäre eine Schleife");
         w.undo();
         assert_eq!(w.project.tracks.len(), 1);
+    }
+
+    #[test]
+    fn range_tool_delete_and_locators() {
+        let mut w = ProjectWindow::new(Project::default(), None, String::new());
+        let bar = w.bar_ticks();
+        w.import_clip("A", None, tone_clip(8.0, 110.0), None)
+            .unwrap(); // Takt 1–5
+        w.import_clip("B", None, tone_clip(8.0, 220.0), None)
+            .unwrap();
+        w.clear_history();
+        let mut h = window_harness(w);
+        h.state_mut().tool = Tool::Range;
+        // Von Takt 2 auf Spur A bis Takt 3 auf Spur B ziehen.
+        drag(&mut h, (bar, 0.5), (2 * bar, 1.5), 0.0);
+        assert_eq!(h.state().range, Some((0, 1, bar, 2 * bar)));
+        h.key_press(Key::P);
+        h.run_steps(1);
+        assert_eq!(
+            (h.state().left_locator, h.state().right_locator),
+            (bar, 2 * bar)
+        );
+        h.key_press(Key::Delete);
+        h.run_steps(1);
+        let w = h.state_mut();
+        for t in 0..2 {
+            let spans: Vec<(u64, u64)> = w.project.tracks[t]
+                .events
+                .iter()
+                .map(|e| (e.start.0, e.end()))
+                .collect();
+            assert_eq!(spans, [(0, bar), (2 * bar, 4 * bar)], "Spur {t}");
+        }
+        assert_eq!(w.range, None);
+        w.undo();
+        assert!(w.project.tracks.iter().all(|t| t.events.len() == 1));
+    }
+
+    #[test]
+    fn glue_tool_joins_parts() {
+        let mut w = ProjectWindow::new(Project::default(), None, String::new());
+        w.add_instrument_track(None);
+        let q = TICKS_PER_QUARTER;
+        w.project.create_event(0, 0, 2 * q).unwrap();
+        w.project.create_event(0, 4 * q, 2 * q).unwrap();
+        w.clear_history();
+        let mut h = window_harness(w);
+        h.state_mut().tool = Tool::Glue;
+        let pos = {
+            let w = h.state();
+            let r = w.lanes_rect;
+            egui::pos2(
+                r.left() + w.view.px_per_quarter * 0.5,
+                r.top() + w.view.row_h * 0.6,
+            )
+        };
+        h.event(egui::Event::PointerMoved(pos));
+        h.run_steps(1);
+        let button = |pressed| egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        h.event(button(true));
+        h.event(button(false));
+        h.run_steps(2);
+        let evs = &h.state().project.tracks[0].events;
+        assert_eq!(evs.len(), 1);
+        assert_eq!(evs[0].length, 6 * q);
     }
 
     #[test]

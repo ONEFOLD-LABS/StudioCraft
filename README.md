@@ -29,7 +29,7 @@ cargo run --release -p studiocraft -- Song/Song.studiocraft  # Projekt öffnen
 cargo run -p studiocraft-cli -- <datei.wav> --loop 1 5  # Kommandozeile: Enter = Start/Stopp, q = Ende
 ```
 
-Bedienung im Projektfenster: Tasten 1–0 wählen Werkzeuge (Auswahl, Trennen, Löschen, Stumm, Zeichnen, Zoom, Wiedergabe sind aktiv), Leertaste Start/Stopp, `/` Cycle, J Snap, H/G Zoom, Strg + Mausrad Zoom, Umschalt + Mausrad horizontal. Im Lineal: Klick setzt den Cursor, Ziehen den Cycle-Bereich, Strg/Alt + Klick den linken/rechten Locator. Events mit Strg + Ziehen kopieren, Alt hebt Snap auf. WAV-Dateien lassen sich ins Projektfenster ziehen: auf eine Audio-Spur an die Mausposition, sonst auf eine neue Spur. Mute und Solo wirken sofort auf die Wiedergabe.
+Bedienung im Projektfenster: Tasten 1–0 wählen Werkzeuge (alle außer Zeitkorrektur sind aktiv: Bereichsauswahl mit Entf zum Herausschneiden, Kleben verbindet mit dem nächsten Event, Alt+Klick mit allen folgenden; P setzt die Locatoren auf die Auswahl), Leertaste Start/Stopp, `/` Cycle, J Snap, H/G Zoom, Strg + Mausrad Zoom, Umschalt + Mausrad horizontal. Im Lineal: Klick setzt den Cursor, Ziehen den Cycle-Bereich, Strg/Alt + Klick den linken/rechten Locator. Events mit Strg + Ziehen kopieren, Alt hebt Snap auf. WAV-Dateien lassen sich ins Projektfenster ziehen: auf eine Audio-Spur an die Mausposition, sonst auf eine neue Spur. Mute und Solo wirken sofort auf die Wiedergabe.
 
 Mit dem Auswahl-Werkzeug hat jedes Event Smart-Bereiche: am Rand in der unteren Hälfte die Länge ändern, in der oberen Hälfte Fade-In/Fade-Out ziehen (auch an den Griffen des ausgewählten Events). Strg+Z macht rückgängig, Strg+Umschalt+Z (oder Strg+Y) stellt wieder her.
 
