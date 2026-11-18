@@ -106,29 +106,89 @@ impl ProjectWindow {
         }
     }
 
+    fn armed_instruments(&self) -> Vec<usize> {
+        (0..self.project.tracks.len())
+            .filter(|&i| {
+                let t = &self.project.tracks[i];
+                t.kind == TrackKind::Instrument && t.record
+            })
+            .collect()
+    }
+
+    /// Ziel des MIDI-Keyboards: aufnahmebereite Instrument-Spur, sonst die ausgewählte.
+    pub(crate) fn midi_target(&self) -> Option<usize> {
+        self.armed_instruments().first().copied().or_else(|| {
+            self.selected_track.filter(|&t| {
+                self.project
+                    .tracks
+                    .get(t)
+                    .is_some_and(|t| t.kind == TrackKind::Instrument)
+            })
+        })
+    }
+
+    /// Öffnet alle MIDI-Eingänge (Keyboard). Ohne Engine nichts zu tun.
+    pub fn open_midi_inputs(&mut self) {
+        let Some(t) = &self.transport else { return };
+        match studiocraft_engine::midi::MidiInputs::open_all(&t.midi) {
+            Ok(m) if m.ports.is_empty() => self.midi_status = "MIDI: kein Eingang".into(),
+            Ok(m) => {
+                self.midi_status = format!("MIDI: {}", m.ports.join(", "));
+                self.midi_inputs = Some(m);
+            }
+            Err(e) => self.midi_status = e,
+        }
+    }
+
+    /// Je Frame: Keyboard-Ziel nachführen, aufgenommene Noten abholen.
+    pub(crate) fn sync_midi(&mut self) {
+        let target = self.midi_target();
+        if self.midi_target_sent != Some(target) {
+            self.midi_target_sent = Some(target);
+            self.send(Command::SetMidiTarget(target));
+        }
+        if let Some(t) = &mut self.transport {
+            while let Ok(m) = t.recorded_midi.pop() {
+                if self.recording {
+                    self.midi_take.push(m);
+                }
+            }
+        }
+    }
+
     pub(crate) fn start_recording(&mut self) {
         if self.recording || self.transport.is_none() {
             return;
         }
-        let armed = self.armed_tracks();
-        if armed.is_empty() {
-            self.message = Some("Keine Audio-Spur aufnahmebereit (R im Spurkopf)".into());
+        let audio = self.armed_tracks();
+        let midi = self.armed_instruments();
+        if audio.is_empty() && midi.is_empty() {
+            self.message = Some("Keine Spur aufnahmebereit (R im Spurkopf)".into());
             return;
         }
-        if let Err(e) = self.ensure_input() {
-            self.message = Some(format!("Aufnahme nicht möglich: {e}"));
-            return;
+        self.audio_recording = false;
+        if !audio.is_empty() {
+            if let Err(e) = self.ensure_input() {
+                self.message = Some(format!("Aufnahme nicht möglich: {e}"));
+                return;
+            }
+            let dir = self.recording_dir();
+            if let Err(e) = std::fs::create_dir_all(&dir) {
+                self.message = Some(format!("{}: {e}", dir.display()));
+                return;
+            }
+            let path = unique_name(&dir, "Aufnahme.wav");
+            if let Some(r) = &self.recorder {
+                self.overruns_at_start = r.overruns.load(std::sync::atomic::Ordering::Relaxed);
+                r.start(&path);
+                self.audio_recording = true;
+            }
         }
-        let dir = self.recording_dir();
-        if let Err(e) = std::fs::create_dir_all(&dir) {
-            self.message = Some(format!("{}: {e}", dir.display()));
-            return;
+        // Alte, nicht abgeholte Noten verwerfen.
+        if let Some(t) = &mut self.transport {
+            while t.recorded_midi.pop().is_ok() {}
         }
-        let path = unique_name(&dir, "Aufnahme.wav");
-        if let Some(r) = &self.recorder {
-            self.overruns_at_start = r.overruns.load(std::sync::atomic::Ordering::Relaxed);
-            r.start(&path);
-        }
+        self.midi_take.clear();
         self.send(Command::Record);
         self.recording = true;
         self.message = None;
@@ -136,22 +196,41 @@ impl ProjectWindow {
 
     /// Beendet die Aufnahme (falls eine läuft) und legt die Takes an.
     pub(crate) fn stop_transport(&mut self) {
+        let stop_pos = self.transport.as_ref().map_or(0, |t| t.status.cursor());
         self.send(Command::Stop);
         if !self.recording {
             return;
         }
         self.recording = false;
+        let status = self
+            .transport
+            .as_ref()
+            .map(|t| (t.status.rec_start(), t.status.rec_played_at()));
+        let (cursor, played_at) = status.unwrap_or((0, None));
+
+        // MIDI: noch Unterwegs-Befindliches abholen, dann Part anlegen.
+        if let Some(t) = &mut self.transport {
+            while let Ok(m) = t.recorded_midi.pop() {
+                self.midi_take.push(m);
+            }
+        }
+        let take = std::mem::take(&mut self.midi_take);
+        if let Some(track) = self.armed_instruments().first().copied()
+            && !take.is_empty()
+        {
+            self.place_midi_take(track, &take, cursor, stop_pos.max(cursor));
+        }
+
+        if !self.audio_recording {
+            return;
+        }
+        self.audio_recording = false;
         let Some(rec) = self.recorder.as_ref() else {
             return;
         };
         let overruns =
             rec.overruns.load(std::sync::atomic::Ordering::Relaxed) - self.overruns_at_start;
         let result = rec.stop();
-        let status = self
-            .transport
-            .as_ref()
-            .map(|t| (t.status.rec_start(), t.status.rec_played_at()));
-        let (cursor, played_at) = status.unwrap_or((0, None));
         let rate = self.sample_rate;
         match result.and_then(|r| {
             // Latenzausgleich: dorthin legen, wo das Gespielte zum Gehörten passt.
@@ -173,8 +252,94 @@ impl ProjectWindow {
         }
     }
 
-    /// Legt eine fertige Aufnahme auf alle aufnahmebereiten Audio-Spuren.
-    /// `start` ist die Projektposition des ersten Frames. Gibt die Zahl der Takes zurück.
+    /// Baut aus aufgenommenen Noten einen Part (obenauf). `start`/`stop`: Aufnahmebereich
+    /// in Frames. Im Cycle umfasst der Part den Cycle-Bereich und mischt alle Durchgänge.
+    pub(crate) fn place_midi_take(
+        &mut self,
+        track: usize,
+        take: &[studiocraft_engine::midi::RecordedMidi],
+        start: u64,
+        stop: u64,
+    ) {
+        let rate = self.sample_rate;
+        let tempo = self.project.tempo.clone();
+        let ticks = |f: u64| tempo.ticks(f, rate);
+        // Noten aus An/Aus-Paaren; offene Noten enden beim Stopp.
+        let mut open: [Option<(u64, u8)>; 128] = [None; 128];
+        let mut notes: Vec<(u64, u64, u8, u8)> = Vec::new();
+        for m in take {
+            let k = usize::from(m.key);
+            if m.on {
+                if let Some((s, v)) = open[k].take() {
+                    notes.push((s, m.pos.max(s + 1), m.key, v));
+                }
+                open[k] = Some((m.pos, m.velocity));
+            } else if let Some((s, v)) = open[k].take() {
+                // Im Cycle kann das Aus hinter dem Sprung liegen: dann bis zum rechten Locator.
+                let end = if m.pos > s {
+                    m.pos
+                } else {
+                    tempo.frames(self.right_locator, rate).max(s + 1)
+                };
+                notes.push((s, end, m.key, v));
+            }
+        }
+        for (k, o) in open.iter().enumerate() {
+            if let Some((s, v)) = *o {
+                notes.push((s, stop.max(s + 1), k as u8, v));
+            }
+        }
+        if notes.is_empty() {
+            return;
+        }
+        let bar = self.bar_ticks();
+        let (mut part_start, mut part_end) = if self.cycle && self.right_locator > self.left_locator
+        {
+            (self.left_locator, self.right_locator)
+        } else {
+            let first = notes.iter().map(|n| n.0).min().unwrap_or(start).min(start);
+            let last = notes.iter().map(|n| n.1).max().unwrap_or(stop).max(stop);
+            (ticks(first) / bar * bar, ticks(last).div_ceil(bar) * bar)
+        };
+        if self.punch_in && self.right_locator > self.left_locator {
+            part_start = part_start.max(self.left_locator);
+        }
+        if self.punch_out && self.right_locator > self.left_locator {
+            part_end = part_end.min(self.right_locator);
+        }
+        if part_end <= part_start {
+            return;
+        }
+        let before = self.project.clone();
+        let Some(id) = self
+            .project
+            .create_event(track, part_start, part_end - part_start)
+        else {
+            return;
+        };
+        // Obenauf legen (zuletzt in der Liste) und Noten eintragen.
+        let i = self.project.find(id).map(|(_, i)| i).unwrap_or(0);
+        let mut ev = self.project.tracks[track].events.remove(i);
+        ev.name = format!(
+            "{} {:02}",
+            self.project.tracks[track].name,
+            self.project.tracks[track].events.len() + 1
+        );
+        ev.notes = notes
+            .into_iter()
+            .map(|(a, b, key, v)| studiocraft_project::Note {
+                pitch: key,
+                velocity: v.max(1),
+                start: ticks(a) as i64 - part_start as i64,
+                length: ticks(b).saturating_sub(ticks(a)).max(1),
+            })
+            .filter(|n| n.start >= 0 && n.start < (part_end - part_start) as i64)
+            .collect();
+        self.project.tracks[track].events.push(ev);
+        self.selection = vec![id];
+        self.checkpoint(before);
+    }
+
     /// `skip`: so viele Frames am Anfang der Aufnahme fallen weg (lagen vor Projektbeginn).
     pub(crate) fn place_recording(
         &mut self,

@@ -10,6 +10,7 @@ use std::sync::{
 
 use studiocraft_project::{Position, TempoMap};
 
+use crate::midi::{MidiMsg, MidiSender, RecordedMidi};
 use crate::{InsertChain, MAX_METERED_TRACKS, Meters, Song, Transport, TransportState};
 
 /// Größter Block, den der Kern in einem Stück mischt.
@@ -26,6 +27,8 @@ pub enum Command {
     /// Note live spielen (Anspielen im Editor, MIDI-Keyboard): Spur, Taste,
     /// Anschlag 0–127, an/aus. Klingt am Anfang des nächsten Blocks.
     LiveNote(usize, u8, u8, bool),
+    /// Ziel für das MIDI-Keyboard (Projektspur), `None`: niemand.
+    SetMidiTarget(Option<usize>),
     /// Insert umgehen oder wieder einschalten: Spur, Slot, umgangen.
     SetBypass(usize, usize, bool),
     /// Neue Abspielliste. Die alte geht über die Rückgabe-Queue an die
@@ -83,6 +86,10 @@ pub struct EngineControl {
     commands: rtrb::Producer<Command>,
     garbage: rtrb::Consumer<Arc<Song>>,
     plugin_garbage: rtrb::Consumer<Box<InsertChain>>,
+    /// Schreibzugang für MIDI-Eingänge (Keyboard).
+    pub midi: MidiSender,
+    /// Während der Aufnahme gespielte Noten (vom Audio-Thread).
+    pub recorded_midi: rtrb::Consumer<RecordedMidi>,
     pub status: Arc<EngineStatus>,
     pub meters: Arc<Meters>,
     pub tempo: TempoMap,
@@ -123,6 +130,9 @@ pub struct EngineCore {
     commands: rtrb::Consumer<Command>,
     garbage: rtrb::Producer<Arc<Song>>,
     plugin_garbage: rtrb::Producer<Box<InsertChain>>,
+    midi_in: rtrb::Consumer<MidiMsg>,
+    midi_rec: rtrb::Producer<RecordedMidi>,
+    midi_target: Option<usize>,
     /// Inserts je Projektspur, vorab angelegt (Austausch ohne Allokation).
     inserts: Vec<Option<Box<InsertChain>>>,
     /// Getrennte Kanäle für die Insert-Verarbeitung.
@@ -144,6 +154,8 @@ pub fn engine(sample_rate: u32, tempo: TempoMap) -> (EngineCore, EngineControl) 
     let (producer, consumer) = rtrb::RingBuffer::new(256);
     let (garbage_tx, garbage_rx) = rtrb::RingBuffer::new(64);
     let (plugin_tx, plugin_rx) = rtrb::RingBuffer::new(64);
+    let (midi_tx, midi_rx) = rtrb::RingBuffer::new(1024);
+    let (rec_tx, rec_rx) = rtrb::RingBuffer::new(8192);
     let status = Arc::new(EngineStatus::default());
     let meters = Arc::new(Meters::default());
     let core = EngineCore {
@@ -153,6 +165,9 @@ pub fn engine(sample_rate: u32, tempo: TempoMap) -> (EngineCore, EngineControl) 
         commands: consumer,
         garbage: garbage_tx,
         plugin_garbage: plugin_tx,
+        midi_in: midi_rx,
+        midi_rec: rec_tx,
+        midi_target: None,
         inserts: (0..MAX_METERED_TRACKS).map(|_| None).collect(),
         held: vec![0; MAX_METERED_TRACKS],
         panic: false,
@@ -169,6 +184,8 @@ pub fn engine(sample_rate: u32, tempo: TempoMap) -> (EngineCore, EngineControl) 
         commands: producer,
         garbage: garbage_rx,
         plugin_garbage: plugin_rx,
+        midi: std::sync::Arc::new(std::sync::Mutex::new(midi_tx)),
+        recorded_midi: rec_rx,
         status,
         meters,
         tempo,
@@ -245,6 +262,13 @@ impl EngineCore {
                     }
                 }
             }
+            Command::SetMidiTarget(t) => {
+                // Gehaltene Noten des alten Ziels beenden.
+                if self.midi_target != t {
+                    self.panic = true;
+                }
+                self.midi_target = t;
+            }
             Command::SetBypass(track, slot, bypass) => {
                 if let Some(Some(chain)) = self.inserts.get_mut(track)
                     && let Some(ins) = chain.slot_mut(slot)
@@ -260,6 +284,30 @@ impl EngineCore {
     pub fn process(&mut self, out: &mut [f32]) {
         while let Ok(cmd) = self.commands.pop() {
             self.apply(cmd);
+        }
+
+        // Keyboard: live an das Ziel, während der Aufnahme mit Position mitschreiben.
+        while let Ok(m) = self.midi_in.pop() {
+            let Some(track) = self.midi_target else {
+                continue;
+            };
+            if let Some(Some(chain)) = self.inserts.get_mut(track) {
+                chain.note(0, m.key, f32::from(m.velocity) / 127.0, m.on);
+                let held = &mut self.held[track.min(MAX_METERED_TRACKS - 1)];
+                if m.on {
+                    *held |= 1 << m.key;
+                } else {
+                    *held &= !(1 << m.key);
+                }
+            }
+            if self.transport.state == TransportState::Recording {
+                let _ = self.midi_rec.push(RecordedMidi {
+                    pos: self.transport.cursor,
+                    key: m.key,
+                    velocity: m.velocity,
+                    on: m.on,
+                });
+            }
         }
 
         out.fill(0.0);
@@ -483,6 +531,41 @@ mod tests {
             504,
             "Aufnahme läuft wie Wiedergabe weiter"
         );
+    }
+
+    #[test]
+    fn keyboard_notes_are_recorded_with_position() {
+        let (mut core, mut ctl) = ramp(10);
+        ctl.send(Command::SetMidiTarget(Some(0)));
+        ctl.send(Command::Locate(1000));
+        ctl.send(Command::Record);
+        core.process(&mut [0.0; 8]);
+        {
+            let mut m = ctl.midi.lock().unwrap();
+            m.push(crate::midi::MidiMsg {
+                key: 60,
+                velocity: 90,
+                on: true,
+            })
+            .unwrap();
+        }
+        core.process(&mut [0.0; 8]);
+        let r = ctl.recorded_midi.pop().unwrap();
+        assert_eq!((r.pos, r.key, r.velocity, r.on), (1004, 60, 90, true));
+        // Ohne Aufnahme wird nichts mitgeschrieben.
+        ctl.send(Command::Stop);
+        core.process(&mut [0.0; 8]);
+        ctl.midi
+            .lock()
+            .unwrap()
+            .push(crate::midi::MidiMsg {
+                key: 62,
+                velocity: 90,
+                on: true,
+            })
+            .unwrap();
+        core.process(&mut [0.0; 8]);
+        assert!(ctl.recorded_midi.pop().is_err());
     }
 
     #[test]

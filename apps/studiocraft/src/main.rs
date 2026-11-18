@@ -89,6 +89,7 @@ fn main() -> ExitCode {
 
     let mut window = ProjectWindow::new(project, transport, status);
     window.audio_host = host.clone();
+    window.open_midi_inputs();
     for f in &files {
         let path = Path::new(f);
         let result = if path.extension().is_some_and(|e| e == file::EXTENSION) {

@@ -96,6 +96,15 @@ pub struct ProjectWindow {
     /// Was die untere Zone zeigt.
     lower: LowerZone,
     key_editor: keyeditor::KeyEditor,
+    midi_inputs: Option<studiocraft_engine::midi::MidiInputs>,
+    /// Anzeige der MIDI-Eingänge für die Statuszeile.
+    midi_status: String,
+    /// Zuletzt an die Engine gemeldetes Keyboard-Ziel.
+    midi_target_sent: Option<Option<usize>>,
+    /// Während der Aufnahme gespielte Noten.
+    midi_take: Vec<studiocraft_engine::midi::RecordedMidi>,
+    /// Die laufende Aufnahme schreibt auch Audio.
+    audio_recording: bool,
 }
 
 /// Inhalt der unteren Zone (Spec „Fenster-Architektur“).
@@ -153,6 +162,11 @@ impl ProjectWindow {
             plugins: inserts::PluginState::default(),
             lower: LowerZone::Mixer,
             key_editor: keyeditor::KeyEditor::default(),
+            midi_inputs: None,
+            midi_status: String::new(),
+            midi_target_sent: None,
+            midi_take: Vec::new(),
+            audio_recording: false,
         };
         w.saved = Some(w.project.clone());
         w.send_locators();
@@ -446,6 +460,7 @@ impl ProjectWindow {
         if let Some(t) = &mut self.transport {
             t.collect_garbage();
         }
+        self.sync_midi();
         self.file_shortcuts(ui);
         self.handle_keys(ui);
         let dt_s = ui.input(|i| i.unstable_dt);
@@ -688,6 +703,10 @@ impl ProjectWindow {
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 ui.weak(format!("{:.1} ms/Frame", self.frame_ms));
                 ui.separator();
+                if !self.midi_status.is_empty() {
+                    ui.weak(&self.midi_status);
+                    ui.separator();
+                }
                 ui.weak(&self.audio_status);
                 if let Some(m) = &self.message {
                     ui.separator();
@@ -1643,6 +1662,99 @@ mod tests {
             w.lower = LowerZone::Editor;
             w.show_lower = true;
         });
+    }
+
+    fn rec(pos: u64, key: u8, on: bool) -> studiocraft_engine::midi::RecordedMidi {
+        studiocraft_engine::midi::RecordedMidi {
+            pos,
+            key,
+            velocity: 100,
+            on,
+        }
+    }
+
+    #[test]
+    fn midi_take_becomes_part_with_notes() {
+        let mut w = ProjectWindow::new(Project::default(), None, String::new());
+        w.add_instrument_track(None);
+        w.project.tracks[0].record = true;
+        let q = TICKS_PER_QUARTER;
+        let bar = w.bar_ticks();
+        // Aufnahme ab Takt 2 (96 000 Frames): C, E; G noch gehalten beim Stopp.
+        let take = [
+            rec(96_000, 60, true),
+            rec(120_000, 60, false),
+            rec(120_000, 64, true),
+            rec(144_000, 64, false),
+            rec(144_000, 67, true),
+        ];
+        w.place_midi_take(0, &take, 96_000, 168_000);
+        let ev = &w.project.tracks[0].events[0];
+        assert_eq!((ev.start.0, ev.length), (bar, bar), "Part auf Taktgrenzen");
+        let notes: Vec<(u8, i64, u64)> = ev
+            .notes
+            .iter()
+            .map(|n| (n.pitch, n.start, n.length))
+            .collect();
+        assert_eq!(
+            notes,
+            [(60, 0, q), (64, q as i64, q), (67, 2 * q as i64, q)]
+        );
+        w.undo();
+        assert!(w.project.tracks[0].events.is_empty());
+    }
+
+    #[test]
+    fn midi_cycle_mixes_passes_and_punch_trims() {
+        let mut w = ProjectWindow::new(Project::default(), None, String::new());
+        w.add_instrument_track(None);
+        w.project.tracks[0].record = true;
+        let bar = w.bar_ticks();
+        w.cycle = true;
+        w.left_locator = 0;
+        w.right_locator = bar; // 2 s = 96 000 Frames
+        // Zwei Durchgänge: C im ersten, E im zweiten (Position wieder vorn).
+        let take = [
+            rec(10_000, 60, true),
+            rec(20_000, 60, false),
+            rec(30_000, 64, true),
+            rec(40_000, 64, false),
+        ];
+        w.place_midi_take(0, &take, 0, 96_000);
+        let ev = &w.project.tracks[0].events[0];
+        assert_eq!((ev.start.0, ev.length), (0, bar), "Part = Cycle-Bereich");
+        assert_eq!(ev.notes.len(), 2);
+        // Punch-In ab Takt 2 ohne Cycle: Noten davor fallen weg.
+        let mut w = ProjectWindow::new(Project::default(), None, String::new());
+        w.add_instrument_track(None);
+        w.project.tracks[0].record = true;
+        w.left_locator = bar;
+        w.right_locator = 2 * bar;
+        w.punch_in = true;
+        let take = [
+            rec(0, 60, true),
+            rec(10_000, 60, false),
+            rec(100_000, 62, true),
+            rec(110_000, 62, false),
+        ];
+        w.place_midi_take(0, &take, 0, 120_000);
+        let ev = &w.project.tracks[0].events[0];
+        assert_eq!(ev.start.0, bar);
+        assert_eq!(ev.notes.iter().map(|n| n.pitch).collect::<Vec<_>>(), [62]);
+    }
+
+    #[test]
+    fn keyboard_follows_armed_then_selected_instrument() {
+        let mut w = ProjectWindow::new(Project::default(), None, String::new());
+        w.add_audio_track();
+        w.add_instrument_track(None);
+        w.add_instrument_track(None);
+        w.selected_track = Some(0);
+        assert_eq!(w.midi_target(), None, "Audio-Spur ist kein Ziel");
+        w.selected_track = Some(1);
+        assert_eq!(w.midi_target(), Some(1));
+        w.project.tracks[2].record = true;
+        assert_eq!(w.midi_target(), Some(2), "aufnahmebereit geht vor");
     }
 
     #[test]

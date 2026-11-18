@@ -43,6 +43,8 @@ Mit dem Auswahl-Werkzeug hat jedes Event Smart-Bereiche: am Rand in der unteren 
 
 **Key-Editor:** Doppelklick auf einen Part öffnet ihn in der unteren Zone (Reiter *Mixer* / *Key-Editor*). Klaviatur links (Klick spielt an), Notenraster mit eigenem Zoom, Velocity-Spur unten. Die Werkzeuge gelten auch hier: Auswahl verschiebt (Strg kopiert, rechter Rand ändert die Länge), Zeichnen setzt Noten und zieht sie auf, Löschen entfernt; Entf löscht ausgewählte Noten, alles rückgängig zu machen.
 
+**MIDI-Keyboard:** Alle MIDI-Eingänge werden beim Start geöffnet. Gespielt wird auf der aufnahmebereiten Instrument-Spur, sonst auf der ausgewählten; die Noten gehen direkt in den Audio-Thread. Mit R auf einer Instrument-Spur nimmt ⏺ bzw. `*` MIDI auf (auch zusammen mit Audio): daraus wird ein Part auf Taktgrenzen, im Cycle über den Cycle-Bereich mit allen Durchgängen, Punch wirkt wie bei Audio.
+
 F3 blendet den Mixer in der unteren Zone ein und aus: je Kanal Panorama, Mute/Solo, Fader mit Pegelanzeige, rechts der Ausgang. Strg + Klick setzt Fader auf 0 dB bzw. Panorama auf Mitte, Umschalt + Ziehen stellt fein ein.
 
 Benötigt Rust 1.85 oder neuer (Edition 2024). Unter Linux zusätzlich die Entwicklerdateien von ALSA und PipeWire (`libasound`, `libpipewire-0.3`) sowie `clang`. `cargo run -- --list-hosts` zeigt die verfügbaren Audio-Hosts, `--audio-host alsa` wählt einen anderen.
