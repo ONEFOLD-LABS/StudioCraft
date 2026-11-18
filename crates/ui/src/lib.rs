@@ -4,12 +4,18 @@
 //! Prototyp-Stand: Projektfenster mit Werkzeugzeile, Inspector, Spurliste,
 //! Lineal, Event-Anzeige und Transportleiste.
 
+mod menu;
 mod mixer;
+mod session;
 mod timeline;
 mod tools;
 pub mod waveform;
 
-use std::{collections::HashMap, path::Path, sync::Arc};
+use std::{
+    collections::HashMap,
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 
 use egui::{Color32, Key, RichText, Ui};
 use studiocraft_engine::{AudioClip, Command, EngineControl, Song, TransportState};
@@ -65,6 +71,15 @@ pub struct ProjectWindow {
     drag_before: Option<Project>,
     /// Lage der Event-Anzeige im letzten Frame (für Tests mit Mauseingaben).
     lanes_rect: egui::Rect,
+    /// Projektdatei, unter der zuletzt gespeichert oder geöffnet wurde.
+    project_path: Option<PathBuf>,
+    /// Zuletzt gespeicherter Stand, um ungesicherte Änderungen zu erkennen.
+    saved: Option<Project>,
+    /// Befehl, der auf die Rückfrage „Speichern?“ wartet.
+    pending: Option<menu::Action>,
+    /// Schließen ist bestätigt (keine weitere Rückfrage).
+    allow_close: bool,
+    last_title: String,
 }
 
 impl ProjectWindow {
@@ -99,7 +114,13 @@ impl ProjectWindow {
             redo: Vec::new(),
             drag_before: None,
             lanes_rect: egui::Rect::NOTHING,
+            project_path: None,
+            saved: None,
+            pending: None,
+            allow_close: false,
+            last_title: String::new(),
         };
+        w.saved = Some(w.project.clone());
         w.send_locators();
         w
     }
@@ -252,6 +273,14 @@ impl ProjectWindow {
         self.dirty = true;
     }
 
+    pub(crate) fn delete_selection(&mut self) {
+        let before = self.project.clone();
+        for id in std::mem::take(&mut self.selection) {
+            self.project.delete(id);
+        }
+        self.checkpoint(before);
+    }
+
     /// Verlauf leeren, z. B. nach dem Laden der Startdateien.
     pub fn clear_history(&mut self) {
         self.undo.clear();
@@ -329,6 +358,7 @@ impl ProjectWindow {
                 continue;
             }
             if mods.command {
+                // Datei-Kürzel behandelt `file_shortcuts`.
                 continue;
             }
             if let Some(tool) = Tool::from_key(k) {
@@ -342,13 +372,7 @@ impl ProjectWindow {
                 Key::Space => self.toggle_play(),
                 Key::Slash => self.toggle_cycle(),
                 Key::F3 => self.show_mixer = !self.show_mixer,
-                Key::Delete | Key::Backspace => {
-                    let before = self.project.clone();
-                    for id in std::mem::take(&mut self.selection) {
-                        self.project.delete(id);
-                    }
-                    self.checkpoint(before);
-                }
+                Key::Delete | Key::Backspace => self.delete_selection(),
                 Key::Home | Key::Comma => self.locate(0),
                 Key::I if alt => self.show_inspector = !self.show_inspector,
                 _ => {}
@@ -362,6 +386,7 @@ impl ProjectWindow {
         if let Some(t) = &mut self.transport {
             t.collect_garbage();
         }
+        self.file_shortcuts(ui);
         self.handle_keys(ui);
         let dt_s = ui.input(|i| i.unstable_dt);
         mixer::update_meters(self, dt_s);
@@ -372,6 +397,7 @@ impl ProjectWindow {
             self.frame_ms * 0.95 + dt * 0.05
         };
 
+        egui::Panel::top("menue").show(ui, |ui| self.menu_bar(ui));
         egui::Panel::top("werkzeugzeile").show(ui, |ui| self.toolbar(ui));
         egui::Panel::bottom("transportleiste").show(ui, |ui| self.transport_bar(ui));
         if self.show_mixer {
@@ -392,6 +418,14 @@ impl ProjectWindow {
         if self.dirty {
             self.dirty = false;
             self.rebuild_song();
+        }
+
+        self.confirm_dialog(ui);
+        let title = self.title();
+        if title != self.last_title {
+            ui.ctx()
+                .send_viewport_cmd(egui::ViewportCommand::Title(title.clone()));
+            self.last_title = title;
         }
 
         let meters_moving = self.master_meter.iter().any(|&v| v > 1e-4)
@@ -559,7 +593,7 @@ const UNDO_STEPS: usize = 200;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use egui_kittest::Harness;
+    use egui_kittest::{Harness, kittest::Queryable};
     use studiocraft_project::TempoMap;
 
     /// Rendert das Projektfenster headless. Mit `STUDIOCRAFT_SHOTS=<ordner>`
@@ -880,6 +914,128 @@ mod tests {
             w.view.zoom(2.0, None);
             w.show_mixer = false;
         });
+    }
+
+    fn temp_dir(name: &str) -> PathBuf {
+        let d = std::env::temp_dir().join(format!("studiocraft-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    #[test]
+    fn save_open_roundtrip_with_other_sample_rate() {
+        let tmp = temp_dir("session");
+        // Eine Datei außerhalb des Projekts (wird beim Speichern kopiert) …
+        let outside = tmp.join("drums.wav");
+        let tone = tone_clip(4.0, 110.0);
+        studiocraft_engine::export::write_wav_f32(&tone.samples, 48_000, &outside).unwrap();
+        let (core, ctl) = studiocraft_engine::engine(48_000, TempoMap::default());
+        let mut w = ProjectWindow::new(Project::default(), Some(ctl), String::new());
+        let bar = w.bar_ticks();
+        w.import_audio(&outside, None).unwrap();
+        // … und eine ohne Datei (wird als WAV abgelegt).
+        let id = w
+            .import_clip(
+                "Synth",
+                None,
+                tone_clip(4.0, 330.0),
+                Some((usize::MAX, bar)),
+            )
+            .unwrap();
+        w.project.trim_start(id, bar + w.beat_ticks());
+        w.project.set_fades(id, 480, 960);
+        w.project.tracks[1].volume_db = -4.5;
+        assert!(w.is_modified());
+
+        let file = tmp.join("Song").join("Song.studiocraft");
+        w.save_as(&file).unwrap();
+        assert!(!w.is_modified());
+        assert_eq!(w.title(), "Song – StudioCraft");
+        let json = std::fs::read_to_string(&file).unwrap();
+        assert!(
+            json.contains("\"path\": \"Audio/drums.wav\""),
+            "relativer Pfad"
+        );
+        assert!(json.contains("\"path\": \"Audio/Synth.wav\""));
+        assert!(
+            tmp.join("Song/Audio/drums.wav").exists() && tmp.join("Song/Audio/Synth.wav").exists()
+        );
+        drop(core);
+
+        // In einem Fenster mit 44,1 kHz öffnen: Offsets und Längen werden umgerechnet.
+        let mut w2 = ProjectWindow::new(Project::default(), None, String::new());
+        w2.sample_rate = 44_100;
+        w2.open(&file).unwrap();
+        assert_eq!(w2.message, None);
+        assert!(!w2.is_modified());
+        let ev = w2.project.event(id).unwrap();
+        let orig = w.project.event(id).unwrap();
+        assert_eq!(
+            (ev.start, ev.length, ev.fade_in, ev.fade_out),
+            (orig.start, orig.length, orig.fade_in, orig.fade_out)
+        );
+        assert_eq!(orig.offset, 24_000, "eine Viertel bei 48 kHz");
+        assert_eq!(ev.offset, 22_050, "eine Viertel bei 44,1 kHz");
+        assert_eq!(w2.project.pool[0].sample_rate, 44_100);
+        assert_eq!(w2.clips.len(), 2);
+        assert_eq!(w2.project.tracks[1].volume_db, -4.5);
+    }
+
+    #[test]
+    fn open_reports_missing_audio() {
+        let tmp = temp_dir("missing");
+        let mut w = ProjectWindow::new(Project::default(), None, String::new());
+        w.import_clip("Weg", None, tone_clip(1.0, 220.0), None)
+            .unwrap();
+        let file = tmp.join("P/P.studiocraft");
+        w.save_as(&file).unwrap();
+        std::fs::remove_file(tmp.join("P/Audio/Weg.wav")).unwrap();
+        let mut w2 = ProjectWindow::new(Project::default(), None, String::new());
+        w2.open(&file).unwrap();
+        assert!(w2.message.as_deref().unwrap().contains("Audio/Weg.wav"));
+        assert_eq!(
+            w2.project.tracks[0].events.len(),
+            1,
+            "Event bleibt erhalten"
+        );
+        assert!(w2.open(&tmp.join("gibt-es-nicht.studiocraft")).is_err());
+    }
+
+    #[test]
+    fn export_mixdown_covers_locator_range() {
+        let tmp = temp_dir("export");
+        let mut w = ProjectWindow::new(Project::default(), None, String::new());
+        w.import_clip("Ton", None, tone_clip(8.0, 220.0), None)
+            .unwrap();
+        w.left_locator = w.bar_ticks();
+        w.right_locator = 3 * w.bar_ticks(); // 2 Takte = 4 s
+        let out = tmp.join("mix.wav");
+        w.export_mixdown(&out).unwrap();
+        let clip = AudioClip::load_wav(&out).unwrap();
+        assert_eq!(clip.frames(), 4 * 48_000);
+        assert!(clip.samples.iter().any(|s| s.abs() > 0.5));
+    }
+
+    #[test]
+    fn ctrl_n_with_changes_asks_first() {
+        let mut w = ProjectWindow::new(Project::default(), None, String::new());
+        w.import_clip("Ton", None, tone_clip(1.0, 220.0), None)
+            .unwrap();
+        let mut h = window_harness(w);
+        h.key_press_modifiers(egui::Modifiers::COMMAND, Key::N);
+        h.run_steps(2);
+        assert_eq!(h.state().pending, Some(menu::Action::New));
+        assert_eq!(h.state().project.tracks.len(), 1, "noch nichts verworfen");
+        if let Ok(dir) = std::env::var("STUDIOCRAFT_SHOTS")
+            && let Ok(img) = h.render()
+        {
+            img.save(Path::new(&dir).join("rueckfrage.png")).unwrap();
+        }
+        h.get_by_label("Nicht speichern").click();
+        h.run_steps(2);
+        assert_eq!(h.state().pending, None);
+        assert!(h.state().project.tracks.is_empty(), "neues leeres Projekt");
     }
 
     #[test]

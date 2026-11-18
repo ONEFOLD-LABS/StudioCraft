@@ -6,6 +6,7 @@
 
 pub mod clip;
 pub mod core;
+pub mod export;
 pub mod meters;
 pub mod transport;
 

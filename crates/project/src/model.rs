@@ -8,7 +8,7 @@ pub type ClipId = u32;
 
 /// Eintrag im Pool: eine Audio-Datei (Spec: „Pool“, „Audio-Clip“).
 /// Die Samples selbst hält die Engine; das Modell kennt nur die Eckdaten.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct PoolClip {
     pub name: String,
     pub path: Option<String>,
@@ -17,7 +17,7 @@ pub struct PoolClip {
     pub frames: u64,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum TrackKind {
     Audio,
     Instrument,
@@ -46,7 +46,7 @@ impl TrackKind {
 }
 
 /// Ein Event auf einer Spur. Positionen und Längen in Ticks.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Event {
     pub id: EventId,
     pub start: Position,
@@ -72,7 +72,7 @@ impl Event {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Track {
     pub name: String,
     pub kind: TrackKind,
@@ -112,7 +112,7 @@ impl Track {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Project {
     pub tracks: Vec<Track>,
     pub tempo: TempoMap,
@@ -446,6 +446,25 @@ impl Project {
             },
         );
         Some(id)
+    }
+
+    /// Rechnet einen Clip auf eine andere Abtastrate um (Länge im Pool und
+    /// Offsets der Events), z. B. wenn ein Projekt mit anderer Geräterate geladen wird.
+    pub fn rescale_clip(&mut self, clip: ClipId, rate: u32) {
+        let Some(c) = self.pool.get_mut(clip as usize) else {
+            return;
+        };
+        if c.sample_rate == rate || c.sample_rate == 0 {
+            return;
+        }
+        let f = f64::from(rate) / f64::from(c.sample_rate);
+        c.frames = (c.frames as f64 * f).round() as u64;
+        c.sample_rate = rate;
+        for ev in self.tracks.iter_mut().flat_map(|t| t.events.iter_mut()) {
+            if ev.clip == Some(clip) {
+                ev.offset = (ev.offset as f64 * f).round() as u64;
+            }
+        }
     }
 
     /// Ob eine Spur zu hören ist: nicht stumm, und bei aktivem Solo selbst Solo.

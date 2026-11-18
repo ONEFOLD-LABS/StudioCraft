@@ -25,12 +25,15 @@ cargo build
 cargo test
 cargo run --release -p studiocraft                      # Projektfenster mit 100 Demo-Spuren
 cargo run --release -p studiocraft -- a.wav b.wav       # jede Datei auf eigener Audio-Spur
+cargo run --release -p studiocraft -- Song/Song.studiocraft  # Projekt öffnen
 cargo run -p studiocraft-cli -- <datei.wav> --loop 1 5  # Kommandozeile: Enter = Start/Stopp, q = Ende
 ```
 
 Bedienung im Projektfenster: Tasten 1–0 wählen Werkzeuge (Auswahl, Trennen, Löschen, Stumm, Zeichnen, Zoom, Wiedergabe sind aktiv), Leertaste Start/Stopp, `/` Cycle, J Snap, H/G Zoom, Strg + Mausrad Zoom, Umschalt + Mausrad horizontal. Im Lineal: Klick setzt den Cursor, Ziehen den Cycle-Bereich, Strg/Alt + Klick den linken/rechten Locator. Events mit Strg + Ziehen kopieren, Alt hebt Snap auf. WAV-Dateien lassen sich ins Projektfenster ziehen: auf eine Audio-Spur an die Mausposition, sonst auf eine neue Spur. Mute und Solo wirken sofort auf die Wiedergabe.
 
 Mit dem Auswahl-Werkzeug hat jedes Event Smart-Bereiche: am Rand in der unteren Hälfte die Länge ändern, in der oberen Hälfte Fade-In/Fade-Out ziehen (auch an den Griffen des ausgewählten Events). Strg+Z macht rückgängig, Strg+Umschalt+Z (oder Strg+Y) stellt wieder her.
+
+**Projekte:** Strg+N neu, Strg+O öffnen, Strg+S speichern, Strg+Umschalt+S speichern unter, Strg+Alt+S neue Version (`Song-01`, `Song-02` …). Ein Projekt ist ein Ordner mit `<Name>.studiocraft` (offenes JSON) und `Audio/`; importierte Dateien werden beim Speichern dorthin kopiert. Vor dem Verwerfen ungesicherter Änderungen fragt StudioCraft nach. *Datei → Audio-Mixdown exportieren* schreibt den Bereich zwischen den Locatoren als 24-Bit-WAV.
 
 F3 blendet den Mixer in der unteren Zone ein und aus: je Kanal Panorama, Mute/Solo, Fader mit Pegelanzeige, rechts der Ausgang. Strg + Klick setzt Fader auf 0 dB bzw. Panorama auf Mitte, Umschalt + Ziehen stellt fein ein.
 

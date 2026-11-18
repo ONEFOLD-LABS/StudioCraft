@@ -5,12 +5,13 @@
 use std::{path::Path, process::ExitCode};
 
 use studiocraft_engine::{PreparedOutput, engine};
-use studiocraft_project::Project;
+use studiocraft_project::{Project, file};
 use studiocraft_ui::ProjectWindow;
 
 const USAGE: &str = "\
-Aufruf: studiocraft [datei.wav …] [--tracks <n>] [--audio-host <name>]
+Aufruf: studiocraft [projekt.studiocraft | datei.wav …] [--tracks <n>] [--audio-host <name>]
 
+  projekt.studiocraft  Projekt öffnen
   datei.wav     Audiodateien, jede auf eine eigene Audio-Spur ab Takt 1
                 (ohne Dateien: Demo-Projekt mit --tracks Spuren, Standard 100)
   --audio-host  Audio-Host wählen, z. B. PipeWire, ALSA, JACK, WASAPI, CoreAudio
@@ -88,7 +89,13 @@ fn main() -> ExitCode {
 
     let mut window = ProjectWindow::new(project, transport, status);
     for f in &files {
-        if let Err(e) = window.import_audio(Path::new(f), None) {
+        let path = Path::new(f);
+        let result = if path.extension().is_some_and(|e| e == file::EXTENSION) {
+            window.open(path)
+        } else {
+            window.import_audio(path, None).map(|_| ())
+        };
+        if let Err(e) = result {
             eprintln!("Fehler: {e}");
             return ExitCode::FAILURE;
         }

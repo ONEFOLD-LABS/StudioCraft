@@ -4,11 +4,23 @@
 pub const TICKS_PER_QUARTER: u64 = 960;
 
 /// Tempo-unabhängige Position im Projekt, gemessen in Ticks ab Projektanfang.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    Default,
+    serde::Serialize,
+    serde::Deserialize,
+)]
 pub struct Position(pub u64);
 
 /// Taktart, z. B. 4/4 oder 6/8.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct TimeSignature {
     pub numerator: u32,
     pub denominator: u32,
@@ -33,7 +45,7 @@ impl TimeSignature {
 
 /// Tempo-Map. Im ersten Schritt nur festes Tempo und feste Taktart;
 /// die variable Tempospur kommt später.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct TempoMap {
     pub bpm: f64,
     pub signature: TimeSignature,
