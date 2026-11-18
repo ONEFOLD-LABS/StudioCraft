@@ -461,6 +461,11 @@ impl ProjectWindow {
             t.collect_garbage();
         }
         self.sync_midi();
+        if self.idle_plugins() {
+            // Plugin-Fenster brauchen ihre Timer auch ohne Mausbewegung.
+            ui.ctx()
+                .request_repaint_after(std::time::Duration::from_millis(15));
+        }
         self.file_shortcuts(ui);
         self.handle_keys(ui);
         let dt_s = ui.input(|i| i.unstable_dt);
@@ -1422,6 +1427,29 @@ mod tests {
         }
         assert!(w.project.tracks[0].inserts.is_empty());
         assert!(w.plugins.sent[0].slots.is_empty());
+    }
+
+    #[test]
+    fn plugins_stay_alive_without_engine() {
+        // Ohne Audio-Engine darf die Kette nicht verworfen werden, solange Griffe darauf zeigen.
+        let mut w = ProjectWindow::new(Project::default(), None, String::new());
+        let Some(fx) = test_effect(&mut w) else {
+            return;
+        };
+        w.add_audio_track();
+        w.project.tracks[0]
+            .inserts
+            .push(studiocraft_project::InsertSlot {
+                plugin_id: fx.id.clone(),
+                name: fx.name.clone(),
+                bypass: false,
+                params: Vec::new(),
+                state: None,
+            });
+        w.sync_inserts();
+        let h = w.plugins.sent[0].handles[0].as_ref().unwrap();
+        assert!(h.has_gui(), "Griff benutzbar");
+        assert!(h.save_state().is_some(), "Instanz lebt noch");
     }
 
     #[test]

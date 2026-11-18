@@ -104,6 +104,15 @@ impl EngineControl {
         self.commands.push(cmd).is_ok()
     }
 
+    /// Wie [`Self::send`], gibt den Befehl aber zurück, wenn die Queue voll ist
+    /// (statt ihn zu verwerfen).
+    pub fn try_send(&mut self, cmd: Command) -> Result<(), Command> {
+        self.collect_garbage();
+        self.commands
+            .push(cmd)
+            .map_err(|rtrb::PushError::Full(c)| c)
+    }
+
     /// Gibt Abspiellisten frei, die der Audio-Thread nicht mehr braucht.
     pub fn collect_garbage(&mut self) {
         while self.garbage.pop().is_ok() {}

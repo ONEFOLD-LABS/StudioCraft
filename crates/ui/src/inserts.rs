@@ -37,11 +37,18 @@ pub(crate) struct SentChain {
     pub(crate) slots: Vec<InsertSlot>,
     /// Modell-Slot → Index in der Engine-Kette (`None`: Plugin fehlt).
     pub(crate) map: Vec<Option<usize>>,
+    /// Kette, die (noch) nicht in der Engine ist – ohne Audio oder bei voller
+    /// Befehls-Queue. Hält die Instanzen am Leben, auf die `handles` zeigen.
+    /// Muss das letzte Feld sein: Felder werden in dieser Reihenfolge freigegeben,
+    /// die Griffe also vor den Instanzen.
+    _offline: Option<Box<InsertChain>>,
 }
 
 /// Plugin-Liste und Parameterbeschreibungen (Hauptthread).
 #[derive(Default)]
 pub(crate) struct PluginState {
+    /// Ein Plugin hat Änderungen gemeldet, die noch nicht gespeichert sind.
+    pub changed: bool,
     pub list: Option<Vec<PluginInfo>>,
     pub params: HashMap<String, Vec<ParamInfo>>,
     pub sent: Vec<SentChain>,
@@ -237,10 +244,20 @@ impl ProjectWindow {
             }
             let chain =
                 (!chain.slots.is_empty() || chain.instrument.is_some()).then(|| Box::new(chain));
-            if let Some(t) = &mut self.transport {
-                t.send(Command::SetInserts(i, chain));
-            }
+            let offline = match (&mut self.transport, chain) {
+                (Some(t), Some(c)) => match t.try_send(Command::SetInserts(i, Some(c))) {
+                    Ok(()) => None,
+                    Err(Command::SetInserts(_, c)) => c,
+                    Err(_) => None,
+                },
+                (Some(t), None) => {
+                    t.send(Command::SetInserts(i, None));
+                    None
+                }
+                (None, c) => c,
+            };
             *have = SentChain {
+                _offline: offline,
                 handles,
                 instrument_handle,
                 slots: want,
@@ -345,6 +362,7 @@ impl ProjectWindow {
                         self.checkpoint(before);
                     }
                 });
+                self.window_button(ui, track, INSTRUMENT, &slot.name);
                 ui.menu_button("Instrument wechseln", |ui| {
                     if let Some(choice) = self.instrument_menu(ui) {
                         self.set_instrument(track, choice);
@@ -372,6 +390,60 @@ impl ProjectWindow {
             state: None,
         });
         self.checkpoint(before);
+    }
+
+    fn handle_mut(&mut self, track: usize, k: usize) -> Option<&mut PluginHandle> {
+        let sent = self.plugins.sent.get_mut(track)?;
+        if k == INSTRUMENT {
+            sent.instrument_handle.as_mut()
+        } else {
+            sent.handles.get_mut(k)?.as_mut()
+        }
+    }
+
+    /// Knopf „Fenster“: öffnet/schließt das eigene Fenster des Plugins.
+    fn window_button(&mut self, ui: &mut Ui, track: usize, k: usize, name: &str) {
+        let title = format!("{} – {}", self.project.tracks[track].name, name);
+        let Some(h) = self.handle_mut(track, k) else {
+            return;
+        };
+        if !h.has_gui() {
+            return;
+        }
+        let open = h.gui_open();
+        if ui
+            .selectable_label(open, "Fenster")
+            .on_hover_text("Eigenes Fenster des Plugins")
+            .clicked()
+        {
+            if open {
+                h.close_gui();
+            } else if let Err(e) = h.open_gui(&title) {
+                self.message = Some(format!("{name}: {e}"));
+            }
+        }
+    }
+
+    /// Im UI-Takt: offene Plugin-Fenster bedienen (Timer, Ereignisse) und
+    /// Zustandsänderungen einsammeln. `true`, solange Fenster offen sind.
+    pub(crate) fn idle_plugins(&mut self) -> bool {
+        let mut open = false;
+        let mut dirty = false;
+        for sent in &mut self.plugins.sent {
+            for h in sent
+                .handles
+                .iter_mut()
+                .flatten()
+                .chain(sent.instrument_handle.iter_mut())
+            {
+                open |= h.idle();
+                dirty |= h.take_dirty();
+            }
+        }
+        if dirty {
+            self.plugins.changed = true;
+        }
+        open
     }
 
     /// Aktuelle Zustände aller laufenden Plugins ins Projekt übernehmen (vor dem Speichern).
@@ -413,6 +485,7 @@ impl ProjectWindow {
                     self.checkpoint(before);
                 }
                 ui.label(&slot.name);
+                self.window_button(ui, track, k, &slot.name);
                 if ui
                     .small_button("x")
                     .on_hover_text("Insert entfernen")

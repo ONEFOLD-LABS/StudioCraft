@@ -9,3 +9,13 @@ license.workspace = true
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 clap-sys = "0.5"
 libloading = "0.9"
+
+[target.'cfg(all(unix, not(target_os = "macos"), not(target_arch = "wasm32")))'.dependencies]
+x11rb = "0.13"
+
+[target.'cfg(all(unix, not(target_arch = "wasm32")))'.dependencies]
+libc = "0.2"
+
+[[test]]
+name = "gui_main_thread"
+harness = false

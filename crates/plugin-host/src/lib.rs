@@ -9,6 +9,10 @@
 #[cfg(not(target_arch = "wasm32"))]
 mod clap;
 #[cfg(not(target_arch = "wasm32"))]
+mod gui;
+#[cfg(not(target_arch = "wasm32"))]
+mod host;
+#[cfg(not(target_arch = "wasm32"))]
 mod scan;
 
 #[cfg(not(target_arch = "wasm32"))]

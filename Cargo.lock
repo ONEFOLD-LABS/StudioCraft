@@ -3519,7 +3519,9 @@ name = "studiocraft-plugin-host"
 version = "0.1.0"
 dependencies = [
  "clap-sys",
+ "libc",
  "libloading 0.9.1",
+ "x11rb",
 ]
 
 [[package]]

@@ -35,7 +35,10 @@ use clap_sys::{
     version::{CLAP_VERSION, clap_version_is_compatible},
 };
 
-use crate::scan::{PluginInfo, cstr};
+use crate::{
+    host::HostShared,
+    scan::{PluginInfo, cstr},
+};
 
 /// Höchstzahl Parameteränderungen pro Block (vorab angelegt, keine Allokation im Audio-Thread).
 const MAX_EVENTS: usize = 256;
@@ -189,24 +192,19 @@ fn host_strings() -> &'static HostStrings {
     })
 }
 
-unsafe extern "C" fn host_get_extension(_: *const clap_host, _: *const c_char) -> *const c_void {
-    ptr::null()
-}
-unsafe extern "C" fn host_request(_: *const clap_host) {}
-
-fn new_host() -> Box<clap_host> {
+fn new_host(shared: &Arc<HostShared>) -> Box<clap_host> {
     let s = host_strings();
     Box::new(clap_host {
         clap_version: CLAP_VERSION,
-        host_data: ptr::null_mut(),
+        host_data: Arc::as_ptr(shared) as *mut c_void,
         name: s.name.as_ptr(),
         vendor: s.vendor.as_ptr(),
         url: s.url.as_ptr(),
         version: s.version.as_ptr(),
-        get_extension: Some(host_get_extension),
-        request_restart: Some(host_request),
-        request_process: Some(host_request),
-        request_callback: Some(host_request),
+        get_extension: Some(crate::host::get_extension),
+        request_restart: Some(crate::host::host_request_nothing),
+        request_process: Some(crate::host::host_request_nothing),
+        request_callback: Some(crate::host::host_request_callback),
     })
 }
 
@@ -260,8 +258,17 @@ unsafe extern "C" fn out_push(_: *const clap_output_events, _: *const clap_event
 /// Vertrag: Der Griff muss freigegeben sein, bevor die Instanz zerstört wird
 /// (StudioCraft gibt Griffe frei, bevor es eine Kette austauscht).
 pub struct PluginHandle {
-    plugin: *const clap_plugin,
+    pub(crate) plugin: *const clap_plugin,
     _lib: Arc<Library>,
+    pub(crate) shared: Arc<HostShared>,
+    pub(crate) gui: crate::gui::GuiState,
+}
+
+impl Drop for PluginHandle {
+    fn drop(&mut self) {
+        // Fenster vor der Instanz schließen (Vertrag: Griff stirbt zuerst).
+        self.close_gui();
+    }
 }
 
 unsafe extern "C" fn ostream_write(
@@ -294,6 +301,16 @@ unsafe extern "C" fn istream_read(stream: *const clap_istream, buf: *mut c_void,
 }
 
 impl PluginHandle {
+    /// Erweiterung des Plugins oder null.
+    pub(crate) fn extension<T>(&self, id: &CStr) -> *const T {
+        // SAFETY: `plugin` lebt (Vertrag oben).
+        unsafe {
+            (*self.plugin)
+                .get_extension
+                .map_or(ptr::null(), |f| f(self.plugin, id.as_ptr()) as *const T)
+        }
+    }
+
     fn state_ext(&self) -> Option<&clap_plugin_state> {
         // SAFETY: `plugin` lebt (Vertrag oben); Ergebnis ist null oder gültig.
         unsafe {
@@ -397,6 +414,8 @@ pub struct ClapInstance {
     plugin: *const clap_plugin,
     _host: Box<clap_host>,
     _lib: Arc<Library>,
+    /// Daten für Host-Rückrufe; `_host.host_data` zeigt darauf.
+    shared: Arc<HostShared>,
     pub info: PluginInfo,
     pub params: Vec<ParamInfo>,
     params_ext: *const clap_plugin_params,
@@ -419,7 +438,8 @@ impl ClapInstance {
         let lib = Library::load(&info.path)?;
         let factory = lib.factory().ok_or("Plugin-Fabrik fehlt")?;
         let create = factory.create_plugin.ok_or("create_plugin fehlt")?;
-        let host = new_host();
+        let shared = Arc::new(HostShared::default());
+        let host = new_host(&shared);
         let id = CString::new(info.id.as_bytes()).map_err(|e| e.to_string())?;
         // SAFETY: Fabrik, Host und Id sind gültig; der Host lebt so lange wie die Instanz.
         let plugin = unsafe { create(factory, &*host, id.as_ptr()) };
@@ -430,6 +450,7 @@ impl ClapInstance {
             plugin,
             _host: host,
             _lib: lib,
+            shared,
             info: info.clone(),
             params: Vec::new(),
             params_ext: ptr::null(),
@@ -473,6 +494,8 @@ impl ClapInstance {
         PluginHandle {
             plugin: self.plugin,
             _lib: self._lib.clone(),
+            shared: self.shared.clone(),
+            gui: Default::default(),
         }
     }
 
@@ -779,6 +802,19 @@ mod tests {
         assert!(b.handle().load_state(&state));
         let again = b.handle().save_state().unwrap();
         assert_eq!(again, state, "geladener Zustand ergibt denselben Zustand");
+    }
+
+    #[test]
+    fn gui_exists_but_only_opens_on_main_thread() {
+        let Some(info) = installed().into_iter().find(|p| p.name == "ZamComp") else {
+            return;
+        };
+        let inst = ClapInstance::new(&info, 48_000, 256).unwrap();
+        let mut h = inst.handle();
+        assert!(h.has_gui());
+        // Testthreads heißen nicht „main“: CLAP verlangt den Hauptthread.
+        assert!(h.open_gui("x").unwrap_err().contains("Hauptthread"));
+        assert!(!h.idle(), "ohne Fenster nichts zu bedienen");
     }
 
     #[test]

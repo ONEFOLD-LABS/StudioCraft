@@ -23,7 +23,7 @@ Jedes Release bringt `SHA256SUMS.txt` und signierte Pakete mit (`.asc`/`.sig`). 
 | GUI | egui/eframe 0.37 + `craft-ui` | egui/eframe 0.37 umgesetzt (Projektfenster-Prototyp); `craft-ui` folgt, sobald Docking und Icons gebraucht werden |
 | Audio-Dateien | `craft-audio` aus craft-libs | noch `hound` (nur WAV), Wechsel geplant |
 | MIDI | `craft-midi` | offen |
-| Plugins | CLAP überall, VST3, AU nur macOS (eigene Host-Crates) | CLAP-Inserts umgesetzt (`clap-sys` + `libloading` wie SoundCraft), generische Parameter-Regler; Plugin-Fenster, VST3, AU offen |
+| Plugins | CLAP überall, VST3, AU nur macOS (eigene Host-Crates) | CLAP-Inserts und -Instrumente (`clap-sys` + `libloading` wie SoundCraft), Parameter-Regler, Plugin-Zustand im Projekt, Plugin-Fenster (schwebend überall, eingebettet unter X11; eingebettet unter Windows/macOS, VST3, AU offen) |
 | Fenster | winit mit X11 und Wayland unter Linux | über eframe (Features `wayland`, `x11`) |
 | Übersetzungen | `craft-i18n` | offen |
 | Schriften | `craft-fonts` | offen |

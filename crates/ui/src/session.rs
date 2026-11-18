@@ -32,7 +32,7 @@ impl ProjectWindow {
 
     /// Ob es ungesicherte Änderungen gibt.
     pub fn is_modified(&self) -> bool {
-        self.saved.as_ref() != Some(&self.project)
+        self.plugins.changed || self.saved.as_ref() != Some(&self.project)
     }
 
     /// Titel für das Fenster: Projektname, `*` bei ungesicherten Änderungen.
@@ -125,6 +125,7 @@ impl ProjectWindow {
         self.project = stored;
         self.project_path = Some(path);
         self.saved = Some(self.project.clone());
+        self.plugins.changed = false;
         self.message = None;
         Ok(())
     }
