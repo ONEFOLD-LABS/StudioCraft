@@ -4,7 +4,7 @@
 use egui::{
     Align2, Color32, FontId, Painter, Pos2, Rect, Sense, Stroke, StrokeKind, Ui, pos2, vec2,
 };
-use studiocraft_project::EventId;
+use studiocraft_project::{Event, EventId, Track, TrackKind};
 
 use crate::{ProjectWindow, TPQ, Tool};
 
@@ -28,7 +28,7 @@ impl Default for View {
             px_per_quarter: 24.0,
             scroll_ticks: 0.0,
             scroll_y: 0.0,
-            row_h: 34.0,
+            row_h: 52.0,
         }
     }
 }
@@ -117,6 +117,7 @@ pub(crate) fn show(w: &mut ProjectWindow, ui: &mut Ui) {
     };
 
     interact(w, ui, &resp, &geo);
+    let drop_target = file_drop(w, ui, &geo);
 
     let geo = Geo {
         view: w.view,
@@ -135,6 +136,70 @@ pub(crate) fn show(w: &mut ProjectWindow, ui: &mut Ui) {
         ui.visuals().weak_text_color(),
     );
     paint_cursor(w, &painter.with_clip_rect(ruler.union(lanes)), &geo);
+    if let Some((row, ticks)) = drop_target {
+        paint_drop_target(&painter.with_clip_rect(lanes), &geo, row, ticks);
+    }
+}
+
+/// Audiodateien per Drag & Drop: auf eine Audio-Spur an die Mausposition,
+/// sonst auf neue Spuren. Gibt das Ziel zurück, solange Dateien darüber schweben.
+fn file_drop(w: &mut ProjectWindow, ui: &Ui, g: &Geo) -> Option<(Option<usize>, u64)> {
+    let (hovering, dropped, pos) = ui.input(|i| {
+        let paths: Vec<std::path::PathBuf> = i
+            .raw
+            .dropped_files
+            .iter()
+            .map(|f| f.path().to_path_buf())
+            .collect();
+        (
+            !i.raw.hovered_files.is_empty(),
+            paths,
+            i.pointer.latest_pos(),
+        )
+    });
+    let target = pos.filter(|p| g.lanes.contains(*p)).map(|p| {
+        let row = g
+            .row_at(p.y)
+            .filter(|&r| w.project.tracks[r].kind == TrackKind::Audio);
+        (row, w.snap_ticks(g.ticks(p.x)))
+    });
+    if !dropped.is_empty() {
+        let (row, at) = target.unwrap_or((None, 0));
+        let mut errors = Vec::new();
+        for (i, path) in dropped.iter().enumerate() {
+            // Erste Datei auf die Zielspur, weitere auf eigene neue Spuren.
+            let t = if i == 0 { row.map(|r| (r, at)) } else { None };
+            let t = t.or(Some((usize::MAX, at)));
+            if let Err(e) = w.import_audio(path, t) {
+                errors.push(e);
+            }
+        }
+        w.message = (!errors.is_empty()).then(|| errors.join("; "));
+        return None;
+    }
+    if hovering { target } else { None }
+}
+
+fn paint_drop_target(painter: &Painter, g: &Geo, row: Option<usize>, ticks: u64) {
+    let x = g.x(ticks as f64);
+    let accent = painter.ctx().global_style().visuals.selection.stroke.color;
+    match row {
+        Some(r) => {
+            let top = g.row_top(r);
+            let rect = Rect::from_min_max(pos2(x, top), pos2(g.lanes.right(), top + g.view.row_h));
+            painter.rect_stroke(rect, 2.0, Stroke::new(2.0, accent), StrokeKind::Inside);
+        }
+        None => {
+            painter.vline(x, g.lanes.y_range(), Stroke::new(2.0, accent));
+            painter.text(
+                pos2(x + 6.0, g.lanes.top() + 6.0),
+                Align2::LEFT_TOP,
+                "Neue Audio-Spur",
+                FontId::proportional(12.0),
+                accent,
+            );
+        }
+    }
 }
 
 fn scroll_and_zoom(
@@ -204,6 +269,7 @@ fn interact(w: &mut ProjectWindow, ui: &Ui, resp: &egui::Response, g: &Geo) {
     if resp.drag_stopped() {
         if let (Some(d), Some(p)) = (w.drag.take(), now) {
             finish_drag(w, g, d, p, mods);
+            w.dirty = true;
         }
         return;
     }
@@ -211,6 +277,7 @@ fn interact(w: &mut ProjectWindow, ui: &Ui, resp: &egui::Response, g: &Geo) {
         && let Some(p) = resp.interact_pointer_pos()
     {
         click(w, g, p, mods);
+        w.dirty = true;
     }
 }
 
@@ -503,37 +570,115 @@ fn paint_lanes(w: &ProjectWindow, painter: &Painter, g: &Geo) {
                 pos2(g.x(ev.start.0 as f64), top),
                 pos2(g.x(ev.end() as f64), top + h),
             );
-            let base = if ev.muted {
-                Color32::GRAY
-            } else {
-                track_color(track.color)
-            };
-            painter.rect_filled(
-                rect,
-                3.0,
-                base.gamma_multiply(if ev.muted { 0.35 } else { 0.75 }),
-            );
-            let selected = w.selection.contains(&ev.id);
-            let stroke = if selected {
-                Stroke::new(2.0, Color32::WHITE)
-            } else {
-                Stroke::new(1.0, base)
-            };
-            painter.rect_stroke(rect, 3.0, stroke, StrokeKind::Inside);
-            let visible = rect.intersect(g.lanes);
-            if visible.width() > 30.0 {
-                // Name am sichtbaren linken Rand festhalten, auch wenn das Event links hinausragt.
-                painter.with_clip_rect(visible.shrink(2.0)).text(
-                    pos2(visible.left() + 5.0, rect.top() + 3.0),
-                    Align2::LEFT_TOP,
-                    &ev.name,
-                    FontId::proportional(11.0),
-                    Color32::from_gray(if ev.muted { 160 } else { 15 }),
-                );
-            }
+            paint_event(w, painter, g, track, ev, rect);
         }
     }
     paint_drag_preview(w, painter, g);
+}
+
+/// Ein Event: farbige Namensleiste oben, darunter der Inhalt (bei Audio die Wellenform).
+fn paint_event(
+    w: &ProjectWindow,
+    painter: &Painter,
+    g: &Geo,
+    track: &Track,
+    ev: &Event,
+    rect: Rect,
+) {
+    const HEAD: f32 = 13.0;
+    let color = if ev.muted {
+        Color32::from_gray(120)
+    } else {
+        track_color(track.color)
+    };
+    let body_fill = if ev.muted {
+        Color32::from_gray(45)
+    } else {
+        color.lerp_to_gamma(Color32::from_gray(18), 0.62)
+    };
+    painter.rect_filled(rect, 3.0, body_fill);
+    let head = Rect::from_min_max(
+        rect.min,
+        pos2(rect.right(), (rect.top() + HEAD).min(rect.bottom())),
+    );
+    painter.rect_filled(
+        head,
+        egui::CornerRadius {
+            nw: 3,
+            ne: 3,
+            sw: 0,
+            se: 0,
+        },
+        color.gamma_multiply(if ev.muted { 0.6 } else { 1.0 }),
+    );
+
+    let visible = rect.intersect(g.lanes);
+    let body = Rect::from_min_max(pos2(rect.left(), head.bottom()), rect.max);
+    if let Some(clip) = ev.clip.and_then(|c| w.clip(c)) {
+        let wave = if ev.muted {
+            Color32::from_gray(110)
+        } else {
+            color.lerp_to_gamma(Color32::WHITE, 0.35)
+        };
+        paint_waveform(w, painter, g, ev, clip, body.intersect(g.lanes), wave);
+    }
+
+    let selected = w.selection.contains(&ev.id);
+    let stroke = if selected {
+        Stroke::new(2.0, Color32::WHITE)
+    } else {
+        Stroke::new(1.0, color.gamma_multiply(0.8))
+    };
+    painter.rect_stroke(rect, 3.0, stroke, StrokeKind::Inside);
+
+    if visible.width() > 24.0 {
+        // Name am sichtbaren linken Rand festhalten, auch wenn das Event links hinausragt.
+        painter
+            .with_clip_rect(head.intersect(visible).shrink2(egui::vec2(3.0, 0.0)))
+            .text(
+                pos2(visible.left() + 5.0, head.center().y),
+                Align2::LEFT_CENTER,
+                &ev.name,
+                FontId::proportional(10.5),
+                Color32::from_gray(if ev.muted { 200 } else { 10 }),
+            );
+    }
+}
+
+fn paint_waveform(
+    w: &ProjectWindow,
+    painter: &Painter,
+    g: &Geo,
+    ev: &Event,
+    clip: &crate::LoadedClip,
+    area: Rect,
+    color: Color32,
+) {
+    if area.width() < 1.0 || area.height() < 4.0 {
+        return;
+    }
+    let tempo = &w.project.tempo;
+    // Frames des Clips pro Tick.
+    let fpt = f64::from(w.sample_rate) * 60.0 / (tempo.bpm * TPQ);
+    let mid = area.center().y;
+    let half = area.height() * 0.5 - 1.0;
+    let mut shapes = Vec::with_capacity(area.width() as usize + 1);
+    let mut x = area.left().floor();
+    while x < area.right() {
+        let f0 = ev.offset as f64 + (g.ticks(x) - ev.start.0 as f64) * fpt;
+        let f1 = ev.offset as f64 + (g.ticks(x + 1.0) - ev.start.0 as f64) * fpt;
+        let (lo, hi) = clip.peaks.range(f0, f1.max(f0 + 1.0));
+        let (y0, y1) = (
+            mid - hi.clamp(-1.0, 1.0) * half,
+            mid - lo.clamp(-1.0, 1.0) * half,
+        );
+        shapes.push(egui::Shape::line_segment(
+            [pos2(x + 0.5, y0), pos2(x + 0.5, y1.max(y0 + 1.0))],
+            Stroke::new(1.0, color),
+        ));
+        x += 1.0;
+    }
+    painter.extend(shapes);
 }
 
 fn paint_drag_preview(w: &ProjectWindow, painter: &Painter, g: &Geo) {

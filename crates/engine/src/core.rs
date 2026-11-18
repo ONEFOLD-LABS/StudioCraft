@@ -10,11 +10,14 @@ use std::sync::{
 
 use studiocraft_project::{Position, TempoMap};
 
-use crate::{AudioClip, Transport, TransportState};
+use crate::{Song, Transport, TransportState};
 
 /// Befehle von der Oberfläche an den Audio-Thread.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone)]
 pub enum Command {
+    /// Neue Abspielliste. Die alte geht über die Rückgabe-Queue an die
+    /// Oberfläche zurück und wird dort freigegeben, nicht im Audio-Thread.
+    SetSong(Arc<Song>),
     Play,
     Stop,
     ToggleCycle,
@@ -52,6 +55,7 @@ impl EngineStatus {
 /// Seite der Oberfläche: sendet Befehle, liest Status, rechnet Positionen um.
 pub struct EngineControl {
     commands: rtrb::Producer<Command>,
+    garbage: rtrb::Consumer<Arc<Song>>,
     pub status: Arc<EngineStatus>,
     pub tempo: TempoMap,
     pub sample_rate: u32,
@@ -61,7 +65,13 @@ impl EngineControl {
     /// Sendet einen Befehl. Ist die Queue voll, geht der Befehl verloren
     /// und `false` wird zurückgegeben.
     pub fn send(&mut self, cmd: Command) -> bool {
+        self.collect_garbage();
         self.commands.push(cmd).is_ok()
+    }
+
+    /// Gibt Abspiellisten frei, die der Audio-Thread nicht mehr braucht.
+    pub fn collect_garbage(&mut self) {
+        while self.garbage.pop().is_ok() {}
     }
 
     pub fn frames(&self, pos: Position) -> u64 {
@@ -77,25 +87,30 @@ impl EngineControl {
 
 /// Seite des Audio-Threads.
 pub struct EngineCore {
-    clip: AudioClip,
+    song: Arc<Song>,
+    sample_rate: u32,
     transport: Transport,
     commands: rtrb::Consumer<Command>,
+    garbage: rtrb::Producer<Arc<Song>>,
     status: Arc<EngineStatus>,
 }
 
 /// Erzeugt das zusammengehörige Paar aus Kern und Steuerung.
-pub fn engine(clip: AudioClip, tempo: TempoMap) -> (EngineCore, EngineControl) {
+pub fn engine(sample_rate: u32, tempo: TempoMap) -> (EngineCore, EngineControl) {
     let (producer, consumer) = rtrb::RingBuffer::new(256);
+    let (garbage_tx, garbage_rx) = rtrb::RingBuffer::new(64);
     let status = Arc::new(EngineStatus::default());
-    let sample_rate = clip.sample_rate;
     let core = EngineCore {
-        clip,
+        song: Arc::new(Song::default()),
+        sample_rate,
         transport: Transport::default(),
         commands: consumer,
+        garbage: garbage_tx,
         status: status.clone(),
     };
     let control = EngineControl {
         commands: producer,
+        garbage: garbage_rx,
         status,
         tempo,
         sample_rate,
@@ -105,12 +120,18 @@ pub fn engine(clip: AudioClip, tempo: TempoMap) -> (EngineCore, EngineControl) {
 
 impl EngineCore {
     pub fn sample_rate(&self) -> u32 {
-        self.clip.sample_rate
+        self.sample_rate
     }
 
     fn apply(&mut self, cmd: Command) {
         let t = &mut self.transport;
         match cmd {
+            Command::SetSong(song) => {
+                let old = std::mem::replace(&mut self.song, song);
+                // Ist die Rückgabe-Queue voll, bleibt nur das Freigeben hier.
+                // Bei 64 Plätzen und Abholung in jedem UI-Frame kommt das praktisch nicht vor.
+                let _ = self.garbage.push(old);
+            }
             Command::Play => t.play(),
             Command::Stop => t.stop(false),
             Command::ToggleCycle => t.cycle = !t.cycle,
@@ -129,21 +150,17 @@ impl EngineCore {
             self.apply(cmd);
         }
 
+        out.fill(0.0);
         let mut frames_left = (out.len() / 2) as u64;
         let mut offset = 0usize;
-        while frames_left > 0 {
-            if !self.transport.is_running() {
-                out[offset..].fill(0.0);
-                break;
-            }
+        while frames_left > 0 && self.transport.is_running() {
             let run = self.transport.frames_until_wrap(frames_left);
             let n = run as usize * 2;
-            let dst = &mut out[offset..offset + n];
-            let src_start = (self.transport.cursor * 2) as usize;
-            let src = self.clip.samples.get(src_start..).unwrap_or(&[]);
-            let copy = n.min(src.len());
-            dst[..copy].copy_from_slice(&src[..copy]);
-            dst[copy..].fill(0.0);
+            self.song.mix(
+                &mut out[offset..offset + n],
+                self.transport.cursor,
+                run as usize,
+            );
             self.transport.advance(run);
             offset += n;
             frames_left -= run;
@@ -161,13 +178,12 @@ impl EngineCore {
 mod tests {
     use super::*;
 
-    /// Clip, dessen linker Kanal den Frame-Index enthält.
-    fn ramp(frames: usize) -> AudioClip {
+    /// Kern mit einem Clip ab Frame 0, dessen linker Kanal den Frame-Index enthält.
+    fn ramp(frames: usize) -> (EngineCore, EngineControl) {
         let samples: Vec<f32> = (0..frames).flat_map(|i| [i as f32, -(i as f32)]).collect();
-        AudioClip {
-            sample_rate: 48_000,
-            samples: samples.into(),
-        }
+        let (core, mut ctl) = engine(48_000, TempoMap::default());
+        ctl.send(Command::SetSong(Arc::new(Song::single(samples.into()))));
+        (core, ctl)
     }
 
     fn left(out: &[f32]) -> Vec<f32> {
@@ -176,7 +192,7 @@ mod tests {
 
     #[test]
     fn stopped_renders_silence() {
-        let (mut core, _ctl) = engine(ramp(100), TempoMap::default());
+        let (mut core, _ctl) = ramp(100);
         let mut out = [1.0f32; 16];
         core.process(&mut out);
         assert!(out.iter().all(|&s| s == 0.0));
@@ -184,7 +200,7 @@ mod tests {
 
     #[test]
     fn plays_clip_from_cursor() {
-        let (mut core, mut ctl) = engine(ramp(100), TempoMap::default());
+        let (mut core, mut ctl) = ramp(100);
         ctl.send(Command::Locate(10));
         ctl.send(Command::Play);
         let mut out = [0.0f32; 8];
@@ -197,7 +213,7 @@ mod tests {
 
     #[test]
     fn cycle_wraps_sample_accurately_inside_block() {
-        let (mut core, mut ctl) = engine(ramp(100), TempoMap::default());
+        let (mut core, mut ctl) = ramp(100);
         ctl.send(Command::SetLocators(20, 23));
         ctl.send(Command::ToggleCycle);
         ctl.send(Command::Locate(21));
@@ -209,7 +225,7 @@ mod tests {
 
     #[test]
     fn past_clip_end_is_silent() {
-        let (mut core, mut ctl) = engine(ramp(3), TempoMap::default());
+        let (mut core, mut ctl) = ramp(3);
         ctl.send(Command::Locate(1));
         ctl.send(Command::Play);
         let mut out = [9.0f32; 8];
@@ -218,8 +234,21 @@ mod tests {
     }
 
     #[test]
+    fn replaced_song_is_returned_for_freeing() {
+        let (mut core, mut ctl) = ramp(10);
+        let mut out = [0.0f32; 4];
+        core.process(&mut out);
+        ctl.send(Command::SetSong(Arc::new(Song::default())));
+        core.process(&mut out);
+        // Die leere Start-Liste hat `send` schon freigegeben; die Rampen-Liste wartet.
+        assert_eq!(ctl.garbage.slots(), 1);
+        ctl.collect_garbage();
+        assert_eq!(ctl.garbage.slots(), 0);
+    }
+
+    #[test]
     fn bar_to_frames_at_120_bpm() {
-        let (_core, ctl) = engine(ramp(1), TempoMap::default());
+        let (_core, ctl) = ramp(1);
         let bar2 = ctl.tempo.position(2, 1);
         assert_eq!(ctl.frames(bar2), 96_000);
         assert_eq!(ctl.position(96_000), bar2);

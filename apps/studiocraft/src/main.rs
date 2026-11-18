@@ -1,13 +1,21 @@
 //! StudioCraft – Desktop-App (Prototyp des Projektfensters).
 //!
-//! Aufruf: `studiocraft [datei.wav] [--tracks <n>] [--audio-host <name>]`
-//! Ohne Datei läuft der Transport mit Stille, damit Cursor und Cycle sichtbar sind.
+//! Aufruf: `studiocraft [datei.wav …] [--tracks <n>] [--audio-host <name>]`
 
-use std::process::ExitCode;
+use std::{path::Path, process::ExitCode};
 
-use studiocraft_engine::{AudioClip, PreparedOutput, engine};
+use studiocraft_engine::{PreparedOutput, engine};
 use studiocraft_project::Project;
 use studiocraft_ui::ProjectWindow;
+
+const USAGE: &str = "\
+Aufruf: studiocraft [datei.wav …] [--tracks <n>] [--audio-host <name>]
+
+  datei.wav     Audiodateien, jede auf eine eigene Audio-Spur ab Takt 1
+                (ohne Dateien: Demo-Projekt mit --tracks Spuren, Standard 100)
+  --audio-host  Audio-Host wählen, z. B. PipeWire, ALSA, JACK, WASAPI, CoreAudio
+
+Weitere Dateien lassen sich ins Projektfenster ziehen.";
 
 struct App {
     window: ProjectWindow,
@@ -24,7 +32,7 @@ impl eframe::App for App {
 use eframe::egui;
 
 fn main() -> ExitCode {
-    let mut file = None;
+    let mut files = Vec::new();
     let mut tracks = 100usize;
     let mut host = None;
     let mut args = std::env::args().skip(1);
@@ -39,41 +47,28 @@ fn main() -> ExitCode {
             },
             "--audio-host" => host = args.next(),
             "-h" | "--help" => {
-                println!("Aufruf: studiocraft [datei.wav] [--tracks <n>] [--audio-host <name>]");
+                println!("{USAGE}");
                 return ExitCode::SUCCESS;
             }
-            _ if !a.starts_with('-') && file.is_none() => file = Some(a),
+            _ if !a.starts_with('-') => files.push(a),
             _ => {
-                eprintln!("Unbekanntes Argument: {a}");
+                eprintln!("Unbekanntes Argument: {a}\n\n{USAGE}");
                 return ExitCode::from(2);
             }
         }
     }
 
-    let project = Project::demo(tracks);
-    let clip = match &file {
-        Some(f) => match AudioClip::load_wav(f) {
-            Ok(c) => Some(c),
-            Err(e) => {
-                eprintln!("Fehler: {f}: {e}");
-                return ExitCode::FAILURE;
-            }
-        },
-        None => None,
+    // Mit Dateien: leeres Projekt, jede Datei auf eigener Spur. Ohne: Demo-Spuren.
+    let project = if files.is_empty() {
+        Project::demo(tracks)
+    } else {
+        Project::default()
     };
-    let preferred = clip.as_ref().map_or(48_000, |c| c.sample_rate);
 
-    let (transport, audio, status) = match PreparedOutput::open(host.as_deref(), preferred) {
+    let (transport, audio, status) = match PreparedOutput::open(host.as_deref(), 48_000) {
         Ok(prepared) => {
             let info = prepared.info.clone();
-            let clip = match clip {
-                Some(c) => c.resampled(info.sample_rate),
-                None => AudioClip {
-                    sample_rate: info.sample_rate,
-                    samples: Vec::new().into(),
-                },
-            };
-            let (core, ctl) = engine(clip, project.tempo.clone());
+            let (core, ctl) = engine(info.sample_rate, project.tempo.clone());
             match prepared.start(core) {
                 Ok(out) => {
                     let block = info
@@ -91,11 +86,20 @@ fn main() -> ExitCode {
         Err(e) => (None, None, format!("Kein Audio: {e}")),
     };
 
+    let mut window = ProjectWindow::new(project, transport, status);
+    for f in &files {
+        if let Err(e) = window.import_audio(Path::new(f), None) {
+            eprintln!("Fehler: {e}");
+            return ExitCode::FAILURE;
+        }
+    }
+
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title("StudioCraft")
             .with_app_id("studiocraft")
-            .with_inner_size([1400.0, 860.0]),
+            .with_inner_size([1400.0, 860.0])
+            .with_drag_and_drop(true),
         ..Default::default()
     };
     let result = eframe::run_native(
@@ -103,7 +107,7 @@ fn main() -> ExitCode {
         options,
         Box::new(move |_cc| {
             Ok(Box::new(App {
-                window: ProjectWindow::new(project, transport, status),
+                window,
                 _audio: audio,
             }))
         }),

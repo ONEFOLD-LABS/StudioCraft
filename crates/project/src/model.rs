@@ -3,6 +3,19 @@
 use crate::{Position, TICKS_PER_QUARTER, TempoMap};
 
 pub type EventId = u64;
+/// Index eines Clips im Pool.
+pub type ClipId = u32;
+
+/// Eintrag im Pool: eine Audio-Datei (Spec: „Pool“, „Audio-Clip“).
+/// Die Samples selbst hält die Engine; das Modell kennt nur die Eckdaten.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PoolClip {
+    pub name: String,
+    pub path: Option<String>,
+    /// Abtastrate der geladenen Samples.
+    pub sample_rate: u32,
+    pub frames: u64,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TrackKind {
@@ -40,6 +53,10 @@ pub struct Event {
     pub length: u64,
     pub name: String,
     pub muted: bool,
+    /// Audio-Events: Clip im Pool. `None` bei MIDI-Parts und leeren Events.
+    pub clip: Option<ClipId>,
+    /// Audio-Events: Startpunkt im Clip in Frames des Clips.
+    pub offset: u64,
 }
 
 impl Event {
@@ -67,6 +84,7 @@ pub struct Track {
 pub struct Project {
     pub tracks: Vec<Track>,
     pub tempo: TempoMap,
+    pub pool: Vec<PoolClip>,
     next_id: EventId,
 }
 
@@ -85,6 +103,7 @@ impl Default for Project {
     fn default() -> Self {
         Self {
             tracks: Vec::new(),
+            pool: Vec::new(),
             tempo: TempoMap::default(),
             next_id: 1,
         }
@@ -131,6 +150,8 @@ impl Project {
                         length: len,
                         name: format!("{} #{}", kind.label(), k + 1),
                         muted: false,
+                        clip: None,
+                        offset: 0,
                     });
                     at += len + ((i as u64 + 2 * k) % 3) * bar;
                     k += 1;
@@ -178,6 +199,9 @@ impl Project {
         }
         let mut right = ev.clone();
         right.id = new_id;
+        if let Some(c) = ev.clip.and_then(|c| self.pool.get(c as usize)) {
+            right.offset = ev.offset + self.tempo.frames(at - ev.start.0, c.sample_rate);
+        }
         right.start = Position(at);
         right.length = ev.end() - at;
         ev.length = at - ev.start.0;
@@ -247,9 +271,64 @@ impl Project {
                 length,
                 name,
                 muted: false,
+                clip: None,
+                offset: 0,
             },
         );
         Some(id)
+    }
+
+    pub fn add_track(&mut self, kind: TrackKind, name: impl Into<String>) -> usize {
+        let i = self.tracks.len();
+        self.tracks.push(Track {
+            name: name.into(),
+            kind,
+            color: PALETTE[i % PALETTE.len()],
+            mute: false,
+            solo: false,
+            record: false,
+            events: Vec::new(),
+        });
+        i
+    }
+
+    pub fn add_clip(&mut self, clip: PoolClip) -> ClipId {
+        self.pool.push(clip);
+        (self.pool.len() - 1) as ClipId
+    }
+
+    /// Legt ein Audio-Event an, das den ganzen Clip abspielt.
+    pub fn add_audio_event(&mut self, track: usize, start: u64, clip: ClipId) -> Option<EventId> {
+        let c = self.pool.get(clip as usize)?;
+        if self.tracks.get(track)?.kind != TrackKind::Audio {
+            return None;
+        }
+        let length = self.tempo.ticks(c.frames, c.sample_rate).max(1);
+        let name = c.name.clone();
+        let id = self.next_event_id();
+        let events = &mut self.tracks[track].events;
+        let pos = events.partition_point(|e| e.start.0 <= start);
+        events.insert(
+            pos,
+            Event {
+                id,
+                start: Position(start),
+                length,
+                name,
+                muted: false,
+                clip: Some(clip),
+                offset: 0,
+            },
+        );
+        Some(id)
+    }
+
+    /// Ob eine Spur zu hören ist: nicht stumm, und bei aktivem Solo selbst Solo.
+    pub fn audible(&self, track: usize) -> bool {
+        let any_solo = self.tracks.iter().any(|t| t.solo);
+        self.tracks
+            .get(track)
+            .is_some_and(|t| !t.mute && (!any_solo || t.solo))
     }
 
     /// Ende des letzten Events in Ticks (mindestens ein Takt).
@@ -306,6 +385,50 @@ mod tests {
         assert_eq!(moved, id);
         assert!(p.tracks[0].events.is_empty());
         assert_eq!(p.tracks[1].events[0].id, id, "nach Start sortiert");
+    }
+
+    fn pool_project() -> (Project, ClipId) {
+        let mut p = Project::default();
+        p.add_track(TrackKind::Audio, "Gesang");
+        // 2 s bei 48 kHz = 1 Takt bei 120 BPM
+        let c = p.add_clip(PoolClip {
+            name: "take".into(),
+            path: None,
+            sample_rate: 48_000,
+            frames: 96_000,
+        });
+        (p, c)
+    }
+
+    #[test]
+    fn audio_event_spans_clip() {
+        let (mut p, c) = pool_project();
+        let id = p.add_audio_event(0, 0, c).unwrap();
+        assert_eq!(p.event(id).unwrap().length, p.tempo.signature.bar_ticks());
+        assert_eq!(p.event(id).unwrap().clip, Some(c));
+    }
+
+    #[test]
+    fn split_moves_offset_of_right_part() {
+        let (mut p, c) = pool_project();
+        let id = p.add_audio_event(0, 0, c).unwrap();
+        let right = p.split(id, TICKS_PER_QUARTER).unwrap();
+        // Eine Viertel bei 120 BPM = 0,5 s = 24 000 Frames.
+        assert_eq!(p.event(right).unwrap().offset, 24_000);
+        assert_eq!(p.event(id).unwrap().offset, 0);
+    }
+
+    #[test]
+    fn solo_and_mute_decide_audibility() {
+        let mut p = Project::default();
+        for n in ["a", "b", "c"] {
+            p.add_track(TrackKind::Audio, n);
+        }
+        assert!(p.audible(0) && p.audible(1));
+        p.tracks[1].mute = true;
+        assert!(!p.audible(1));
+        p.tracks[2].solo = true;
+        assert!(!p.audible(0) && !p.audible(1) && p.audible(2));
     }
 
     #[test]

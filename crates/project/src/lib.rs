@@ -7,5 +7,5 @@
 pub mod model;
 pub mod time;
 
-pub use model::{Event, EventId, Project, Track, TrackKind};
+pub use model::{ClipId, Event, EventId, PoolClip, Project, Track, TrackKind};
 pub use time::{Position, TICKS_PER_QUARTER, TempoMap, TimeSignature};

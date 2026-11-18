@@ -6,10 +6,22 @@
 
 mod timeline;
 mod tools;
+pub mod waveform;
+
+use std::{collections::HashMap, path::Path, sync::Arc};
 
 use egui::{Color32, Key, RichText, Ui};
-use studiocraft_engine::{Command, EngineControl, TransportState};
-use studiocraft_project::{EventId, Position, Project, TICKS_PER_QUARTER};
+use studiocraft_engine::{AudioClip, Command, EngineControl, Song, TransportState};
+use studiocraft_project::{
+    ClipId, EventId, PoolClip, Position, Project, TICKS_PER_QUARTER, TrackKind,
+};
+use waveform::Peaks;
+
+/// Samples und Wellenform eines Pool-Clips (in Engine-Abtastrate).
+pub struct LoadedClip {
+    pub samples: Arc<[f32]>,
+    pub peaks: Peaks,
+}
 
 pub use tools::{Grid, Tool};
 
@@ -33,11 +45,20 @@ pub struct ProjectWindow {
     right_locator: u64,
     cycle: bool,
     frame_ms: f32,
+    /// Audio-Daten zum Pool des Projekts.
+    clips: HashMap<ClipId, LoadedClip>,
+    /// Abtastrate der Engine; Clips werden beim Import darauf umgerechnet.
+    sample_rate: u32,
+    /// Projekt geändert: Abspielliste der Engine neu bauen.
+    dirty: bool,
+    /// Letzte Meldung (z. B. Importfehler) für die Statuszeile.
+    message: Option<String>,
 }
 
 impl ProjectWindow {
     pub fn new(project: Project, transport: Option<EngineControl>, audio_status: String) -> Self {
         let bar = project.tempo.signature.bar_ticks();
+        let sample_rate = transport.as_ref().map_or(48_000, |t| t.sample_rate);
         let mut w = Self {
             project,
             transport,
@@ -55,6 +76,10 @@ impl ProjectWindow {
             right_locator: 4 * bar,
             cycle: false,
             frame_ms: 0.0,
+            clips: HashMap::new(),
+            sample_rate,
+            dirty: true,
+            message: None,
         };
         w.send_locators();
         w
@@ -111,6 +136,82 @@ impl ProjectWindow {
         ((t / g).round() * g) as u64
     }
 
+    /// Lädt eine WAV-Datei in den Pool und legt ein Event an. Ohne Ziel
+    /// (Spur, Position) entsteht eine neue Audio-Spur ab Takt 1.
+    pub fn import_audio(
+        &mut self,
+        path: &Path,
+        target: Option<(usize, u64)>,
+    ) -> Result<EventId, String> {
+        let clip = AudioClip::load_wav(path).map_err(|e| format!("{}: {e}", path.display()))?;
+        let name = path
+            .file_stem()
+            .map_or("Audio".into(), |s| s.to_string_lossy().into_owned());
+        self.import_clip(&name, Some(path.display().to_string()), clip, target)
+    }
+
+    /// Wie [`Self::import_audio`], mit bereits geladenen Samples.
+    pub fn import_clip(
+        &mut self,
+        name: &str,
+        path: Option<String>,
+        clip: AudioClip,
+        target: Option<(usize, u64)>,
+    ) -> Result<EventId, String> {
+        let clip = clip.resampled(self.sample_rate);
+        let id = self.project.add_clip(PoolClip {
+            name: name.to_owned(),
+            path,
+            sample_rate: clip.sample_rate,
+            frames: clip.frames(),
+        });
+        let peaks = Peaks::new(&clip.samples);
+        self.clips.insert(
+            id,
+            LoadedClip {
+                samples: clip.samples,
+                peaks,
+            },
+        );
+        let (track, start) = match target {
+            Some((t, at))
+                if self
+                    .project
+                    .tracks
+                    .get(t)
+                    .is_some_and(|t| t.kind == TrackKind::Audio) =>
+            {
+                (t, at)
+            }
+            Some((_, at)) => (self.project.add_track(TrackKind::Audio, name), at),
+            None => (self.project.add_track(TrackKind::Audio, name), 0),
+        };
+        let ev = self
+            .project
+            .add_audio_event(track, start, id)
+            .ok_or_else(|| format!("{name}: Event konnte nicht angelegt werden"))?;
+        self.selected_track = Some(track);
+        self.selection = vec![ev];
+        self.dirty = true;
+        Ok(ev)
+    }
+
+    pub(crate) fn clip(&self, id: ClipId) -> Option<&LoadedClip> {
+        self.clips.get(&id)
+    }
+
+    /// Baut die Abspielliste neu und übergibt sie der Engine.
+    fn rebuild_song(&mut self) {
+        let Some(t) = &mut self.transport else { return };
+        let samples: HashMap<ClipId, Arc<[f32]>> = self
+            .clips
+            .iter()
+            .map(|(&id, c)| (id, c.samples.clone()))
+            .collect();
+        let song = Song::build(&self.project, &samples, self.sample_rate);
+        t.send(Command::SetSong(Arc::new(song)));
+    }
+
     fn sync_from_engine(&mut self) {
         if let Some(t) = &self.transport {
             self.cursor = t.position(t.status.cursor()).0;
@@ -163,6 +264,7 @@ impl ProjectWindow {
                 Key::Space => self.toggle_play(),
                 Key::Slash => self.toggle_cycle(),
                 Key::Delete | Key::Backspace => {
+                    self.dirty = true;
                     for id in std::mem::take(&mut self.selection) {
                         self.project.delete(id);
                     }
@@ -177,6 +279,9 @@ impl ProjectWindow {
     /// Zeichnet das ganze Projektfenster.
     pub fn ui(&mut self, ui: &mut Ui) {
         self.sync_from_engine();
+        if let Some(t) = &mut self.transport {
+            t.collect_garbage();
+        }
         self.handle_keys(ui);
         let dt = ui.input(|i| i.unstable_dt) * 1000.0;
         self.frame_ms = if self.frame_ms == 0.0 {
@@ -194,6 +299,11 @@ impl ProjectWindow {
                 .show(ui, |ui| self.inspector(ui));
         }
         egui::CentralPanel::default().show(ui, |ui| timeline::show(self, ui));
+
+        if self.dirty {
+            self.dirty = false;
+            self.rebuild_song();
+        }
 
         if self.is_playing() {
             ui.ctx().request_repaint();
@@ -241,8 +351,9 @@ impl ProjectWindow {
         });
         ui.label(format!("Typ: {}", track.kind.label()));
         ui.horizontal(|ui| {
-            ui.toggle_value(&mut track.mute, "M");
-            ui.toggle_value(&mut track.solo, "S");
+            let m = ui.toggle_value(&mut track.mute, "M").changed();
+            let s = ui.toggle_value(&mut track.solo, "S").changed();
+            self.dirty |= m || s;
             if track.kind.holds_events() {
                 ui.toggle_value(&mut track.record, "R");
             }
@@ -316,6 +427,10 @@ impl ProjectWindow {
                 ui.weak(format!("{:.1} ms/Frame", self.frame_ms));
                 ui.separator();
                 ui.weak(&self.audio_status);
+                if let Some(m) = &self.message {
+                    ui.separator();
+                    ui.colored_label(ui.visuals().warn_fg_color, m);
+                }
             });
         });
     }
@@ -336,6 +451,7 @@ pub(crate) const TPQ: f64 = TICKS_PER_QUARTER as f64;
 mod tests {
     use super::*;
     use egui_kittest::Harness;
+    use studiocraft_project::TempoMap;
 
     /// Rendert das Projektfenster headless. Mit `STUDIOCRAFT_SHOTS=<ordner>`
     /// werden die Bilder gespeichert, sonst wird nur geprüft, dass es rendert.
@@ -362,8 +478,17 @@ mod tests {
     #[test]
     #[ignore = "Messung, kein Funktionstest"]
     fn frame_time_many_tracks() {
-        for n in [100, 1000] {
-            let mut w = ProjectWindow::new(Project::demo(n), None, String::new());
+        for (n, audio) in [(100, false), (1000, false), (50, true)] {
+            let mut w = if audio {
+                let mut w = ProjectWindow::new(Project::default(), None, String::new());
+                let clip = tone_clip(120.0, 110.0);
+                for _ in 0..n {
+                    w.import_clip("Audio", None, clip.clone(), None).unwrap();
+                }
+                w
+            } else {
+                ProjectWindow::new(Project::demo(n), None, String::new())
+            };
             w.view.zoom(0.5, None);
             let calls = std::rc::Rc::new(std::cell::Cell::new(0u32));
             let counter = calls.clone();
@@ -388,11 +513,89 @@ mod tests {
                 calls.get() - before >= frames,
                 "Oberfläche wurde nicht jede Frame gebaut"
             );
+            let art = if audio { "Audio-Spuren mit Wellenform" } else { "Spuren" };
             println!(
-                "{n} Spuren: {ms:.2} ms CPU pro Frame ({} Durchläufe)",
+                "{n} {art}: {ms:.2} ms CPU pro Frame ({} Durchläufe)",
                 calls.get() - before
             );
         }
+    }
+
+    /// Synthetischer Clip: abklingende Töne, damit die Wellenform Struktur hat.
+    fn tone_clip(seconds: f32, hz: f32) -> AudioClip {
+        let rate = 48_000;
+        let n = (seconds * rate as f32) as usize;
+        let beat = rate as usize / 2; // Viertel bei 120 BPM
+        let samples: Vec<f32> = (0..n)
+            .flat_map(|i| {
+                let t = i as f32 / rate as f32;
+                let env = (-((i % beat) as f32) / (beat as f32 * 0.25)).exp();
+                let v = (t * hz * std::f32::consts::TAU).sin() * env * 0.9;
+                [v, v]
+            })
+            .collect();
+        AudioClip {
+            sample_rate: rate,
+            samples: samples.into(),
+        }
+    }
+
+    #[test]
+    fn mute_and_solo_reach_the_engine() {
+        let (mut core, ctl) = studiocraft_engine::engine(48_000, TempoMap::default());
+        let mut w = ProjectWindow::new(Project::default(), Some(ctl), String::new());
+        w.import_clip("A", None, tone_clip(1.0, 220.0), None)
+            .unwrap();
+        w.import_clip("B", None, tone_clip(1.0, 330.0), None)
+            .unwrap();
+        let mut out = vec![0.0f32; 512];
+        let mut level = |w: &mut ProjectWindow| {
+            w.rebuild_song();
+            w.locate(0);
+            w.send(Command::Play);
+            core.process(&mut out);
+            w.send(Command::Stop);
+            core.process(&mut [0.0; 2]);
+            out.iter().map(|s| s.abs()).fold(0.0f32, f32::max)
+        };
+        let both = level(&mut w);
+        assert!(both > 0.5, "beide Spuren klingen: {both}");
+        w.project.tracks[0].mute = true;
+        let one = level(&mut w);
+        assert!(one > 0.1 && one < both, "eine Spur stumm: {one}");
+        w.project.tracks[0].mute = false;
+        w.project.tracks[1].solo = true;
+        w.project.tracks[1].mute = true;
+        assert_eq!(level(&mut w), 0.0, "Solo auf stummer Spur: Stille");
+    }
+
+    #[test]
+    fn renders_audio_events_with_waveforms() {
+        shot("audio-wellenformen", |w| {
+            w.project = Project::default();
+            w.import_clip("Bass", None, tone_clip(8.0, 55.0), None)
+                .unwrap();
+            w.import_clip(
+                "Gitarre",
+                None,
+                tone_clip(6.0, 196.0),
+                Some((usize::MAX, 2 * w.bar_ticks())),
+            )
+            .unwrap();
+            let id = w
+                .import_clip(
+                    "Gesang",
+                    None,
+                    tone_clip(8.0, 440.0),
+                    Some((usize::MAX, w.bar_ticks())),
+                )
+                .unwrap();
+            let right = w.project.split(id, 3 * w.bar_ticks()).unwrap();
+            w.project.move_event(right, 2, 4 * w.bar_ticks(), false);
+            w.project.tracks[1].events[0].muted = true;
+            w.view.zoom(2.0, None);
+            w.selection = vec![right];
+        });
     }
 
     #[test]

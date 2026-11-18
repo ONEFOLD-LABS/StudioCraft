@@ -4,12 +4,13 @@
 use std::{
     io::{self, BufRead, Write},
     process::ExitCode,
+    sync::Arc,
     thread,
     time::Duration,
 };
 
 use studiocraft_engine::{
-    AudioClip, Command, EngineControl, PreparedOutput, TransportState, engine, output,
+    AudioClip, Command, EngineControl, PreparedOutput, Song, TransportState, engine, output,
 };
 use studiocraft_project::TempoMap;
 
@@ -157,7 +158,8 @@ fn main() -> ExitCode {
         bpm: args.bpm,
         ..TempoMap::default()
     };
-    let (core, mut ctl) = engine(clip, tempo);
+    let (core, mut ctl) = engine(clip.sample_rate, tempo);
+    ctl.send(Command::SetSong(Arc::new(Song::single(clip.samples))));
     let output = match prepared.start(core) {
         Ok(o) => o,
         Err(e) => {

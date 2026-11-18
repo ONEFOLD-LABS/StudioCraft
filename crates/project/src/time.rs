@@ -54,6 +54,17 @@ impl TempoMap {
         pos.0 as f64 / TICKS_PER_QUARTER as f64 * 60.0 / self.bpm
     }
 
+    /// Dauer in Ticks als Anzahl Frames bei `rate`.
+    pub fn frames(&self, ticks: u64, rate: u32) -> u64 {
+        (ticks as f64 / TICKS_PER_QUARTER as f64 * 60.0 / self.bpm * f64::from(rate)).round() as u64
+    }
+
+    /// Anzahl Frames bei `rate` als Dauer in Ticks.
+    pub fn ticks(&self, frames: u64, rate: u32) -> u64 {
+        (frames as f64 / f64::from(rate) * self.bpm / 60.0 * TICKS_PER_QUARTER as f64).round()
+            as u64
+    }
+
     /// Position aus Takt und Schlag, beide ab 1 gezählt wie im Lineal (1.1 = Anfang).
     pub fn position(&self, bar: u64, beat: u64) -> Position {
         let sig = self.signature;
