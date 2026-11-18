@@ -39,7 +39,7 @@ jobs:
             libx11-dev libxcb1-dev libxcursor-dev libxrandr-dev libxi-dev libfontconfig1-dev \
             libfreetype-dev libgl1-mesa-dev
       - run: packaging/linux/package.sh
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: linux-${{ matrix.runner }}
           path: dist/release/*
@@ -81,7 +81,7 @@ jobs:
           else
             tar -C dist -czf "dist/release/$name.tar.gz" "$name"
           fi
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.os }}
           path: dist/release/*
