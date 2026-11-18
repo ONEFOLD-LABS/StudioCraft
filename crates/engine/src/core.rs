@@ -23,6 +23,9 @@ pub enum Command {
     SetInserts(usize, Option<Box<InsertChain>>),
     /// Parameter eines Inserts setzen: Spur, Slot, Parameter-Id, Wert.
     SetParam(usize, usize, u32, f64),
+    /// Note live spielen (Anspielen im Editor, MIDI-Keyboard): Spur, Taste,
+    /// Anschlag 0–127, an/aus. Klingt am Anfang des nächsten Blocks.
+    LiveNote(usize, u8, u8, bool),
     /// Insert umgehen oder wieder einschalten: Spur, Slot, umgangen.
     SetBypass(usize, usize, bool),
     /// Neue Abspielliste. Die alte geht über die Rückgabe-Queue an die
@@ -228,6 +231,18 @@ impl EngineCore {
                     && let Some(ins) = chain.slot_mut(slot)
                 {
                     ins.instance.set_param(id, value);
+                }
+            }
+            Command::LiveNote(track, key, velocity, on) => {
+                let key = key.min(127);
+                if let Some(Some(chain)) = self.inserts.get_mut(track) {
+                    chain.note(0, key, f32::from(velocity) / 127.0, on);
+                    let held = &mut self.held[track.min(MAX_METERED_TRACKS - 1)];
+                    if on {
+                        *held |= 1 << key;
+                    } else {
+                        *held &= !(1 << key);
+                    }
                 }
             }
             Command::SetBypass(track, slot, bypass) => {

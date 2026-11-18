@@ -41,6 +41,8 @@ Mit dem Auswahl-Werkzeug hat jedes Event Smart-Bereiche: am Rand in der unteren 
 
 **Instrument-Spuren:** *Projekt → Instrument-Spur hinzufügen* legt eine Spur mit einem CLAP-Instrument an (Strg+T legt eine Audio-Spur an). Parts (mit dem Zeichnen-Werkzeug) spielen ihre Noten über das Instrument; Instrumente und Effekte laufen auch im Stopp weiter, damit sie ausklingen. Parameter großer Plugins lassen sich im Inspector durchsuchen.
 
+**Key-Editor:** Doppelklick auf einen Part öffnet ihn in der unteren Zone (Reiter *Mixer* / *Key-Editor*). Klaviatur links (Klick spielt an), Notenraster mit eigenem Zoom, Velocity-Spur unten. Die Werkzeuge gelten auch hier: Auswahl verschiebt (Strg kopiert, rechter Rand ändert die Länge), Zeichnen setzt Noten und zieht sie auf, Löschen entfernt; Entf löscht ausgewählte Noten, alles rückgängig zu machen.
+
 F3 blendet den Mixer in der unteren Zone ein und aus: je Kanal Panorama, Mute/Solo, Fader mit Pegelanzeige, rechts der Ausgang. Strg + Klick setzt Fader auf 0 dB bzw. Panorama auf Mitte, Umschalt + Ziehen stellt fein ein.
 
 Benötigt Rust 1.85 oder neuer (Edition 2024). Unter Linux zusätzlich die Entwicklerdateien von ALSA und PipeWire (`libasound`, `libpipewire-0.3`) sowie `clang`. `cargo run -- --list-hosts` zeigt die verfügbaren Audio-Hosts, `--audio-host alsa` wählt einen anderen.

@@ -122,7 +122,27 @@ impl ProjectWindow {
             });
             ui.menu_button("Ansicht", |ui| {
                 ui.checkbox(&mut self.show_inspector, "Inspector (Alt+I)");
-                ui.checkbox(&mut self.show_mixer, "Mixer (F3)");
+                if ui
+                    .selectable_label(
+                        self.show_lower && self.lower == crate::LowerZone::Mixer,
+                        "Mixer (F3)",
+                    )
+                    .clicked()
+                {
+                    self.show_lower = true;
+                    self.lower = crate::LowerZone::Mixer;
+                }
+                if ui
+                    .selectable_label(
+                        self.show_lower && self.lower == crate::LowerZone::Editor,
+                        "Key-Editor",
+                    )
+                    .clicked()
+                {
+                    self.show_lower = true;
+                    self.lower = crate::LowerZone::Editor;
+                }
+                ui.checkbox(&mut self.show_lower, "Untere Zone");
             });
         });
     }

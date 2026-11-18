@@ -1,0 +1,763 @@
+//! Key-Editor (Spec-Abschnitt „Editoren“): Noten als Balken über einer
+//! Klaviatur, darunter die Velocity-Spur. Läuft in der unteren Zone.
+//!
+//! Werkzeuge wie im Projektfenster: Auswahl (verschieben, Strg kopiert, am
+//! rechten Rand Länge ändern), Zeichnen (Note setzen, Länge aufziehen),
+//! Löschen. Alt hebt Snap auf. Klick auf die Klaviatur spielt den Ton an.
+
+use egui::{
+    Align2, Color32, FontId, Painter, Pos2, Rect, Sense, Stroke, StrokeKind, Ui, pos2, vec2,
+};
+use studiocraft_engine::Command;
+use studiocraft_project::{EventId, Note};
+
+use crate::{ProjectWindow, TPQ, Tool};
+
+const KEYS_W: f32 = 52.0;
+const RULER_H: f32 = 20.0;
+const VEL_H: f32 = 70.0;
+/// Fangbereich am rechten Notenrand in Pixel.
+const EDGE: f32 = 6.0;
+
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct KeyView {
+    pub px_per_quarter: f32,
+    pub scroll_ticks: f64,
+    pub key_h: f32,
+    /// Oberkante der Ansicht in Pixel ab Tonhöhe 127.
+    pub scroll_y: f32,
+}
+
+impl Default for KeyView {
+    fn default() -> Self {
+        // C3 bis C6 grob in der Mitte.
+        Self {
+            px_per_quarter: 60.0,
+            scroll_ticks: 0.0,
+            key_h: 11.0,
+            scroll_y: (127.0 - 84.0) * 11.0,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub(crate) enum NoteDrag {
+    /// Auswahl verschieben: Startzustand der Noten, Ankerpunkt (Tick, Tonhöhe).
+    Move {
+        original: Vec<Note>,
+        anchor_tick: f64,
+        anchor_pitch: i32,
+        grab_offset: f64,
+    },
+    /// Länge der Auswahl am rechten Rand ändern.
+    Resize { original: Vec<Note>, note: usize },
+    /// Velocity in der unteren Spur ziehen.
+    Velocity,
+}
+
+/// Zustand des Key-Editors (welcher Part, Auswahl, Ansicht).
+#[derive(Debug, Clone)]
+pub(crate) struct KeyEditor {
+    pub part: Option<EventId>,
+    pub view: KeyView,
+    pub selection: Vec<usize>,
+    pub drag: Option<NoteDrag>,
+    /// Gerade angespielte Taste (wird beim Loslassen beendet).
+    pub preview: Option<u8>,
+    /// Der Editor hatte den letzten Klick: Entf usw. wirken auf Noten.
+    pub focused: bool,
+    /// Lage des Notenrasters und der Velocity-Spur im letzten Frame (für Tests).
+    pub grid_rect: Rect,
+    pub vel_rect: Rect,
+}
+
+impl Default for KeyEditor {
+    fn default() -> Self {
+        Self {
+            part: None,
+            view: KeyView::default(),
+            selection: Vec::new(),
+            drag: None,
+            preview: None,
+            focused: false,
+            grid_rect: Rect::NOTHING,
+            vel_rect: Rect::NOTHING,
+        }
+    }
+}
+
+const NOTE_NAMES: [&str; 12] = [
+    "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "H",
+];
+
+fn is_black(pitch: i32) -> bool {
+    matches!(pitch.rem_euclid(12), 1 | 3 | 6 | 8 | 10)
+}
+
+/// Tonname nach Yamaha-Zählung wie in klassischen DAWs (C3 = 60).
+pub(crate) fn note_name(pitch: u8) -> String {
+    format!(
+        "{}{}",
+        NOTE_NAMES[usize::from(pitch % 12)],
+        i32::from(pitch) / 12 - 2
+    )
+}
+
+struct KGeo {
+    keys: Rect,
+    ruler: Rect,
+    grid: Rect,
+    vel: Rect,
+    view: KeyView,
+    part_start: u64,
+}
+
+impl KGeo {
+    fn x(&self, abs_tick: f64) -> f32 {
+        self.grid.left()
+            + ((abs_tick - self.view.scroll_ticks) / TPQ) as f32 * self.view.px_per_quarter
+    }
+    fn tick(&self, x: f32) -> f64 {
+        self.view.scroll_ticks + f64::from((x - self.grid.left()) / self.view.px_per_quarter) * TPQ
+    }
+    fn y(&self, pitch: i32) -> f32 {
+        self.grid.top() + (127 - pitch) as f32 * self.view.key_h - self.view.scroll_y
+    }
+    fn pitch(&self, y: f32) -> i32 {
+        (127.0 - ((y - self.grid.top() + self.view.scroll_y) / self.view.key_h).floor()) as i32
+    }
+    fn note_rect(&self, n: &Note) -> Rect {
+        let a = self.part_start as f64 + n.start as f64;
+        let b = a + n.length as f64;
+        let y = self.y(i32::from(n.pitch));
+        Rect::from_min_max(
+            pos2(self.x(a), y + 1.0),
+            pos2(self.x(b).max(self.x(a) + 3.0), y + self.view.key_h - 1.0),
+        )
+    }
+}
+
+impl ProjectWindow {
+    /// Öffnet den Key-Editor für einen Part in der unteren Zone.
+    pub(crate) fn open_key_editor(&mut self, part: EventId) {
+        let Some(ev) = self.project.event(part) else {
+            return;
+        };
+        let (start, notes) = (ev.start.0, ev.notes.clone());
+        self.key_editor.part = Some(part);
+        self.key_editor.selection.clear();
+        self.key_editor.view.scroll_ticks = start as f64;
+        if let Some(mid) = notes.iter().map(|n| i32::from(n.pitch)).max() {
+            let lo = notes
+                .iter()
+                .map(|n| i32::from(n.pitch))
+                .min()
+                .unwrap_or(mid);
+            let center = (mid + lo) / 2;
+            self.key_editor.view.scroll_y =
+                ((127 - center) as f32 - 8.0) * self.key_editor.view.key_h;
+        }
+        self.lower = crate::LowerZone::Editor;
+        self.show_lower = true;
+    }
+
+    fn part_track(&self) -> Option<usize> {
+        self.key_editor
+            .part
+            .and_then(|p| self.project.find(p))
+            .map(|(t, _)| t)
+    }
+
+    fn preview(&mut self, key: Option<u8>) {
+        let Some(track) = self.part_track() else {
+            return;
+        };
+        if let Some(old) = self.key_editor.preview.take() {
+            self.send(Command::LiveNote(track, old, 0, false));
+        }
+        if let Some(k) = key {
+            self.send(Command::LiveNote(track, k, 100, true));
+            self.key_editor.preview = Some(k);
+        }
+    }
+
+    /// Notenänderungen an einem Part (mit Undo-Schritt).
+    fn edit_notes(&mut self, part: EventId, f: impl FnOnce(&mut Vec<Note>)) {
+        let before = self.project.clone();
+        if let Some(ev) = self.project.event_mut(part) {
+            f(&mut ev.notes);
+        }
+        self.checkpoint(before);
+    }
+
+    pub(crate) fn delete_selected_notes(&mut self) {
+        let Some(part) = self.key_editor.part else {
+            return;
+        };
+        let mut sel = std::mem::take(&mut self.key_editor.selection);
+        sel.sort_unstable();
+        self.edit_notes(part, |notes| {
+            for i in sel.into_iter().rev() {
+                if i < notes.len() {
+                    notes.remove(i);
+                }
+            }
+        });
+    }
+}
+
+pub(crate) fn show(w: &mut ProjectWindow, ui: &mut Ui) {
+    let Some(part) = w.key_editor.part.filter(|p| w.project.event(*p).is_some()) else {
+        ui.centered_and_justified(|ui| {
+            ui.weak("Doppelklick auf einen Part öffnet ihn hier im Key-Editor")
+        });
+        return;
+    };
+    let Some(ev) = w.project.event(part).cloned() else {
+        return;
+    };
+    let color = w
+        .project
+        .find(part)
+        .map(|(t, _)| w.project.tracks[t].color)
+        .map_or(Color32::LIGHT_BLUE, |c| Color32::from_rgb(c[0], c[1], c[2]));
+
+    let (resp, painter) = ui.allocate_painter(ui.available_size(), Sense::click_and_drag());
+    let r = resp.rect;
+    let keys = Rect::from_min_max(
+        pos2(r.left(), r.top() + RULER_H),
+        pos2(r.left() + KEYS_W, r.bottom() - VEL_H),
+    );
+    let ruler = Rect::from_min_max(
+        pos2(r.left() + KEYS_W, r.top()),
+        pos2(r.right(), r.top() + RULER_H),
+    );
+    let grid = Rect::from_min_max(
+        pos2(r.left() + KEYS_W, r.top() + RULER_H),
+        pos2(r.right(), r.bottom() - VEL_H),
+    );
+    let vel = Rect::from_min_max(pos2(r.left() + KEYS_W, r.bottom() - VEL_H + 4.0), r.max);
+
+    // Scrollen und Zoomen wie im Projektfenster.
+    if resp.hovered() {
+        let (delta, zoom, mods, hover) = ui.input(|i| {
+            (
+                i.smooth_scroll_delta,
+                i.zoom_delta(),
+                i.modifiers,
+                i.pointer.hover_pos(),
+            )
+        });
+        let v = &mut w.key_editor.view;
+        if zoom != 1.0 {
+            let ax = hover.map_or(0.0, |p| p.x - grid.left());
+            let anchor = v.scroll_ticks + f64::from(ax / v.px_per_quarter) * TPQ;
+            v.px_per_quarter = (v.px_per_quarter * zoom).clamp(4.0, 2000.0);
+            v.scroll_ticks = (anchor - f64::from(ax / v.px_per_quarter) * TPQ).max(0.0);
+        } else if mods.shift {
+            v.scroll_ticks =
+                (v.scroll_ticks - f64::from((delta.y + delta.x) / v.px_per_quarter) * TPQ).max(0.0);
+        } else {
+            v.scroll_y -= delta.y;
+            v.scroll_ticks =
+                (v.scroll_ticks - f64::from(delta.x / v.px_per_quarter) * TPQ).max(0.0);
+        }
+        v.scroll_y = v
+            .scroll_y
+            .clamp(0.0, (128.0 * v.key_h - grid.height()).max(0.0));
+    }
+    let g = KGeo {
+        keys,
+        ruler,
+        grid,
+        vel,
+        view: w.key_editor.view,
+        part_start: ev.start.0,
+    };
+    w.key_editor.grid_rect = grid;
+    w.key_editor.vel_rect = vel;
+
+    interact(w, ui, &resp, &g, part, &ev.notes);
+
+    let notes = w
+        .project
+        .event(part)
+        .map(|e| e.notes.clone())
+        .unwrap_or_default();
+    let p = painter.with_clip_rect(grid);
+    paint_grid(w, &p, &g, ev.start.0, ev.end());
+    for (i, n) in notes.iter().enumerate() {
+        let rect = g.note_rect(n);
+        let selected = w.key_editor.selection.contains(&i);
+        let inside = n.start >= 0 && n.start < ev.length as i64;
+        let fill = color.lerp_to_gamma(Color32::WHITE, 0.1 + 0.4 * f32::from(n.velocity) / 127.0);
+        let fill = if inside {
+            fill
+        } else {
+            fill.gamma_multiply(0.3)
+        };
+        p.rect_filled(rect, 2.0, fill);
+        let stroke = if selected {
+            Stroke::new(2.0, Color32::WHITE)
+        } else {
+            Stroke::new(1.0, Color32::from_black_alpha(140))
+        };
+        p.rect_stroke(rect, 2.0, stroke, StrokeKind::Inside);
+    }
+    paint_ruler(w, &painter.with_clip_rect(ruler), &g);
+    paint_keys(&painter.with_clip_rect(keys), &g, w.key_editor.preview);
+    paint_velocity(
+        &painter.with_clip_rect(vel),
+        &g,
+        &notes,
+        &w.key_editor.selection,
+        color,
+    );
+    // Projekt-Cursor
+    let cx = g.x(w.cursor as f64);
+    painter.with_clip_rect(ruler.union(grid)).vline(
+        cx,
+        ruler.top()..=grid.bottom(),
+        Stroke::new(1.5, Color32::from_rgb(230, 60, 60)),
+    );
+}
+
+fn snap(w: &ProjectWindow, t: f64, free: bool) -> f64 {
+    if free {
+        t.round().max(0.0)
+    } else {
+        w.snap_ticks(t) as f64
+    }
+}
+
+fn hit_note(g: &KGeo, notes: &[Note], p: Pos2) -> Option<usize> {
+    notes
+        .iter()
+        .enumerate()
+        .rev()
+        .find(|(_, n)| g.note_rect(n).expand(1.0).contains(p))
+        .map(|(i, _)| i)
+}
+
+fn interact(
+    w: &mut ProjectWindow,
+    ui: &Ui,
+    resp: &egui::Response,
+    g: &KGeo,
+    part: EventId,
+    notes: &[Note],
+) {
+    let (mods, press, now, released) = ui.input(|i| {
+        (
+            i.modifiers,
+            i.pointer.press_origin(),
+            i.pointer.interact_pos(),
+            i.pointer.any_released(),
+        )
+    });
+    // Beim Klick ist die Taste schon wieder oben: dann zählt die Klickposition.
+    let press = press.or_else(|| resp.interact_pointer_pos());
+    if resp.clicked() || resp.drag_started() {
+        w.key_editor.focused = true;
+        w.selected_track = w.part_track();
+    }
+    if released && w.key_editor.preview.is_some() && w.key_editor.drag.is_none() {
+        w.preview(None);
+    }
+
+    // Klaviatur: anspielen.
+    if (resp.clicked() || resp.drag_started())
+        && let Some(p) = press.filter(|p| g.keys.contains(*p))
+    {
+        w.preview(Some(g.pitch(p.y).clamp(0, 127) as u8));
+        return;
+    }
+
+    // Velocity-Spur.
+    if (resp.drag_started() || resp.clicked()) && press.is_some_and(|p| g.vel.contains(p)) {
+        w.drag_before = Some(w.project.clone());
+        w.key_editor.drag = Some(NoteDrag::Velocity);
+    }
+    if matches!(w.key_editor.drag, Some(NoteDrag::Velocity))
+        && let Some(p) = now.or(press)
+    {
+        let v = (((g.vel.bottom() - p.y) / g.vel.height()) * 127.0).clamp(1.0, 127.0) as u8;
+        let t = g.tick(p.x) - g.part_start as f64;
+        let sel = w.key_editor.selection.clone();
+        if let Some(ev) = w.project.event_mut(part) {
+            for (i, n) in ev.notes.iter_mut().enumerate() {
+                let under = (n.start as f64) <= t && t < n.end() as f64;
+                if under && (sel.is_empty() || sel.contains(&i)) {
+                    n.velocity = v;
+                }
+            }
+        }
+        w.dirty = true;
+        if resp.drag_stopped() || resp.clicked() {
+            w.key_editor.drag = None;
+            if let Some(b) = w.drag_before.take() {
+                w.checkpoint(b);
+            }
+        }
+        return;
+    }
+
+    let in_grid = |p: Pos2| g.grid.contains(p);
+
+    // Ziehen beginnen.
+    if resp.drag_started()
+        && let Some(p) = press.filter(|p| in_grid(*p))
+    {
+        w.drag_before = Some(w.project.clone());
+        let tick = g.tick(p.x);
+        match w.tool {
+            Tool::Select => {
+                if let Some(i) = hit_note(g, notes, p) {
+                    if !w.key_editor.selection.contains(&i) {
+                        w.key_editor.selection = vec![i];
+                    }
+                    let n = notes[i];
+                    let rect = g.note_rect(&n);
+                    w.key_editor.drag = Some(if (rect.right() - p.x).abs() <= EDGE {
+                        NoteDrag::Resize {
+                            original: notes.to_vec(),
+                            note: i,
+                        }
+                    } else {
+                        w.preview(Some(n.pitch));
+                        NoteDrag::Move {
+                            original: notes.to_vec(),
+                            anchor_tick: tick,
+                            anchor_pitch: i32::from(n.pitch),
+                            grab_offset: tick - (g.part_start as f64 + n.start as f64),
+                        }
+                    });
+                }
+            }
+            Tool::Draw => {
+                let pitch = g.pitch(p.y).clamp(0, 127) as u8;
+                let start = snap(w, tick, mods.alt) as i64 - g.part_start as i64;
+                let len = w.grid.ticks(&w.project);
+                if let Some(ev) = w.project.event_mut(part) {
+                    ev.notes.push(Note {
+                        pitch,
+                        velocity: 100,
+                        start,
+                        length: len,
+                    });
+                    let i = ev.notes.len() - 1;
+                    w.key_editor.selection = vec![i];
+                    w.key_editor.drag = Some(NoteDrag::Resize {
+                        original: ev.notes.clone(),
+                        note: i,
+                    });
+                }
+                w.preview(Some(pitch));
+            }
+            _ => {}
+        }
+    }
+
+    // Während des Ziehens.
+    if resp.dragged()
+        && let (Some(drag), Some(p)) = (w.key_editor.drag.clone(), now)
+    {
+        let sel = w.key_editor.selection.clone();
+        match drag {
+            NoteDrag::Move {
+                original,
+                anchor_tick,
+                anchor_pitch,
+                grab_offset,
+            } => {
+                let raw = g.tick(p.x) - grab_offset;
+                let anchor_start = anchor_tick - grab_offset;
+                let dt = snap(w, raw, mods.alt) - snap(w, anchor_start, mods.alt);
+                let dp = g.pitch(p.y) - anchor_pitch;
+                let copy = mods.command;
+                if let Some(ev) = w.project.event_mut(part) {
+                    ev.notes = original.clone();
+                    let moved: Vec<Note> = sel
+                        .iter()
+                        .filter_map(|&i| original.get(i))
+                        .map(|n| Note {
+                            start: n.start + dt as i64,
+                            pitch: (i32::from(n.pitch) + dp).clamp(0, 127) as u8,
+                            ..*n
+                        })
+                        .collect();
+                    if copy {
+                        ev.notes.extend(moved);
+                    } else {
+                        for (k, &i) in sel.iter().enumerate() {
+                            if let Some(n) = ev.notes.get_mut(i) {
+                                *n = moved[k];
+                            }
+                        }
+                    }
+                }
+                let pitch = (anchor_pitch + dp).clamp(0, 127) as u8;
+                if w.key_editor.preview != Some(pitch) {
+                    w.preview(Some(pitch));
+                }
+            }
+            NoteDrag::Resize { original, note } => {
+                let end = snap(w, g.tick(p.x), mods.alt);
+                let min = if mods.alt {
+                    1.0
+                } else {
+                    w.grid.ticks(&w.project) as f64
+                };
+                if let (Some(ev), Some(anchor)) = (w.project.event_mut(part), original.get(note)) {
+                    let anchor_end = g.part_start as f64 + anchor.end() as f64;
+                    let delta = end - anchor_end;
+                    ev.notes = original.clone();
+                    let targets: Vec<usize> = if sel.contains(&note) {
+                        sel.clone()
+                    } else {
+                        vec![note]
+                    };
+                    for i in targets {
+                        if let (Some(n), Some(o)) = (ev.notes.get_mut(i), original.get(i)) {
+                            n.length = (o.length as f64 + delta).max(min).round() as u64;
+                        }
+                    }
+                }
+            }
+            NoteDrag::Velocity => {}
+        }
+        w.dirty = true;
+    }
+
+    if resp.drag_stopped() {
+        w.key_editor.drag = None;
+        w.preview(None);
+        if let Some(b) = w.drag_before.take() {
+            w.checkpoint(b);
+        }
+        return;
+    }
+
+    // Einzelklicks.
+    if resp.clicked()
+        && let Some(p) = resp.interact_pointer_pos().filter(|p| in_grid(*p))
+    {
+        let hit = hit_note(g, notes, p);
+        match (w.tool, hit) {
+            (Tool::Select, Some(i)) => {
+                if mods.shift {
+                    if let Some(k) = w.key_editor.selection.iter().position(|&s| s == i) {
+                        w.key_editor.selection.remove(k);
+                    } else {
+                        w.key_editor.selection.push(i);
+                    }
+                } else {
+                    w.key_editor.selection = vec![i];
+                }
+                w.preview(Some(notes[i].pitch));
+            }
+            (Tool::Select, None) => w.key_editor.selection.clear(),
+            (Tool::Erase, Some(i)) => {
+                w.key_editor.selection.clear();
+                w.edit_notes(part, |n| {
+                    n.remove(i);
+                });
+            }
+            (Tool::Draw, None) => {
+                let pitch = g.pitch(p.y).clamp(0, 127) as u8;
+                let start = snap(w, g.tick(p.x), mods.alt) as i64 - g.part_start as i64;
+                let len = w.grid.ticks(&w.project);
+                w.edit_notes(part, |n| {
+                    n.push(Note {
+                        pitch,
+                        velocity: 100,
+                        start,
+                        length: len,
+                    })
+                });
+                if let Some(ev) = w.project.event(part) {
+                    w.key_editor.selection = vec![ev.notes.len() - 1];
+                }
+                w.preview(Some(pitch));
+            }
+            _ => {}
+        }
+    }
+
+    // Mauszeiger am rechten Notenrand.
+    if w.tool == Tool::Select
+        && let Some(p) = resp.hover_pos()
+        && let Some(i) = hit_note(g, notes, p)
+        && (g.note_rect(&notes[i]).right() - p.x).abs() <= EDGE
+    {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
+    }
+}
+
+fn paint_grid(w: &ProjectWindow, p: &Painter, g: &KGeo, part_start: u64, part_end: u64) {
+    let v = p.ctx().global_style().visuals.clone();
+    p.rect_filled(g.grid, 0.0, v.extreme_bg_color);
+    // Tastenreihen: schwarze Tasten dunkler, C-Linien kräftiger.
+    let top = g.pitch(g.grid.top()).min(127);
+    let bottom = g.pitch(g.grid.bottom()).max(0);
+    for pitch in bottom..=top {
+        let y = g.y(pitch);
+        let row = Rect::from_min_max(
+            pos2(g.grid.left(), y),
+            pos2(g.grid.right(), y + g.view.key_h),
+        );
+        if is_black(pitch) {
+            p.rect_filled(row, 0.0, Color32::from_black_alpha(60));
+        }
+        let s = if pitch % 12 == 0 {
+            Stroke::new(1.0, v.widgets.noninteractive.bg_stroke.color)
+        } else {
+            Stroke::new(1.0, v.faint_bg_color)
+        };
+        p.hline(row.x_range(), row.bottom(), s);
+    }
+    // Part-Bereich hervorheben, außerhalb abdunkeln.
+    let (a, b) = (g.x(part_start as f64), g.x(part_end as f64));
+    p.rect_filled(
+        Rect::from_x_y_ranges(g.grid.left()..=a, g.grid.y_range()),
+        0.0,
+        Color32::from_black_alpha(90),
+    );
+    p.rect_filled(
+        Rect::from_x_y_ranges(b..=g.grid.right(), g.grid.y_range()),
+        0.0,
+        Color32::from_black_alpha(90),
+    );
+    // Takt- und Zählzeitlinien.
+    let bar = w.bar_ticks();
+    let beat = w.beat_ticks();
+    let step = w.grid.ticks(&w.project).max(1);
+    let t0 = (g.tick(g.grid.left()).max(0.0) as u64 / step) * step;
+    let mut t = t0;
+    let end = g.tick(g.grid.right()).max(0.0) as u64;
+    let px_step = step as f32 / TPQ as f32 * g.view.px_per_quarter;
+    while t <= end && px_step >= 4.0 {
+        let col = if t % bar == 0 {
+            v.widgets.noninteractive.bg_stroke.color
+        } else if t % beat == 0 {
+            v.widgets.noninteractive.bg_stroke.color.gamma_multiply(0.5)
+        } else {
+            v.faint_bg_color
+        };
+        p.vline(g.x(t as f64), g.grid.y_range(), Stroke::new(1.0, col));
+        t += step;
+    }
+}
+
+fn paint_ruler(w: &ProjectWindow, p: &Painter, g: &KGeo) {
+    let v = p.ctx().global_style().visuals.clone();
+    p.rect_filled(g.ruler, 0.0, v.faint_bg_color);
+    let bar = w.bar_ticks();
+    let mut b = g.tick(g.ruler.left()).max(0.0) as u64 / bar;
+    while (b * bar) as f64 <= g.tick(g.ruler.right()) {
+        let x = g.x((b * bar) as f64);
+        p.vline(
+            x,
+            g.ruler.y_range(),
+            Stroke::new(1.0, v.widgets.noninteractive.bg_stroke.color),
+        );
+        p.text(
+            pos2(x + 3.0, g.ruler.center().y),
+            Align2::LEFT_CENTER,
+            (b + 1).to_string(),
+            FontId::proportional(11.0),
+            v.text_color(),
+        );
+        b += 1;
+    }
+}
+
+fn paint_keys(p: &Painter, g: &KGeo, playing: Option<u8>) {
+    // Erst eine weiße Tastenfläche, darauf die schwarzen Tasten – wie beim Klavier.
+    p.rect_filled(g.keys, 0.0, Color32::from_gray(228));
+    let top = g.pitch(g.keys.top()).min(127);
+    let bottom = g.pitch(g.keys.bottom()).max(0);
+    let line = Stroke::new(1.0, Color32::from_gray(150));
+    for pitch in bottom..=top {
+        let y = g.y(pitch);
+        let row = Rect::from_min_max(
+            pos2(g.keys.left(), y),
+            pos2(g.keys.right(), y + g.view.key_h),
+        );
+        let lit = playing == Some(pitch as u8);
+        if is_black(pitch) {
+            let r = Rect::from_min_max(row.min, pos2(row.left() + KEYS_W * 0.6, row.bottom()));
+            p.rect_filled(
+                r,
+                1.0,
+                if lit {
+                    Color32::from_rgb(90, 140, 220)
+                } else {
+                    Color32::from_gray(28)
+                },
+            );
+        } else {
+            if lit {
+                p.rect_filled(row, 0.0, Color32::from_rgb(150, 190, 245));
+            }
+            // Trennlinie zwischen benachbarten weißen Tasten (E–F, H–C).
+            if matches!(pitch.rem_euclid(12), 4 | 11) {
+                p.hline(row.x_range(), row.top(), line);
+            }
+        }
+        if pitch % 12 == 0 {
+            p.hline(row.x_range(), row.bottom(), line);
+            if g.view.key_h >= 8.0 {
+                p.text(
+                    pos2(g.keys.right() - 3.0, y + g.view.key_h / 2.0),
+                    Align2::RIGHT_CENTER,
+                    note_name(pitch as u8),
+                    FontId::proportional(9.0),
+                    Color32::from_gray(40),
+                );
+            }
+        }
+    }
+    p.vline(g.keys.right(), g.keys.y_range(), line);
+}
+
+fn paint_velocity(p: &Painter, g: &KGeo, notes: &[Note], sel: &[usize], color: Color32) {
+    let v = p.ctx().global_style().visuals.clone();
+    p.rect_filled(g.vel, 0.0, v.extreme_bg_color);
+    p.hline(
+        g.vel.x_range(),
+        g.vel.top(),
+        Stroke::new(1.0, v.widgets.noninteractive.bg_stroke.color),
+    );
+    p.text(
+        g.vel.left_top() + vec2(4.0, 2.0),
+        Align2::LEFT_TOP,
+        "Velocity",
+        FontId::proportional(10.0),
+        v.weak_text_color(),
+    );
+    for (i, n) in notes.iter().enumerate() {
+        let x = g.x(g.part_start as f64 + n.start as f64);
+        let h = g.vel.height() * f32::from(n.velocity) / 127.0;
+        let r = Rect::from_min_max(pos2(x, g.vel.bottom() - h), pos2(x + 4.0, g.vel.bottom()));
+        let c = if sel.contains(&i) {
+            Color32::WHITE
+        } else {
+            color
+        };
+        p.rect_filled(r, 0.0, c);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn note_names_with_middle_c_as_c3() {
+        assert_eq!(note_name(60), "C3");
+        assert_eq!(note_name(69), "A3");
+        assert_eq!(note_name(0), "C-2");
+        assert_eq!(note_name(61), "C#3");
+    }
+}

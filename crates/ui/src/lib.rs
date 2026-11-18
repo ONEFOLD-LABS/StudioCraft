@@ -5,6 +5,7 @@
 //! Lineal, Event-Anzeige und Transportleiste.
 
 mod inserts;
+mod keyeditor;
 mod menu;
 mod mixer;
 mod recording;
@@ -62,7 +63,7 @@ pub struct ProjectWindow {
     dirty: bool,
     /// Letzte Meldung (z. B. Importfehler) für die Statuszeile.
     message: Option<String>,
-    show_mixer: bool,
+    show_lower: bool,
     /// Angezeigte Pegel je Spur und Ausgang (linear, mit Abfall).
     meter_levels: Vec<[f32; 2]>,
     master_meter: [f32; 2],
@@ -92,6 +93,16 @@ pub struct ProjectWindow {
     punch_out: bool,
     overruns_at_start: u64,
     plugins: inserts::PluginState,
+    /// Was die untere Zone zeigt.
+    lower: LowerZone,
+    key_editor: keyeditor::KeyEditor,
+}
+
+/// Inhalt der unteren Zone (Spec „Fenster-Architektur“).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum LowerZone {
+    Mixer,
+    Editor,
 }
 
 impl ProjectWindow {
@@ -119,7 +130,7 @@ impl ProjectWindow {
             sample_rate,
             dirty: true,
             message: None,
-            show_mixer: true,
+            show_lower: true,
             meter_levels: Vec::new(),
             master_meter: [0.0; 2],
             undo: Vec::new(),
@@ -140,6 +151,8 @@ impl ProjectWindow {
             punch_out: false,
             overruns_at_start: 0,
             plugins: inserts::PluginState::default(),
+            lower: LowerZone::Mixer,
+            key_editor: keyeditor::KeyEditor::default(),
         };
         w.saved = Some(w.project.clone());
         w.send_locators();
@@ -401,8 +414,23 @@ impl ProjectWindow {
                 Key::G => self.view.zoom(0.8, None),
                 Key::Space => self.toggle_play(),
                 Key::Slash => self.toggle_cycle(),
-                Key::F3 => self.show_mixer = !self.show_mixer,
-                Key::Delete | Key::Backspace => self.delete_selection(),
+                Key::F3 => {
+                    // F3: Mixer ein/aus; ist gerade der Editor zu sehen, zum Mixer wechseln.
+                    if self.show_lower && self.lower == LowerZone::Mixer {
+                        self.show_lower = false;
+                    } else {
+                        self.show_lower = true;
+                        self.lower = LowerZone::Mixer;
+                    }
+                }
+                Key::Delete | Key::Backspace => {
+                    if self.key_editor.focused && self.show_lower && self.lower == LowerZone::Editor
+                    {
+                        self.delete_selected_notes();
+                    } else {
+                        self.delete_selection();
+                    }
+                }
                 Key::Home | Key::Comma => self.locate(0),
                 Key::I if alt => self.show_inspector = !self.show_inspector,
                 Key::I => self.punch_in = !self.punch_in,
@@ -432,12 +460,28 @@ impl ProjectWindow {
         egui::Panel::top("menue").show(ui, |ui| self.menu_bar(ui));
         egui::Panel::top("werkzeugzeile").show(ui, |ui| self.toolbar(ui));
         egui::Panel::bottom("transportleiste").show(ui, |ui| self.transport_bar(ui));
-        if self.show_mixer {
-            egui::Panel::bottom("mixer")
+        if self.show_lower {
+            egui::Panel::bottom("untere-zone")
                 .resizable(true)
                 .default_size(300.0)
                 .min_size(200.0)
-                .show(ui, |ui| mixer::show(self, ui));
+                .show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.selectable_value(&mut self.lower, LowerZone::Mixer, "Mixer");
+                        ui.selectable_value(&mut self.lower, LowerZone::Editor, "Key-Editor");
+                        if self.lower == LowerZone::Editor
+                            && let Some(ev) =
+                                self.key_editor.part.and_then(|p| self.project.event(p))
+                        {
+                            ui.separator();
+                            ui.weak(format!("{} · {} Noten", ev.name, ev.notes.len()));
+                        }
+                    });
+                    match self.lower {
+                        LowerZone::Mixer => mixer::show(self, ui),
+                        LowerZone::Editor => keyeditor::show(self, ui),
+                    }
+                });
         }
         if self.show_inspector {
             egui::Panel::left("inspector")
@@ -1007,7 +1051,7 @@ mod tests {
             w.project.trim_end(b, 3 * bar + bar / 2);
             w.selection = vec![b];
             w.view.zoom(2.0, None);
-            w.show_mixer = false;
+            w.show_lower = false;
         });
     }
 
@@ -1293,7 +1337,7 @@ mod tests {
                 core.process(&mut buf); // 2,5 s aufnehmen
             }
             w.recording = true;
-            w.show_mixer = false;
+            w.show_lower = false;
         });
     }
 
@@ -1399,7 +1443,7 @@ mod tests {
                     });
                 w.sync_inserts();
             }
-            w.show_mixer = false;
+            w.show_lower = false;
         });
     }
 
@@ -1477,7 +1521,127 @@ mod tests {
                 .unwrap();
             w.selected_track = Some(0);
             w.sync_inserts();
-            w.show_mixer = false;
+            w.show_lower = false;
+        });
+    }
+
+    /// Bildschirmposition für (absoluter Tick, Tonhöhe) im Key-Editor.
+    fn key_pos(h: &Harness<'_, ProjectWindow>, tick: u64, pitch: i32) -> egui::Pos2 {
+        let w = h.state();
+        let v = w.key_editor.view;
+        let g = w.key_editor.grid_rect;
+        let x = g.left() + ((tick as f64 - v.scroll_ticks) / TPQ) as f32 * v.px_per_quarter;
+        let y = g.top() + (127 - pitch) as f32 * v.key_h - v.scroll_y + v.key_h / 2.0;
+        egui::pos2(x, y)
+    }
+
+    fn mouse_drag(
+        h: &mut Harness<'_, ProjectWindow>,
+        a: egui::Pos2,
+        b: egui::Pos2,
+        modifiers: egui::Modifiers,
+    ) {
+        let button = |pos, pressed| egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers,
+        };
+        h.event(egui::Event::PointerMoved(a));
+        h.run_steps(1);
+        h.event(button(a, true));
+        h.run_steps(1);
+        for i in 1..=5 {
+            h.event(egui::Event::PointerMoved(a + (b - a) * (i as f32 / 5.0)));
+            h.run_steps(1);
+        }
+        h.event(button(b, false));
+        h.run_steps(2);
+    }
+
+    fn mouse_click(h: &mut Harness<'_, ProjectWindow>, p: egui::Pos2) {
+        let button = |pressed| egui::Event::PointerButton {
+            pos: p,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        h.event(egui::Event::PointerMoved(p));
+        h.run_steps(1);
+        h.event(button(true));
+        h.event(button(false));
+        h.run_steps(2);
+    }
+
+    #[test]
+    fn key_editor_draw_move_resize_velocity_erase_undo() {
+        let mut w = ProjectWindow::new(Project::default(), None, String::new());
+        w.add_instrument_track(None);
+        let q = TICKS_PER_QUARTER;
+        let part = w.project.create_event(0, 0, 16 * q).unwrap();
+        w.clear_history();
+        w.open_key_editor(part);
+        w.key_editor.view.scroll_y = (127.0 - 72.0) * w.key_editor.view.key_h;
+        let mut h = window_harness(w);
+        let notes =
+            |h: &Harness<'_, ProjectWindow>| h.state().project.event(part).unwrap().notes.clone();
+
+        // Zeichnen: Note C3 ab Zählzeit 2, auf zwei Zählzeiten aufgezogen.
+        h.state_mut().tool = Tool::Draw;
+        let a = key_pos(&h, q + 10, 60);
+        let b = key_pos(&h, 3 * q - 10, 60);
+        mouse_drag(&mut h, a, b, egui::Modifiers::NONE);
+        assert_eq!(notes(&h).len(), 1);
+        let n = notes(&h)[0];
+        assert_eq!((n.pitch, n.start, n.length), (60, q as i64, 2 * q));
+
+        // Verschieben: eine Zählzeit nach rechts, zwei Halbtöne hoch.
+        h.state_mut().tool = Tool::Select;
+        let a = key_pos(&h, 2 * q, 60);
+        let b = key_pos(&h, 3 * q, 62);
+        mouse_drag(&mut h, a, b, egui::Modifiers::NONE);
+        let n = notes(&h)[0];
+        assert_eq!((n.pitch, n.start), (62, 2 * q as i64));
+
+        // Länge: rechten Rand von Zählzeit 5 auf 6 ziehen.
+        let a = key_pos(&h, 4 * q, 62) - egui::vec2(2.0, 0.0);
+        let b = key_pos(&h, 5 * q, 62);
+        mouse_drag(&mut h, a, b, egui::Modifiers::NONE);
+        assert_eq!(notes(&h)[0].length, 3 * q);
+
+        // Velocity: halbe Höhe in der Velocity-Spur über der Note.
+        let vel = h.state().key_editor.vel_rect;
+        let x = key_pos(&h, 3 * q, 62).x;
+        mouse_click(&mut h, egui::pos2(x, vel.center().y));
+        let v = notes(&h)[0].velocity;
+        assert!((55..=72).contains(&v), "Velocity etwa halb: {v}");
+
+        // Löschen mit dem Radiergummi.
+        h.state_mut().tool = Tool::Erase;
+        let p = key_pos(&h, 3 * q, 62);
+        mouse_click(&mut h, p);
+        assert!(notes(&h).is_empty());
+
+        // Rückgängig: Note wieder da, dann alles bis zum leeren Part.
+        let w = h.state_mut();
+        w.undo();
+        assert_eq!(w.project.event(part).unwrap().notes.len(), 1);
+        for _ in 0..4 {
+            w.undo();
+        }
+        assert!(w.project.event(part).unwrap().notes.is_empty());
+    }
+
+    #[test]
+    fn renders_key_editor() {
+        shot("key-editor", |w| {
+            w.project = Project::default();
+            w.add_instrument_track(None);
+            let part = melody(w, 0, 0);
+            w.open_key_editor(part);
+            w.key_editor.selection = vec![2, 3];
+            w.lower = LowerZone::Editor;
+            w.show_lower = true;
         });
     }
 
