@@ -1,6 +1,6 @@
 # Cleanroom-Spezifikation: DAW-Bedienkonzept
 
-Stand: 2026-11-18 · Lebende Fassung: https://claude.ai/artifact/JPZqqo7GT4DvJsx8RHg6kL
+Stand: 2026-11-18
 
 > Diese Datei ist ein Export. Änderungen bitte zuerst in der lebenden Fassung machen und danach hier nachziehen.
 

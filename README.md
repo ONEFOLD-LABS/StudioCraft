@@ -3,7 +3,7 @@
 Plattformübergreifende DAW in Rust für Linux, Windows, macOS, FreeBSD und das Web. Teil der Craft-Familie. Das Bedienkonzept orientiert sich an klassischen DAWs und wird im Cleanroom-Verfahren nachgebaut.
 
 - **Plattformen und Pakete:** [`docs/plattformen.md`](docs/plattformen.md)
-- **Spezifikation:** [`docs/spec.md`](docs/spec.md) (lebende Fassung: https://claude.ai/artifact/JPZqqo7GT4DvJsx8RHg6kL)
+- **Spezifikation:** [`docs/spec.md`](docs/spec.md)
 - **Cleanroom-Regel:** Implementiert wird nur gegen die Spec. Kein Dekompilieren, kein Reverse Engineering von fremder Programme oder fremden Projektdateien, keine fremde Marken oder -Grafiken.
 
 ## Aufbau
