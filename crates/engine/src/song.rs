@@ -14,9 +14,14 @@ pub struct PlayEvent {
     pub offset: u64,
     /// Verschachtelte Stereo-Samples in Engine-Abtastrate.
     pub samples: Arc<[f32]>,
-    /// Fade-In und Fade-Out in Frames (linear).
+    /// Fade-In und Fade-Out in Frames (linear), bezogen auf das ganze Event.
     pub fade_in: u64,
     pub fade_out: u64,
+    /// Ist dies nur ein sichtbarer Ausschnitt eines Events (weil ein darüber
+    /// liegendes Event den Rest verdeckt): Abstand zum Anfang des ganzen Events
+    /// und dessen Länge. Damit verlaufen die Fades wie beim ganzen Event.
+    pub env_offset: u64,
+    pub env_length: u64,
 }
 
 impl PlayEvent {
@@ -28,17 +33,20 @@ impl PlayEvent {
             samples,
             fade_in: 0,
             fade_out: 0,
+            env_offset: 0,
+            env_length: length,
         }
     }
 
     /// Lautstärkefaktor aus den Fades an Frame `k` des Events.
     #[inline]
     fn fade_gain(&self, k: u64) -> f32 {
+        let k = k + self.env_offset;
         let mut g = 1.0;
         if k < self.fade_in {
             g = k as f32 / self.fade_in as f32;
         }
-        let rest = self.length.saturating_sub(k);
+        let rest = self.env_length.saturating_sub(k);
         if rest < self.fade_out {
             g *= rest as f32 / self.fade_out as f32;
         }
@@ -98,24 +106,37 @@ impl Song {
             .enumerate()
             .filter(|(i, t)| t.kind == TrackKind::Audio && project.audible(*i))
             .map(|(slot, t)| {
-                let mut events: Vec<PlayEvent> = t
-                    .events
-                    .iter()
-                    .filter(|e| !e.muted)
-                    .filter_map(|e| {
-                        let samples = clips.get(&e.clip?)?.clone();
-                        Some(PlayEvent {
+                // Wie in klassischen DAWs klingt auf einer Audiospur bei Überlappung nur das
+                // oberste Event (das spätere in der Liste). Verdeckte Teile fallen weg.
+                let mut events = Vec::new();
+                for (i, e) in t.events.iter().enumerate() {
+                    if e.muted {
+                        continue;
+                    }
+                    let Some(samples) = e.clip.and_then(|c| clips.get(&c)) else {
+                        continue;
+                    };
+                    let covers = t.events[i + 1..]
+                        .iter()
+                        .filter(|l| !l.muted)
+                        .map(|l| (l.start.0, l.end()));
+                    let ev_start = tempo.frames(e.start.0, rate);
+                    let env_length = tempo.frames(e.end(), rate) - ev_start;
+                    for (a, b) in visible_parts((e.start.0, e.end()), covers) {
+                        let (fa, fb) = (tempo.frames(a, rate), tempo.frames(b, rate));
+                        if fb <= fa {
+                            continue;
+                        }
+                        let env_offset = fa - ev_start;
+                        events.push(PlayEvent {
                             fade_in: tempo.frames(e.fade_in, rate),
                             fade_out: tempo.frames(e.fade_out, rate),
-                            ..PlayEvent::new(
-                                tempo.frames(e.start.0, rate),
-                                tempo.frames(e.length, rate),
-                                e.offset,
-                                samples,
-                            )
-                        })
-                    })
-                    .collect();
+                            env_offset,
+                            env_length,
+                            ..PlayEvent::new(fa, fb - fa, e.offset + env_offset, samples.clone())
+                        });
+                    }
+                }
                 events.sort_by_key(|e| e.start);
                 let (gain_l, gain_r) = t.gains();
                 PlayTrack {
@@ -146,6 +167,27 @@ impl Song {
             }
         }
     }
+}
+
+/// Teile von `range`, die von keinem der `covers` verdeckt werden.
+fn visible_parts(range: (u64, u64), covers: impl Iterator<Item = (u64, u64)>) -> Vec<(u64, u64)> {
+    let mut parts = vec![range];
+    for (ca, cb) in covers {
+        parts = parts
+            .into_iter()
+            .flat_map(|(a, b)| {
+                if cb <= a || ca >= b {
+                    vec![(a, b)]
+                } else {
+                    [(a, ca.max(a)), (cb.min(b), b)]
+                        .into_iter()
+                        .filter(|(x, y)| y > x)
+                        .collect()
+                }
+            })
+            .collect();
+    }
+    parts
 }
 
 impl PlayTrack {
@@ -255,6 +297,71 @@ mod tests {
         song.mix(&mut out, 0, 8);
         let left: Vec<f32> = out.chunks(2).map(|c| c[0]).collect();
         assert_eq!(left, [0.0, 0.25, 0.5, 0.75, 1.0, 1.0, 1.0, 0.5]);
+    }
+
+    #[test]
+    fn topmost_event_wins_on_overlap() {
+        use studiocraft_project::Position;
+        let mut p = Project::default();
+        p.add_track(TrackKind::Audio, "a");
+        let c = p.add_clip(PoolClip {
+            name: "c".into(),
+            path: None,
+            sample_rate: 48_000,
+            frames: 192_000,
+        });
+        let q = TICKS_PER_QUARTER;
+        let old = p.add_audio_event(0, 0, c).unwrap(); // 4 s = 8 Viertel
+        let new = p.create_event(0, 0, 1).unwrap();
+        // Neuer Take obenauf (spätere Position in der Liste) von Viertel 2 bis 4.
+        let ev = p.event_mut(new).unwrap();
+        ev.clip = Some(c);
+        ev.start = Position(2 * q);
+        ev.length = 2 * q;
+        ev.offset = 0;
+        let i = p.find(new).unwrap().1;
+        let taken = p.tracks[0].events.remove(i);
+        p.tracks[0].events.push(taken);
+        p.set_fades(old, 8 * q, 0);
+        let clips = HashMap::from([(c, ones(192_000, 1.0))]);
+        let song = Song::build(&p, &clips, 48_000);
+        let spans: Vec<(u64, u64, u64)> = song.tracks[0]
+            .events
+            .iter()
+            .map(|e| (e.start, e.length, e.offset))
+            .collect();
+        // Alter Take sichtbar 0–1 s und 2–4 s, neuer Take 1–2 s.
+        assert_eq!(
+            spans,
+            [
+                (0, 48_000, 0),
+                (48_000, 48_000, 0),
+                (96_000, 96_000, 96_000)
+            ]
+        );
+        // Der zweite Teil des alten Takes setzt den Fade-In des ganzen Events fort.
+        let tail = &song.tracks[0].events[2];
+        assert_eq!(
+            (tail.env_offset, tail.env_length, tail.fade_in),
+            (96_000, 192_000, 192_000)
+        );
+        let mut out = vec![0.0; 2];
+        song.mix(&mut out, 96_000, 1);
+        assert!(
+            (out[0] - 0.5).abs() < 1e-4,
+            "Fade-In bei halber Länge: {}",
+            out[0]
+        );
+    }
+
+    #[test]
+    fn visible_parts_cut_out_covers() {
+        assert_eq!(
+            visible_parts((0, 10), [(2, 4), (8, 12)].into_iter()),
+            [(0, 2), (4, 8)]
+        );
+        assert_eq!(visible_parts((0, 10), [(0, 10)].into_iter()), []);
+        assert_eq!(visible_parts((5, 10), [(0, 3)].into_iter()), [(5, 10)]);
     }
 
     #[test]

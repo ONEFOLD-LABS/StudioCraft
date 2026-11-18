@@ -47,8 +47,18 @@ pub fn render_wav(
 
 /// Speichert verschachteltes Stereo als 32-Bit-Float-WAV (verlustfrei).
 pub fn write_wav_f32(samples: &[f32], rate: u32, path: &Path) -> Result<(), String> {
+    write_wav_f32_channels(samples, 2, rate, path)
+}
+
+/// Speichert verschachtelte Samples mit `channels` Kanälen als 32-Bit-Float-WAV.
+pub fn write_wav_f32_channels(
+    samples: &[f32],
+    channels: u16,
+    rate: u32,
+    path: &Path,
+) -> Result<(), String> {
     let spec = hound::WavSpec {
-        channels: 2,
+        channels,
         sample_rate: rate,
         bits_per_sample: 32,
         sample_format: hound::SampleFormat::Float,

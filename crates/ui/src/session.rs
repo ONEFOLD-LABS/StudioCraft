@@ -235,7 +235,7 @@ fn file_name_of(src: &Path, fallback: &str) -> String {
     )
 }
 
-fn sanitize(name: &str) -> String {
+pub(crate) fn sanitize(name: &str) -> String {
     name.chars()
         .map(|c| {
             if c.is_alphanumeric() || " -_".contains(c) {
@@ -248,7 +248,7 @@ fn sanitize(name: &str) -> String {
 }
 
 /// `dir/name`, bei Bedarf mit Zähler: `name (2).wav`.
-fn unique_name(dir: &Path, name: &str) -> PathBuf {
+pub(crate) fn unique_name(dir: &Path, name: &str) -> PathBuf {
     let candidate = dir.join(name);
     if !candidate.exists() {
         return candidate;

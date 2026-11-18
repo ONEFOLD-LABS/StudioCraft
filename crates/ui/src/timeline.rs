@@ -720,7 +720,42 @@ fn paint_lanes(w: &ProjectWindow, painter: &Painter, g: &Geo) {
             paint_event(w, painter, g, track, ev, rect);
         }
     }
+    paint_recording(w, painter, g);
     paint_drag_preview(w, painter, g);
+}
+
+/// Während der Aufnahme wächst auf jeder aufnahmebereiten Spur ein roter Bereich mit.
+fn paint_recording(w: &ProjectWindow, painter: &Painter, g: &Geo) {
+    let Some(t) = w.transport.as_ref().filter(|_| w.recording) else {
+        return;
+    };
+    let start = t.position(t.status.rec_start()).0;
+    let from = if w.cursor >= start {
+        start
+    } else {
+        w.left_locator
+    };
+    for row in g.visible_rows() {
+        let tr = &w.project.tracks[row];
+        if !(tr.record && tr.kind == TrackKind::Audio) {
+            continue;
+        }
+        let top = g.row_top(row) + 2.0;
+        let rect = Rect::from_min_max(
+            pos2(g.x(from as f64), top),
+            pos2(
+                g.x(w.cursor as f64).max(g.x(from as f64) + 1.0),
+                top + g.view.row_h - 4.0,
+            ),
+        );
+        painter.rect_filled(rect, 3.0, Color32::from_rgba_unmultiplied(220, 50, 50, 90));
+        painter.rect_stroke(
+            rect,
+            3.0,
+            Stroke::new(1.0, Color32::from_rgb(230, 70, 70)),
+            StrokeKind::Inside,
+        );
+    }
 }
 
 /// Ein Event: farbige Namensleiste oben, darunter der Inhalt (bei Audio die Wellenform).

@@ -22,6 +22,8 @@ pub enum Command {
     /// Oberfläche zurück und wird dort freigegeben, nicht im Audio-Thread.
     SetSong(Arc<Song>),
     Play,
+    /// Aufnahme starten (aus dem Stopp oder während der Wiedergabe).
+    Record,
     Stop,
     ToggleCycle,
     /// Linker und rechter Locator in Frames.
@@ -36,6 +38,8 @@ pub struct EngineStatus {
     cursor: AtomicU64,
     state: AtomicU8,
     cycle: AtomicBool,
+    /// Projektposition (Frames), an der die letzte Aufnahme begann.
+    rec_start: AtomicU64,
     /// Gerenderte Blöcke, nützlich für Diagnose.
     blocks: AtomicU64,
 }
@@ -46,6 +50,9 @@ impl EngineStatus {
     }
     pub fn state(&self) -> TransportState {
         TransportState::from_u8(self.state.load(Ordering::Relaxed))
+    }
+    pub fn rec_start(&self) -> u64 {
+        self.rec_start.load(Ordering::Relaxed)
     }
     pub fn cycle(&self) -> bool {
         self.cycle.load(Ordering::Relaxed)
@@ -144,6 +151,10 @@ impl EngineCore {
                 let _ = self.garbage.push(old);
             }
             Command::Play => t.play(),
+            Command::Record => {
+                self.status.rec_start.store(t.cursor, Ordering::Relaxed);
+                t.record();
+            }
             Command::Stop => t.stop(false),
             Command::ToggleCycle => t.cycle = !t.cycle,
             Command::SetLocators(l, r) => {
@@ -300,6 +311,21 @@ mod tests {
             ctl.meters.take_master(),
             [0.0, 0.0],
             "abgeholt ist abgeholt"
+        );
+    }
+
+    #[test]
+    fn record_remembers_start_position() {
+        let (mut core, mut ctl) = ramp(10);
+        ctl.send(Command::Locate(500));
+        ctl.send(Command::Record);
+        core.process(&mut [0.0; 8]);
+        assert_eq!(ctl.status.rec_start(), 500);
+        assert_eq!(ctl.status.state(), TransportState::Recording);
+        assert_eq!(
+            ctl.status.cursor(),
+            504,
+            "Aufnahme läuft wie Wiedergabe weiter"
         );
     }
 

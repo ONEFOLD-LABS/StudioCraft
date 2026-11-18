@@ -6,6 +6,7 @@
 
 mod menu;
 mod mixer;
+mod recording;
 mod session;
 mod timeline;
 mod tools;
@@ -80,6 +81,15 @@ pub struct ProjectWindow {
     /// Schließen ist bestätigt (keine weitere Rückfrage).
     allow_close: bool,
     last_title: String,
+    /// Audio-Host, mit dem auch der Eingang geöffnet wird.
+    pub audio_host: Option<String>,
+    input: Option<studiocraft_engine::AudioInput>,
+    recorder: Option<studiocraft_engine::Recorder>,
+    input_status: String,
+    recording: bool,
+    punch_in: bool,
+    punch_out: bool,
+    overruns_at_start: u64,
 }
 
 impl ProjectWindow {
@@ -119,6 +129,14 @@ impl ProjectWindow {
             pending: None,
             allow_close: false,
             last_title: String::new(),
+            audio_host: None,
+            input: None,
+            recorder: None,
+            input_status: String::new(),
+            recording: false,
+            punch_in: false,
+            punch_out: false,
+            overruns_at_start: 0,
         };
         w.saved = Some(w.project.clone());
         w.send_locators();
@@ -154,12 +172,11 @@ impl ProjectWindow {
     }
 
     fn toggle_play(&mut self) {
-        let cmd = if self.is_playing() {
-            Command::Stop
+        if self.is_playing() || self.recording {
+            self.stop_transport();
         } else {
-            Command::Play
-        };
-        self.send(cmd);
+            self.send(Command::Play);
+        }
     }
 
     fn toggle_cycle(&mut self) {
@@ -313,6 +330,15 @@ impl ProjectWindow {
         if ui.ctx().egui_wants_keyboard_input() {
             return;
         }
+        // `*` (auch auf dem Nummernblock): Aufnahme. egui hat dafür keine eigene Taste.
+        let star = ui.input(|i| {
+            i.events
+                .iter()
+                .any(|e| matches!(e, egui::Event::Text(t) if t == "*"))
+        });
+        if star {
+            self.toggle_record();
+        }
         let (keys, mods) = ui.input(|i| {
             let mut pressed = Vec::new();
             for k in [
@@ -337,6 +363,7 @@ impl ProjectWindow {
                 Key::Comma,
                 Key::Slash,
                 Key::F3,
+                Key::O,
                 Key::Z,
                 Key::Y,
             ] {
@@ -375,6 +402,8 @@ impl ProjectWindow {
                 Key::Delete | Key::Backspace => self.delete_selection(),
                 Key::Home | Key::Comma => self.locate(0),
                 Key::I if alt => self.show_inspector = !self.show_inspector,
+                Key::I => self.punch_in = !self.punch_in,
+                Key::O => self.punch_out = !self.punch_out,
                 _ => {}
             }
         }
@@ -468,6 +497,7 @@ impl ProjectWindow {
             ui.label("Keine Spur ausgewählt");
             return;
         };
+        let channels = self.input_channels();
         let track = &mut self.project.tracks[idx];
         ui.horizontal(|ui| {
             let label = ui.label("Name");
@@ -475,6 +505,15 @@ impl ProjectWindow {
                 .labelled_by(label.id);
         });
         ui.label(format!("Typ: {}", track.kind.label()));
+        if track.kind == TrackKind::Audio {
+            egui::ComboBox::from_label("Eingang")
+                .selected_text(track.input.label())
+                .show_ui(ui, |ui| {
+                    for opt in studiocraft_project::TrackInput::options(channels) {
+                        ui.selectable_value(&mut track.input, opt, opt.label());
+                    }
+                });
+        }
         ui.horizontal(|ui| {
             let m = ui.toggle_value(&mut track.mute, "M").changed();
             let s = ui.toggle_value(&mut track.solo, "S").changed();
@@ -519,7 +558,7 @@ impl ProjectWindow {
                 self.locate(0);
             }
             if ui.button("⏹").on_hover_text("Stopp").clicked() {
-                self.send(Command::Stop);
+                self.stop_transport();
             }
             let playing = self.is_playing();
             if ui
@@ -529,6 +568,18 @@ impl ProjectWindow {
             {
                 self.toggle_play();
             }
+            let rec = egui::RichText::new("⏺").color(if self.recording {
+                Color32::from_rgb(240, 60, 60)
+            } else {
+                ui.visuals().text_color()
+            });
+            if ui
+                .selectable_label(self.recording, rec)
+                .on_hover_text("Aufnahme (*)")
+                .clicked()
+            {
+                self.toggle_record();
+            }
             if ui
                 .selectable_label(self.cycle, "🔁")
                 .on_hover_text("Cycle (/)")
@@ -536,6 +587,16 @@ impl ProjectWindow {
             {
                 self.toggle_cycle();
             }
+            ui.selectable_value_toggle_punch(
+                &mut self.punch_in,
+                "Punch-In",
+                "Aufnahme erst ab dem linken Locator (I)",
+            );
+            ui.selectable_value_toggle_punch(
+                &mut self.punch_out,
+                "Punch-Out",
+                "Aufnahme nur bis zum rechten Locator (O)",
+            );
             ui.separator();
             let tempo = &self.project.tempo;
             let (bar, beat, six, tick) = tempo.bars_beats(Position(self.cursor));
@@ -581,6 +642,23 @@ impl ProjectWindow {
 
     pub(crate) fn beat_ticks(&self) -> u64 {
         self.project.tempo.signature.beat_ticks()
+    }
+}
+
+/// Kleiner Umschalter für die Transportleiste.
+trait PunchToggle {
+    fn selectable_value_toggle_punch(&mut self, value: &mut bool, label: &str, hint: &str);
+}
+
+impl PunchToggle for Ui {
+    fn selectable_value_toggle_punch(&mut self, value: &mut bool, label: &str, hint: &str) {
+        if self
+            .selectable_label(*value, label)
+            .on_hover_text(hint)
+            .clicked()
+        {
+            *value = !*value;
+        }
     }
 }
 
@@ -1036,6 +1114,157 @@ mod tests {
         h.run_steps(2);
         assert_eq!(h.state().pending, None);
         assert!(h.state().project.tracks.is_empty(), "neues leeres Projekt");
+    }
+
+    /// Zweikanal-Aufnahme: links eine Rampe (Frame-Index / 1e6), rechts konstant 0,5.
+    fn two_channel_recording(dir: &Path, frames: u64) -> studiocraft_engine::Recording {
+        let samples: Vec<f32> = (0..frames).flat_map(|i| [i as f32 / 1e6, 0.5]).collect();
+        let path = dir.join("Aufnahme.wav");
+        studiocraft_engine::export::write_wav_f32_channels(&samples, 2, 48_000, &path).unwrap();
+        studiocraft_engine::Recording {
+            path,
+            frames,
+            channels: 2,
+            sample_rate: 48_000,
+        }
+    }
+
+    fn recording_window() -> ProjectWindow {
+        let mut w = ProjectWindow::new(Project::default(), None, String::new());
+        for (name, ch) in [("Mikro", 0), ("Gitarre", 1)] {
+            let t = w.project.add_track(TrackKind::Audio, name);
+            w.project.tracks[t].record = true;
+            w.project.tracks[t].input = studiocraft_project::TrackInput {
+                first: ch,
+                stereo: false,
+            };
+        }
+        w.clear_history();
+        w
+    }
+
+    #[test]
+    fn recording_lands_on_armed_tracks_with_their_inputs() {
+        let dir = temp_dir("rec-plain");
+        let mut w = recording_window();
+        let bar = w.bar_ticks();
+        // Vier Sekunden ab Takt 2.
+        let rec = two_channel_recording(&dir, 4 * 48_000);
+        let n = w.place_recording(&rec, 96_000).unwrap();
+        assert_eq!(n, 2);
+        assert!(!rec.path.exists(), "Rohdatei aufgeräumt");
+        for t in 0..2 {
+            let ev = &w.project.tracks[t].events[0];
+            assert_eq!((ev.start.0, ev.length), (bar, 2 * bar));
+        }
+        let mic = &w.clips[&w.project.tracks[0].events[0].clip.unwrap()].samples;
+        let gtr = &w.clips[&w.project.tracks[1].events[0].clip.unwrap()].samples;
+        assert_eq!(
+            &mic[200..202],
+            &[100.0 / 1e6, 100.0 / 1e6],
+            "Kanal 1 mono auf beide Seiten"
+        );
+        assert_eq!(&gtr[200..202], &[0.5, 0.5], "Kanal 2");
+        assert!(
+            dir.join("Aufnahme - Mikro.wav").exists()
+                && dir.join("Aufnahme - Gitarre.wav").exists()
+        );
+        w.undo();
+        assert!(
+            w.project.tracks.iter().all(|t| t.events.is_empty()),
+            "Aufnahme ist ein Undo-Schritt"
+        );
+    }
+
+    #[test]
+    fn cycle_recording_makes_stacked_takes_last_on_top() {
+        let dir = temp_dir("rec-cycle");
+        let mut w = recording_window();
+        w.project.tracks[1].record = false;
+        let bar = w.bar_ticks();
+        w.cycle = true;
+        w.left_locator = bar;
+        w.right_locator = 2 * bar; // Cycle Takt 2 bis 3 = 2 s bis 4 s
+        // Start bei 0 s, 7 s Aufnahme: 4 s bis zum rechten Locator, dann 2 s und 1 s.
+        let rec = two_channel_recording(&dir, 7 * 48_000);
+        assert_eq!(w.place_recording(&rec, 0).unwrap(), 3);
+        let evs = &w.project.tracks[0].events;
+        let spans: Vec<(u64, u64, u64)> = evs
+            .iter()
+            .map(|e| (e.start.0, e.length, e.offset))
+            .collect();
+        assert_eq!(
+            spans,
+            [
+                (0, 2 * bar, 0),
+                (bar, bar, 192_000),
+                (bar, bar / 2, 288_000)
+            ]
+        );
+        assert_eq!(
+            evs[2].name, "Mikro 03",
+            "jüngster Take liegt oben (zuletzt in der Liste)"
+        );
+    }
+
+    #[test]
+    fn punch_in_and_out_keep_only_the_locator_range() {
+        let dir = temp_dir("rec-punch");
+        let mut w = recording_window();
+        w.project.tracks[1].record = false;
+        let bar = w.bar_ticks();
+        w.left_locator = bar;
+        w.right_locator = 2 * bar;
+        w.punch_in = true;
+        w.punch_out = true;
+        let rec = two_channel_recording(&dir, 8 * 48_000); // Takt 1 bis 5
+        assert_eq!(w.place_recording(&rec, 0).unwrap(), 1);
+        let ev = &w.project.tracks[0].events[0];
+        assert_eq!((ev.start.0, ev.length, ev.offset), (bar, bar, 96_000));
+        // Ganz außerhalb: kein Take.
+        let rec = two_channel_recording(&dir, 48_000);
+        assert_eq!(w.place_recording(&rec, 5 * 96_000).unwrap(), 0);
+    }
+
+    #[test]
+    fn record_without_armed_track_explains_why() {
+        let (_core, ctl) = studiocraft_engine::engine(48_000, TempoMap::default());
+        let mut w = ProjectWindow::new(Project::default(), Some(ctl), String::new());
+        w.project.add_track(TrackKind::Audio, "A");
+        w.start_recording();
+        assert!(!w.is_recording());
+        assert!(w.message.as_deref().unwrap().contains("aufnahmebereit"));
+    }
+
+    #[test]
+    fn renders_recording_in_progress() {
+        let (mut core, ctl) = studiocraft_engine::engine(48_000, TempoMap::default());
+        shot("aufnahme", move |w| {
+            w.project = Project::default();
+            let bar = 4 * TICKS_PER_QUARTER;
+            w.import_clip("Playback", None, tone_clip(8.0, 110.0), None)
+                .unwrap();
+            let id = w
+                .import_clip(
+                    "Alter Take",
+                    None,
+                    tone_clip(4.0, 330.0),
+                    Some((usize::MAX, bar)),
+                )
+                .unwrap();
+            let _ = id;
+            w.project.tracks[1].record = true;
+            w.project.tracks[1].name = "Gesang".into();
+            w.transport = Some(ctl);
+            w.send(Command::Locate(96_000));
+            w.send(Command::Record);
+            let mut buf = vec![0.0f32; 2 * 4800];
+            for _ in 0..25 {
+                core.process(&mut buf); // 2,5 s aufnehmen
+            }
+            w.recording = true;
+            w.show_mixer = false;
+        });
     }
 
     #[test]

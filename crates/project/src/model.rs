@@ -84,7 +84,52 @@ pub struct Track {
     pub volume_db: f32,
     /// Panorama: −1 links, 0 Mitte, +1 rechts (Stereo-Balance).
     pub pan: f32,
+    /// Aufnahme-Eingang (Audio-Spuren).
+    #[serde(default)]
+    pub input: TrackInput,
     pub events: Vec<Event>,
+}
+
+/// Welche Eingangskanäle eine Audio-Spur aufnimmt.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct TrackInput {
+    /// Erster Kanal, ab 0.
+    pub first: u16,
+    /// `true`: `first` und `first + 1` als Stereo, sonst Mono.
+    pub stereo: bool,
+}
+
+impl Default for TrackInput {
+    fn default() -> Self {
+        Self {
+            first: 0,
+            stereo: true,
+        }
+    }
+}
+
+impl TrackInput {
+    /// Anzeige wie „Eingang 1/2“ oder „Eingang 2“ (Kanäle ab 1 gezählt).
+    pub fn label(self) -> String {
+        if self.stereo {
+            format!("Eingang {}/{}", self.first + 1, self.first + 2)
+        } else {
+            format!("Eingang {}", self.first + 1)
+        }
+    }
+
+    /// Alle sinnvollen Eingänge bei `channels` Gerätekanälen: Stereopaare, dann Mono.
+    pub fn options(channels: u16) -> Vec<Self> {
+        let pairs = (0..channels / 2).map(|i| Self {
+            first: 2 * i,
+            stereo: true,
+        });
+        let monos = (0..channels).map(|c| Self {
+            first: c,
+            stereo: false,
+        });
+        pairs.chain(monos).collect()
+    }
 }
 
 /// Untere Grenze des Faders; darunter ist der Kanal stumm (−∞).
@@ -172,6 +217,7 @@ impl Project {
                 record: false,
                 volume_db: 0.0,
                 pan: 0.0,
+                input: TrackInput::default(),
                 events: Vec::new(),
             };
             if kind.holds_events() {
@@ -410,6 +456,7 @@ impl Project {
             record: false,
             volume_db: 0.0,
             pan: 0.0,
+            input: TrackInput::default(),
             events: Vec::new(),
         });
         i
@@ -465,6 +512,38 @@ impl Project {
                 ev.offset = (ev.offset as f64 * f).round() as u64;
             }
         }
+    }
+
+    /// Legt einen Take obenauf (ans Ende der Liste, damit er bei Überlappung
+    /// klingt): ein Ausschnitt eines Clips ab `offset` Frames, `length` in Ticks.
+    pub fn place_take(
+        &mut self,
+        track: usize,
+        start: u64,
+        clip: ClipId,
+        offset: u64,
+        length: u64,
+        name: &str,
+    ) -> Option<EventId> {
+        if self.tracks.get(track)?.kind != TrackKind::Audio
+            || self.pool.get(clip as usize).is_none()
+            || length == 0
+        {
+            return None;
+        }
+        let id = self.next_event_id();
+        self.tracks[track].events.push(Event {
+            id,
+            start: Position(start),
+            length,
+            name: name.to_owned(),
+            muted: false,
+            clip: Some(clip),
+            offset,
+            fade_in: 0,
+            fade_out: 0,
+        });
+        Some(id)
     }
 
     /// Ob eine Spur zu hören ist: nicht stumm, und bei aktivem Solo selbst Solo.
@@ -640,6 +719,13 @@ mod tests {
             ),
             (0, 960)
         );
+    }
+
+    #[test]
+    fn input_options_for_two_channels() {
+        let o = TrackInput::options(2);
+        let labels: Vec<String> = o.iter().map(|i| i.label()).collect();
+        assert_eq!(labels, ["Eingang 1/2", "Eingang 1", "Eingang 2"]);
     }
 
     #[test]
