@@ -2091,8 +2091,8 @@ mod tests {
         h.key_press(Key::Delete);
         h.run_steps(1);
         let w = h.state_mut();
-        for t in 0..2 {
-            let spans: Vec<(u64, u64)> = w.project.tracks[t]
+        for (t, track) in w.project.tracks.iter().enumerate() {
+            let spans: Vec<(u64, u64)> = track
                 .events
                 .iter()
                 .map(|e| (e.start.0, e.end()))
