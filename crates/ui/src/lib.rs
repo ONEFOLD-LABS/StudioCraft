@@ -1126,6 +1126,7 @@ mod tests {
             frames,
             channels: 2,
             sample_rate: 48_000,
+            first_captured_at: None,
         }
     }
 
@@ -1150,7 +1151,7 @@ mod tests {
         let bar = w.bar_ticks();
         // Vier Sekunden ab Takt 2.
         let rec = two_channel_recording(&dir, 4 * 48_000);
-        let n = w.place_recording(&rec, 96_000).unwrap();
+        let n = w.place_recording(&rec, 96_000, 0).unwrap();
         assert_eq!(n, 2);
         assert!(!rec.path.exists(), "Rohdatei aufgeräumt");
         for track in &w.project.tracks {
@@ -1187,7 +1188,7 @@ mod tests {
         w.right_locator = 2 * bar; // Cycle Takt 2 bis 3 = 2 s bis 4 s
         // Start bei 0 s, 7 s Aufnahme: 4 s bis zum rechten Locator, dann 2 s und 1 s.
         let rec = two_channel_recording(&dir, 7 * 48_000);
-        assert_eq!(w.place_recording(&rec, 0).unwrap(), 3);
+        assert_eq!(w.place_recording(&rec, 0, 0).unwrap(), 3);
         let evs = &w.project.tracks[0].events;
         let spans: Vec<(u64, u64, u64)> = evs
             .iter()
@@ -1218,12 +1219,24 @@ mod tests {
         w.punch_in = true;
         w.punch_out = true;
         let rec = two_channel_recording(&dir, 8 * 48_000); // Takt 1 bis 5
-        assert_eq!(w.place_recording(&rec, 0).unwrap(), 1);
+        assert_eq!(w.place_recording(&rec, 0, 0).unwrap(), 1);
         let ev = &w.project.tracks[0].events[0];
         assert_eq!((ev.start.0, ev.length, ev.offset), (bar, bar, 96_000));
         // Ganz außerhalb: kein Take.
         let rec = two_channel_recording(&dir, 48_000);
-        assert_eq!(w.place_recording(&rec, 5 * 96_000).unwrap(), 0);
+        assert_eq!(w.place_recording(&rec, 5 * 96_000, 0).unwrap(), 0);
+    }
+
+    #[test]
+    fn skipped_frames_before_project_start_are_dropped() {
+        let dir = temp_dir("rec-skip");
+        let mut w = recording_window();
+        w.project.tracks[1].record = false;
+        let rec = two_channel_recording(&dir, 48_000);
+        assert_eq!(w.place_recording(&rec, 0, 480).unwrap(), 1);
+        let ev = &w.project.tracks[0].events[0];
+        assert_eq!((ev.start.0, ev.offset), (0, 480), "erste 10 ms fallen weg");
+        assert_eq!(ev.length, w.project.tempo.ticks(48_000 - 480, 48_000));
     }
 
     #[test]

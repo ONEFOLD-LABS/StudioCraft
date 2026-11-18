@@ -147,8 +147,22 @@ impl ProjectWindow {
         let overruns =
             rec.overruns.load(std::sync::atomic::Ordering::Relaxed) - self.overruns_at_start;
         let result = rec.stop();
-        let start = self.transport.as_ref().map_or(0, |t| t.status.rec_start());
-        match result.and_then(|r| self.place_recording(&r, start)) {
+        let status = self
+            .transport
+            .as_ref()
+            .map(|t| (t.status.rec_start(), t.status.rec_played_at()));
+        let (cursor, played_at) = status.unwrap_or((0, None));
+        let rate = self.sample_rate;
+        match result.and_then(|r| {
+            // Latenzausgleich: dorthin legen, wo das Gespielte zum Gehörten passt.
+            let (start, skip) = match (played_at, r.first_captured_at) {
+                (Some(play), Some(cap)) => {
+                    studiocraft_engine::clock::compensated_start(cursor, play, cap, rate)
+                }
+                _ => (cursor, 0),
+            };
+            self.place_recording(&r, start, skip)
+        }) {
             Ok(n) if overruns > 0 => {
                 self.message = Some(format!(
                     "{n} Take(s) aufgenommen, aber {overruns} Samples verloren (Puffer voll)"
@@ -161,7 +175,13 @@ impl ProjectWindow {
 
     /// Legt eine fertige Aufnahme auf alle aufnahmebereiten Audio-Spuren.
     /// `start` ist die Projektposition des ersten Frames. Gibt die Zahl der Takes zurück.
-    pub(crate) fn place_recording(&mut self, rec: &Recording, start: u64) -> Result<usize, String> {
+    /// `skip`: so viele Frames am Anfang der Aufnahme fallen weg (lagen vor Projektbeginn).
+    pub(crate) fn place_recording(
+        &mut self,
+        rec: &Recording,
+        start: u64,
+        skip: u64,
+    ) -> Result<usize, String> {
         let before = self.project.clone();
         let rate = self.sample_rate;
         let tempo = self.project.tempo.clone();
@@ -169,7 +189,13 @@ impl ProjectWindow {
         let cycle = self
             .cycle
             .then(|| (to_frames(self.left_locator), to_frames(self.right_locator)));
-        let takes = passes(start, rec.frames, cycle);
+        let takes: Vec<Pass> = passes(start, rec.frames.saturating_sub(skip), cycle)
+            .into_iter()
+            .map(|p| Pass {
+                offset: p.offset + skip,
+                ..p
+            })
+            .collect();
         let dir = rec.path.parent().map(Path::to_path_buf).unwrap_or_default();
         let stem = rec
             .path

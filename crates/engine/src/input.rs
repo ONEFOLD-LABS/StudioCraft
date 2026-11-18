@@ -1,10 +1,11 @@
 //! Audio-Eingang und Recorder.
 //!
 //! Der Eingangs-Callback (Echtzeit) schiebt alle Kanäle verschachtelt in einen
-//! lock-freien Ringpuffer. Ein eigener Recorder-Thread leert ihn laufend und
-//! schreibt während einer Aufnahme direkt in eine WAV-Datei (32-Bit-Float,
-//! alle Kanäle des Geräts). Welche Kanäle auf welche Spur gehen, entscheidet
-//! die Oberfläche nach dem Stopp.
+//! lock-freien Ringpuffer und veröffentlicht, wann sein erstes Sample erfasst
+//! wurde. Ein eigener Recorder-Thread leert den Puffer laufend und schreibt
+//! während einer Aufnahme direkt in eine WAV-Datei (32-Bit-Float, alle Kanäle
+//! des Geräts). Welche Kanäle auf welche Spur gehen, entscheidet die
+//! Oberfläche nach dem Stopp.
 
 use std::{
     path::{Path, PathBuf},
@@ -21,6 +22,8 @@ use cpal::{
     Device, FromSample, SampleFormat, SizedSample, Stream, StreamConfig,
     traits::{DeviceTrait, HostTrait, StreamTrait},
 };
+
+use crate::clock::{CaptureClock, now_nanos};
 
 /// Puffer zwischen Eingangs-Callback und Recorder in Sekunden.
 const RING_SECONDS: usize = 4;
@@ -40,6 +43,8 @@ pub struct Recording {
     pub frames: u64,
     pub channels: u16,
     pub sample_rate: u32,
+    /// Wann der erste Frame erfasst wurde (Uhr aus [`crate::clock`]), falls bekannt.
+    pub first_captured_at: Option<u64>,
 }
 
 enum Control {
@@ -122,7 +127,7 @@ impl PreparedInput {
         })
     }
 
-    /// Startet Eingang und Recorder-Thread. Neue Aufnahmen landen in `dir`.
+    /// Startet Eingang und Recorder-Thread.
     pub fn start(self) -> Result<(AudioInput, Recorder), String> {
         let Self {
             device,
@@ -133,16 +138,19 @@ impl PreparedInput {
         let capacity = config.sample_rate as usize * usize::from(config.channels) * RING_SECONDS;
         let (producer, consumer) = rtrb::RingBuffer::new(capacity);
         let overruns = Arc::new(AtomicU64::new(0));
+        let clock = Arc::new(CaptureClock::default());
+        let (o, c) = (overruns.clone(), clock.clone());
         let stream = match format {
-            SampleFormat::F32 => build::<f32>(&device, &config, producer, overruns.clone()),
-            SampleFormat::I16 => build::<i16>(&device, &config, producer, overruns.clone()),
-            SampleFormat::I32 => build::<i32>(&device, &config, producer, overruns.clone()),
-            SampleFormat::U16 => build::<u16>(&device, &config, producer, overruns.clone()),
-            SampleFormat::F64 => build::<f64>(&device, &config, producer, overruns.clone()),
+            SampleFormat::F32 => build::<f32>(&device, &config, producer, o, c),
+            SampleFormat::I16 => build::<i16>(&device, &config, producer, o, c),
+            SampleFormat::I32 => build::<i32>(&device, &config, producer, o, c),
+            SampleFormat::U16 => build::<u16>(&device, &config, producer, o, c),
+            SampleFormat::F64 => build::<f64>(&device, &config, producer, o, c),
             other => Err(format!("Sampleformat {other} wird nicht unterstützt")),
         }?;
         stream.play().map_err(|e| format!("Eingang starten: {e}"))?;
-        let recorder = Recorder::spawn(consumer, info.channels, info.sample_rate, overruns);
+        let recorder =
+            Recorder::spawn_with_clock(consumer, info.channels, info.sample_rate, overruns, clock);
         Ok((
             AudioInput {
                 _stream: stream,
@@ -158,16 +166,25 @@ fn build<T>(
     config: &StreamConfig,
     mut producer: rtrb::Producer<f32>,
     overruns: Arc<AtomicU64>,
+    clock: Arc<CaptureClock>,
 ) -> Result<Stream, String>
 where
     T: SizedSample,
     f32: FromSample<T>,
 {
+    let channels = usize::from(config.channels.max(1));
+    let mut frames_seen = 0u64;
     device
         .build_input_stream(
             *config,
-            move |data: &[T], _| {
+            move |data: &[T], info: &cpal::InputCallbackInfo| {
                 // Echtzeit: nur kopieren, nie warten.
+                // Wann das erste Sample dieses Puffers erfasst wurde.
+                let ts = info.timestamp();
+                let latency = ts.callback.saturating_duration_since(ts.capture).as_nanos() as u64;
+                clock.publish(frames_seen, now_nanos().saturating_sub(latency));
+                frames_seen += (data.len() / channels) as u64;
+
                 let n = data.len().min(producer.slots());
                 if let Ok(mut chunk) = producer.write_chunk_uninit(n) {
                     let (a, b) = chunk.as_mut_slices();
@@ -189,17 +206,34 @@ where
 }
 
 impl Recorder {
-    /// Startet den Thread, der `consumer` leert. Öffentlich für Tests ohne Gerät.
+    /// Startet den Thread, der `consumer` leert (ohne Zeitzuordnung; für Tests ohne Gerät).
     pub fn spawn(
         consumer: rtrb::Consumer<f32>,
         channels: u16,
         sample_rate: u32,
         overruns: Arc<AtomicU64>,
     ) -> Self {
+        Self::spawn_with_clock(
+            consumer,
+            channels,
+            sample_rate,
+            overruns,
+            Arc::new(CaptureClock::default()),
+        )
+    }
+
+    /// Wie [`Self::spawn`], mit der Zeitzuordnung des Eingangs-Callbacks.
+    pub fn spawn_with_clock(
+        consumer: rtrb::Consumer<f32>,
+        channels: u16,
+        sample_rate: u32,
+        overruns: Arc<AtomicU64>,
+        clock: Arc<CaptureClock>,
+    ) -> Self {
         let (tx, rx) = mpsc::channel();
         let thread = thread::Builder::new()
             .name("recorder".into())
-            .spawn(move || recorder_loop(consumer, rx, channels, sample_rate))
+            .spawn(move || recorder_loop(consumer, rx, channels, sample_rate, &clock))
             .ok();
         Self {
             control: tx,
@@ -239,6 +273,7 @@ struct Active {
     writer: hound::WavWriter<std::io::BufWriter<std::fs::File>>,
     path: PathBuf,
     samples: u64,
+    first_captured_at: Option<u64>,
 }
 
 fn recorder_loop(
@@ -246,7 +281,11 @@ fn recorder_loop(
     rx: mpsc::Receiver<Control>,
     channels: u16,
     rate: u32,
+    clock: &CaptureClock,
 ) {
+    let ch = u64::from(channels.max(1));
+    // Wie viele Samples insgesamt aus dem Puffer geholt wurden (für die Zeitzuordnung).
+    let mut consumed = 0u64;
     let mut active: Option<Active> = None;
     let mut failed: Option<String> = None;
     let spec = hound::WavSpec {
@@ -260,20 +299,18 @@ fn recorder_loop(
         // Zuerst alles abholen, was bis jetzt angekommen ist.
         let n = consumer.slots();
         if let Ok(chunk) = consumer.read_chunk(n) {
-            match &mut active {
-                Some(a) if failed.is_none() => {
-                    let (x, y) = chunk.as_slices();
-                    for &s in x.iter().chain(y) {
-                        if let Err(e) = a.writer.write_sample(s) {
-                            failed = Some(format!("{}: {e}", a.path.display()));
-                            break;
-                        }
+            if let Some(a) = active.as_mut().filter(|_| failed.is_none()) {
+                let (x, y) = chunk.as_slices();
+                for &s in x.iter().chain(y) {
+                    if let Err(e) = a.writer.write_sample(s) {
+                        failed = Some(format!("{}: {e}", a.path.display()));
+                        break;
                     }
-                    a.samples += n as u64;
-                    chunk.commit_all();
                 }
-                _ => chunk.commit_all(),
+                a.samples += n as u64;
             }
+            chunk.commit_all();
+            consumed += n as u64;
         }
         match msg {
             Ok(Control::Start(path)) => {
@@ -281,13 +318,16 @@ fn recorder_loop(
                 let n = consumer.slots();
                 if let Ok(c) = consumer.read_chunk(n) {
                     c.commit_all();
+                    consumed += n as u64;
                 }
                 failed = None;
+                let first_captured_at = clock.time_of(consumed / ch, rate);
                 active = match hound::WavWriter::create(&path, spec) {
                     Ok(writer) => Some(Active {
                         writer,
                         path,
                         samples: 0,
+                        first_captured_at,
                     }),
                     Err(e) => {
                         failed = Some(format!("{}: {e}", path.display()));
@@ -300,7 +340,8 @@ fn recorder_loop(
                     (_, Some(e)) => Err(e),
                     (None, None) => Err("Es lief keine Aufnahme".into()),
                     (Some(a), None) => {
-                        let frames = a.samples / u64::from(channels.max(1));
+                        let frames = a.samples / ch;
+                        let first_captured_at = a.first_captured_at;
                         a.writer
                             .finalize()
                             .map(|()| Recording {
@@ -308,6 +349,7 @@ fn recorder_loop(
                                 frames,
                                 channels,
                                 sample_rate: rate,
+                                first_captured_at,
                             })
                             .map_err(|e| e.to_string())
                     }
@@ -347,8 +389,11 @@ mod tests {
     #[test]
     fn records_only_after_start_and_splits_channels() {
         let (mut tx, rx) = rtrb::RingBuffer::new(1024);
-        let rec = Recorder::spawn(rx, 3, 48_000, Arc::new(AtomicU64::new(0)));
-        // Vor dem Start: wird verworfen.
+        let clock = Arc::new(CaptureClock::default());
+        let rec =
+            Recorder::spawn_with_clock(rx, 3, 48_000, Arc::new(AtomicU64::new(0)), clock.clone());
+        // Vor dem Start: wird verworfen. Der Eingang meldet: Frame 0 bei 1 s erfasst.
+        clock.publish(0, 1_000_000_000);
         for _ in 0..30 {
             tx.push(9.0).unwrap();
         }
@@ -366,6 +411,11 @@ mod tests {
         std::thread::sleep(Duration::from_millis(30));
         let done = rec.stop().unwrap();
         assert_eq!((done.frames, done.channels), (100, 3));
+        // 10 verworfene Frames (30 Samples / 3 Kanäle) nach 1 s: erster Frame bei 1 s + 10/48000 s.
+        assert_eq!(
+            done.first_captured_at,
+            Some(1_000_000_000 + 10 * 1_000_000_000 / 48_000)
+        );
         let mono2 = extract_channels(&done, 2, false).unwrap();
         assert_eq!(&mono2[..4], &[0.5, 0.5, 1.5, 1.5]);
         let st = extract_channels(&done, 0, true).unwrap();

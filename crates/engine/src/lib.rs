@@ -5,6 +5,7 @@
 //! Message-Queues ([`Command`]) und atomare Statuswerte ([`EngineStatus`]).
 
 pub mod clip;
+pub mod clock;
 pub mod core;
 pub mod export;
 pub mod input;

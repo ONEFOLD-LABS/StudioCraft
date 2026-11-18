@@ -40,6 +40,8 @@ pub struct EngineStatus {
     cycle: AtomicBool,
     /// Projektposition (Frames), an der die letzte Aufnahme begann.
     rec_start: AtomicU64,
+    /// Zeitpunkt (Uhr aus [`crate::clock`]), zu dem `rec_start` hörbar wurde; 0 = unbekannt.
+    rec_played_at: AtomicU64,
     /// Gerenderte Blöcke, nützlich für Diagnose.
     blocks: AtomicU64,
 }
@@ -53,6 +55,10 @@ impl EngineStatus {
     }
     pub fn rec_start(&self) -> u64 {
         self.rec_start.load(Ordering::Relaxed)
+    }
+    /// Wann `rec_start` aus dem Lautsprecher kam, falls die Ausgabe Zeitstempel liefert.
+    pub fn rec_played_at(&self) -> Option<u64> {
+        Some(self.rec_played_at.load(Ordering::Relaxed)).filter(|&n| n > 0)
     }
     pub fn cycle(&self) -> bool {
         self.cycle.load(Ordering::Relaxed)
@@ -107,6 +113,8 @@ pub struct EngineCore {
     meters: Arc<Meters>,
     /// Puffer für eine Spur, vorab angelegt (keine Allokation im Audio-Thread).
     scratch: Box<[f32]>,
+    /// Wann der Anfang des aktuellen Blocks hörbar wird (Uhr aus [`crate::clock`]).
+    block_played_at: u64,
 }
 
 /// Erzeugt das zusammengehörige Paar aus Kern und Steuerung.
@@ -124,6 +132,7 @@ pub fn engine(sample_rate: u32, tempo: TempoMap) -> (EngineCore, EngineControl) 
         status: status.clone(),
         meters: meters.clone(),
         scratch: vec![0.0; SCRATCH_FRAMES * 2].into_boxed_slice(),
+        block_played_at: 0,
     };
     let control = EngineControl {
         commands: producer,
@@ -141,6 +150,11 @@ impl EngineCore {
         self.sample_rate
     }
 
+    /// Vor `process`: wann der Anfang des nächsten Blocks hörbar wird.
+    pub fn set_block_played_at(&mut self, nanos: u64) {
+        self.block_played_at = nanos;
+    }
+
     fn apply(&mut self, cmd: Command) {
         let t = &mut self.transport;
         match cmd {
@@ -153,6 +167,9 @@ impl EngineCore {
             Command::Play => t.play(),
             Command::Record => {
                 self.status.rec_start.store(t.cursor, Ordering::Relaxed);
+                self.status
+                    .rec_played_at
+                    .store(self.block_played_at, Ordering::Relaxed);
                 t.record();
             }
             Command::Stop => t.stop(false),

@@ -159,8 +159,14 @@ where
     device
         .build_output_stream(
             *config,
-            move |data: &mut [T], _| {
+            move |data: &mut [T], info: &cpal::OutputCallbackInfo| {
                 // Echtzeit-Callback: keine Allokation, kein Lock.
+                let ts = info.timestamp();
+                let latency = ts
+                    .playback
+                    .saturating_duration_since(ts.callback)
+                    .as_nanos() as u64;
+                core.set_block_played_at(crate::clock::now_nanos() + latency);
                 for out in data.chunks_mut(SCRATCH_FRAMES * channels) {
                     let frames = out.len() / channels;
                     let block = &mut scratch[..frames * 2];
