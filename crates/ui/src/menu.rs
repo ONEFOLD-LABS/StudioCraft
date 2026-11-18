@@ -34,6 +34,7 @@ const SC_SAVE_AS: KeyboardShortcut = KeyboardShortcut::new(CMD.plus(Modifiers::S
 const SC_VERSION: KeyboardShortcut = KeyboardShortcut::new(CMD.plus(Modifiers::ALT), Key::S);
 const SC_UNDO: KeyboardShortcut = KeyboardShortcut::new(CMD, Key::Z);
 const SC_REDO: KeyboardShortcut = KeyboardShortcut::new(CMD.plus(Modifiers::SHIFT), Key::Z);
+const SC_TRACK: KeyboardShortcut = KeyboardShortcut::new(CMD, Key::T);
 
 impl ProjectWindow {
     /// Tastenkürzel der Datei-Befehle (Spec „Tastaturkonzept“).
@@ -51,6 +52,9 @@ impl ProjectWindow {
             .find(|(sc, _)| i.consume_shortcut(sc))
             .map(|(_, a)| a)
         });
+        if ui.input_mut(|i| i.consume_shortcut(&SC_TRACK)) {
+            self.add_audio_track();
+        }
         if let Some(a) = hit {
             self.request(ui, a);
         }
@@ -103,6 +107,18 @@ impl ProjectWindow {
                 if ui.add_enabled(!self.selection.is_empty(), del).clicked() {
                     self.delete_selection();
                 }
+            });
+            ui.menu_button("Projekt", |ui| {
+                let audio = egui::Button::new("Audio-Spur hinzufügen")
+                    .shortcut_text(ui.ctx().format_shortcut(&SC_TRACK));
+                if ui.add(audio).clicked() {
+                    self.add_audio_track();
+                }
+                ui.menu_button("Instrument-Spur hinzufügen", |ui| {
+                    if let Some(info) = self.instrument_menu(ui) {
+                        self.add_instrument_track(info);
+                    }
+                });
             });
             ui.menu_button("Ansicht", |ui| {
                 ui.checkbox(&mut self.show_inspector, "Inspector (Alt+I)");

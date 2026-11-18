@@ -19,9 +19,15 @@ pub(crate) const MAX_INSERTS: usize = 8;
 /// Größter Block, den die Engine an ein Plugin gibt.
 const MAX_BLOCK: u32 = 8192;
 
+/// Slot-Nummer für das Instrument einer Instrument-Spur (Inserts zählen ab 0).
+pub(crate) const INSTRUMENT: usize = usize::MAX;
+
 /// Was zuletzt an die Engine ging, je Spur.
 #[derive(Default, Clone)]
 pub(crate) struct SentChain {
+    pub(crate) instrument: Option<InsertSlot>,
+    /// Instrument läuft in der Engine (Plugin vorhanden).
+    pub(crate) instrument_ok: bool,
     pub(crate) slots: Vec<InsertSlot>,
     /// Modell-Slot → Index in der Engine-Kette (`None`: Plugin fehlt).
     pub(crate) map: Vec<Option<usize>>,
@@ -52,13 +58,56 @@ impl ProjectWindow {
         self.plugin_list().iter().find(|p| p.id == id).cloned()
     }
 
+    pub(crate) fn slot(&self, track: usize, k: usize) -> Option<&InsertSlot> {
+        let t = self.project.tracks.get(track)?;
+        if k == INSTRUMENT {
+            t.instrument.as_ref()
+        } else {
+            t.inserts.get(k)
+        }
+    }
+
+    fn slot_mut(&mut self, track: usize, k: usize) -> Option<&mut InsertSlot> {
+        let t = self.project.tracks.get_mut(track)?;
+        if k == INSTRUMENT {
+            t.instrument.as_mut()
+        } else {
+            t.inserts.get_mut(k)
+        }
+    }
+
+    /// Index des Slots in der Engine-Kette (`None`: Plugin fehlt).
+    fn engine_index(&self, track: usize, k: usize) -> Option<usize> {
+        let sent = self.plugins.sent.get(track)?;
+        if k == INSTRUMENT {
+            sent.instrument_ok.then_some(INSTRUMENT)
+        } else {
+            sent.map.get(k).copied().flatten()
+        }
+    }
+
+    fn instantiate(&mut self, slot: &InsertSlot) -> Result<ClapInstance, String> {
+        let info = self
+            .find_plugin(&slot.plugin_id)
+            .ok_or_else(|| format!("{}: nicht installiert", slot.name))?;
+        let mut inst = ClapInstance::new(&info, self.sample_rate, MAX_BLOCK)?;
+        for &(id, v) in &slot.params {
+            inst.set_param(id, v);
+        }
+        self.plugins
+            .params
+            .entry(slot.plugin_id.clone())
+            .or_insert_with(|| inst.params.clone());
+        Ok(inst)
+    }
+
     /// Engine-Ketten an das Projekt angleichen (nach jeder Änderung aufgerufen).
     pub(crate) fn sync_inserts(&mut self) {
         let n = self.project.tracks.len();
         let mut sent = std::mem::take(&mut self.plugins.sent);
-        // Spuren, die es nicht mehr gibt: Inserts entfernen.
+        // Spuren, die es nicht mehr gibt: Kette entfernen.
         for (i, old) in sent.iter().enumerate().skip(n) {
-            if !old.slots.is_empty() {
+            if !old.slots.is_empty() || old.instrument.is_some() {
                 self.send(Command::SetInserts(i, None));
             }
         }
@@ -66,41 +115,64 @@ impl ProjectWindow {
         let mut missing = Vec::new();
         for (i, have) in sent.iter_mut().enumerate() {
             let want = self.project.tracks[i].inserts.clone();
-            let same = want.len() == have.slots.len()
+            let want_instr = self.project.tracks[i].instrument.clone();
+            let same_instr = match (&want_instr, &have.instrument) {
+                (None, None) => true,
+                (Some(a), Some(b)) => a.same_plugin(b),
+                _ => false,
+            };
+            let same = same_instr
+                && want.len() == have.slots.len()
                 && want.iter().zip(&have.slots).all(|(a, b)| a.same_plugin(b));
             if same {
                 // Nur Bypass und Parameter nachziehen.
-                for (k, (w, h)) in want.iter().zip(&have.slots).enumerate() {
-                    let Some(idx) = have.map[k] else { continue };
+                let mut pairs: Vec<(Option<usize>, &InsertSlot, &InsertSlot)> = want
+                    .iter()
+                    .zip(&have.slots)
+                    .enumerate()
+                    .map(|(k, (w, h))| (have.map[k], w, h))
+                    .collect();
+                if let (Some(w), Some(h)) = (&want_instr, &have.instrument) {
+                    pairs.push((have.instrument_ok.then_some(INSTRUMENT), w, h));
+                }
+                let mut cmds = Vec::new();
+                for (idx, w, h) in pairs {
+                    let Some(idx) = idx else { continue };
                     if w.bypass != h.bypass {
-                        self.send(Command::SetBypass(i, idx, w.bypass));
+                        cmds.push(Command::SetBypass(i, idx, w.bypass));
                     }
                     for &(id, v) in &w.params {
                         if !h.params.contains(&(id, v)) {
-                            self.send(Command::SetParam(i, idx, id, v));
+                            cmds.push(Command::SetParam(i, idx, id, v));
                         }
                     }
                 }
+                for c in cmds {
+                    self.send(c);
+                }
                 have.slots = want;
+                have.instrument = want_instr;
                 continue;
             }
             // Kette neu aufbauen.
             let mut chain = InsertChain::default();
+            let mut instrument_ok = false;
+            if let Some(slot) = &want_instr {
+                match self.instantiate(slot) {
+                    Ok(inst) => {
+                        chain.instrument = Some(Insert {
+                            instance: inst,
+                            bypass: slot.bypass,
+                        });
+                        instrument_ok = true;
+                    }
+                    Err(e) => missing.push(e),
+                }
+            }
             let mut map = Vec::with_capacity(want.len());
             for slot in &want {
-                let instance = self
-                    .find_plugin(&slot.plugin_id)
-                    .ok_or_else(|| format!("{}: nicht installiert", slot.name))
-                    .and_then(|info| ClapInstance::new(&info, self.sample_rate, MAX_BLOCK));
-                match instance {
-                    Ok(mut inst) => {
-                        for &(id, v) in &slot.params {
-                            inst.set_param(id, v);
-                        }
-                        self.plugins
-                            .params
-                            .entry(slot.plugin_id.clone())
-                            .or_insert_with(|| inst.params.clone());
+                match self.instantiate(slot) {
+                    Ok(inst) => {
                         map.push(Some(chain.slots.len()));
                         chain.slots.push(Insert {
                             instance: inst,
@@ -113,16 +185,139 @@ impl ProjectWindow {
                     }
                 }
             }
-            let chain = (!chain.slots.is_empty()).then(|| Box::new(chain));
+            let chain =
+                (!chain.slots.is_empty() || chain.instrument.is_some()).then(|| Box::new(chain));
             if let Some(t) = &mut self.transport {
                 t.send(Command::SetInserts(i, chain));
             }
-            *have = SentChain { slots: want, map };
+            *have = SentChain {
+                slots: want,
+                map,
+                instrument: want_instr,
+                instrument_ok,
+            };
         }
         self.plugins.sent = sent;
         if !missing.is_empty() {
             self.message = Some(format!("Plugins: {}", missing.join("; ")));
         }
+    }
+
+    /// Menü der installierten Instrumente, nach Hersteller. Gibt die Auswahl zurück
+    /// (`Some(None)`: Spur ohne Instrument).
+    pub(crate) fn instrument_menu(&mut self, ui: &mut Ui) -> Option<Option<PluginInfo>> {
+        let instruments: Vec<PluginInfo> = self
+            .plugin_list()
+            .iter()
+            .filter(|p| p.is_instrument())
+            .cloned()
+            .collect();
+        let mut chosen = None;
+        if ui.button("Ohne Instrument").clicked() {
+            chosen = Some(None);
+        }
+        if instruments.is_empty() {
+            ui.weak("Keine CLAP-Instrumente installiert");
+        }
+        ui.separator();
+        egui::ScrollArea::vertical()
+            .max_height(480.0)
+            .show(ui, |ui| {
+                for p in instruments {
+                    let label = if p.vendor.is_empty() {
+                        p.name.clone()
+                    } else {
+                        format!("{} – {}", p.name, p.vendor)
+                    };
+                    if ui.button(label).clicked() {
+                        chosen = Some(Some(p));
+                    }
+                }
+            });
+        if chosen.is_some() {
+            ui.close();
+        }
+        chosen
+    }
+
+    pub(crate) fn add_audio_track(&mut self) {
+        let before = self.project.clone();
+        let n = self
+            .project
+            .tracks
+            .iter()
+            .filter(|t| t.kind == studiocraft_project::TrackKind::Audio)
+            .count();
+        let t = self.project.add_track(
+            studiocraft_project::TrackKind::Audio,
+            format!("Audio {:02}", n + 1),
+        );
+        self.selected_track = Some(t);
+        self.checkpoint(before);
+    }
+
+    pub(crate) fn add_instrument_track(&mut self, info: Option<PluginInfo>) {
+        let before = self.project.clone();
+        let name = info
+            .as_ref()
+            .map_or("Instrument".to_owned(), |p| p.name.clone());
+        let t = self
+            .project
+            .add_track(studiocraft_project::TrackKind::Instrument, name);
+        self.project.tracks[t].instrument = info.map(|p| InsertSlot {
+            plugin_id: p.id,
+            name: p.name,
+            bypass: false,
+            params: Vec::new(),
+        });
+        self.selected_track = Some(t);
+        self.checkpoint(before);
+    }
+
+    /// Instrument-Bereich des Inspectors: Plugin wählen, ein/aus, Parameter.
+    pub(crate) fn instrument_ui(&mut self, ui: &mut Ui, track: usize) {
+        match self.project.tracks[track].instrument.clone() {
+            Some(slot) => {
+                ui.horizontal(|ui| {
+                    let mut on = !slot.bypass;
+                    if ui
+                        .checkbox(&mut on, slot.name.clone())
+                        .on_hover_text("Ein/Aus")
+                        .changed()
+                    {
+                        let before = self.project.clone();
+                        if let Some(s) = self.project.tracks[track].instrument.as_mut() {
+                            s.bypass = !on;
+                        }
+                        self.checkpoint(before);
+                    }
+                });
+                ui.menu_button("Instrument wechseln", |ui| {
+                    if let Some(choice) = self.instrument_menu(ui) {
+                        self.set_instrument(track, choice);
+                    }
+                });
+                self.params_ui(ui, track, INSTRUMENT);
+            }
+            None => {
+                ui.menu_button("Instrument wählen", |ui| {
+                    if let Some(choice) = self.instrument_menu(ui) {
+                        self.set_instrument(track, choice);
+                    }
+                });
+            }
+        }
+    }
+
+    fn set_instrument(&mut self, track: usize, info: Option<PluginInfo>) {
+        let before = self.project.clone();
+        self.project.tracks[track].instrument = info.map(|p| InsertSlot {
+            plugin_id: p.id,
+            name: p.name,
+            bypass: false,
+            params: Vec::new(),
+        });
+        self.checkpoint(before);
     }
 
     /// Insert-Bereich des Inspectors.
@@ -211,20 +406,45 @@ impl ProjectWindow {
     }
 
     /// Allgemeine Parameteransicht (Regler je Parameter). Eigene Plugin-Fenster folgen.
-    fn params_ui(&mut self, ui: &mut Ui, track: usize, k: usize) {
-        let slot = &self.project.tracks[track].inserts[k];
+    /// `k` ist der Insert-Slot oder [`INSTRUMENT`].
+    pub(crate) fn params_ui(&mut self, ui: &mut Ui, track: usize, k: usize) {
+        let Some(slot) = self.slot(track, k) else {
+            return;
+        };
         let Some(infos) = self.plugins.params.get(&slot.plugin_id).cloned() else {
             return;
         };
         egui::CollapsingHeader::new(format!("Parameter ({})", infos.len()))
             .id_salt(("insert-params", track, k))
             .show(ui, |ui| {
+                // Suchfeld; bei großen Plugins (Sampler: tausende Parameter) unverzichtbar.
+                let filter_id = egui::Id::unique(("param-filter", track, k));
+                let mut filter: String = ui.data(|d| d.get_temp(filter_id)).unwrap_or_default();
+                ui.horizontal(|ui| {
+                    let l = ui.label("Suche");
+                    if ui
+                        .text_edit_singleline(&mut filter)
+                        .labelled_by(l.id)
+                        .changed()
+                    {
+                        ui.data_mut(|d| d.insert_temp(filter_id, filter.clone()));
+                    }
+                });
+                let needle = filter.to_lowercase();
+                let shown: Vec<&ParamInfo> = infos
+                    .iter()
+                    .filter(|i| needle.is_empty() || i.name.to_lowercase().contains(&needle))
+                    .collect();
+                // Nur sichtbare Zeilen bauen.
+                let row_h = ui.spacing().interact_size.y + ui.spacing().item_spacing.y;
                 egui::ScrollArea::vertical()
                     .id_salt(("insert-params-scroll", track, k))
                     .max_height(280.0)
-                    .show(ui, |ui| {
-                        for info in &infos {
-                            let slot = &self.project.tracks[track].inserts[k];
+                    .show_rows(ui, row_h, shown.len(), |ui, rows| {
+                        for info in &shown[rows] {
+                            let Some(slot) = self.slot(track, k) else {
+                                return;
+                            };
                             let mut v = slot
                                 .params
                                 .iter()
@@ -236,20 +456,20 @@ impl ProjectWindow {
                                 slider = slider.step_by(1.0);
                             }
                             if ui.add(slider).changed() {
-                                self.project.tracks[track].inserts[k].set_param(info.id, v);
-                                let chain_idx = self
-                                    .plugins
-                                    .sent
-                                    .get(track)
-                                    .and_then(|s| s.map.get(k).copied().flatten());
-                                if let Some(idx) = chain_idx {
+                                if let Some(s) = self.slot_mut(track, k) {
+                                    s.set_param(info.id, v);
+                                }
+                                if let Some(idx) = self.engine_index(track, k) {
                                     self.send(Command::SetParam(track, idx, info.id, v));
-                                    if let Some(s) = self
-                                        .plugins
-                                        .sent
-                                        .get_mut(track)
-                                        .and_then(|s| s.slots.get_mut(k))
-                                    {
+                                    let sent = self.plugins.sent.get_mut(track);
+                                    let s = sent.and_then(|s| {
+                                        if k == INSTRUMENT {
+                                            s.instrument.as_mut()
+                                        } else {
+                                            s.slots.get_mut(k)
+                                        }
+                                    });
+                                    if let Some(s) = s {
                                         s.set_param(info.id, v);
                                     }
                                 }

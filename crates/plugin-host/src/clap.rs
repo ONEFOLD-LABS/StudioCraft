@@ -12,8 +12,9 @@ use clap_sys::{
     audio_buffer::clap_audio_buffer,
     entry::clap_plugin_entry,
     events::{
-        CLAP_CORE_EVENT_SPACE_ID, CLAP_EVENT_PARAM_VALUE, clap_event_header,
-        clap_event_param_value, clap_input_events, clap_output_events,
+        CLAP_CORE_EVENT_SPACE_ID, CLAP_EVENT_NOTE_OFF, CLAP_EVENT_NOTE_ON, CLAP_EVENT_PARAM_VALUE,
+        clap_event_header, clap_event_note, clap_event_param_value, clap_input_events,
+        clap_output_events,
     },
     ext::{
         audio_ports::{
@@ -210,8 +211,24 @@ fn new_host() -> Box<clap_host> {
 // ---------------------------------------------------------------------------
 // Ereignislisten für `process`.
 
+/// Ein Ereignis beliebigen Typs; alle beginnen mit `clap_event_header`.
+#[repr(C)]
+#[derive(Clone, Copy)]
+union AnyEvent {
+    header: clap_event_header,
+    param: clap_event_param_value,
+    note: clap_event_note,
+}
+
+impl AnyEvent {
+    fn header(&self) -> &clap_event_header {
+        // SAFETY: jede Variante beginnt mit dem Kopf (repr(C)).
+        unsafe { &self.header }
+    }
+}
+
 struct EventList {
-    events: Vec<clap_event_param_value>,
+    events: Vec<AnyEvent>,
 }
 
 unsafe extern "C" fn in_size(list: *const clap_input_events) -> u32 {
@@ -224,7 +241,7 @@ unsafe extern "C" fn in_get(list: *const clap_input_events, i: u32) -> *const cl
         let l = &*((*list).ctx as *const EventList);
         l.events
             .get(i as usize)
-            .map_or(ptr::null(), |e| &e.header as *const _)
+            .map_or(ptr::null(), |e| e.header() as *const _)
     }
 }
 unsafe extern "C" fn out_push(_: *const clap_output_events, _: *const clap_event_header) -> bool {
@@ -464,28 +481,62 @@ impl ClapInstance {
     /// Parameteränderung für den nächsten Block vormerken. Echtzeitsicher;
     /// ist der Vorrat voll, gewinnt beim nächsten Block der neueste Wert nicht.
     pub fn set_param(&mut self, id: u32, value: f64) {
-        if let Some(e) = self.pending.events.iter_mut().find(|e| e.param_id == id) {
-            e.value = value;
+        let existing = self.pending.events.iter_mut().find(|e| {
+            // SAFETY: Typ wird über den Kopf geprüft, bevor die Variante gelesen wird.
+            e.header().type_ == CLAP_EVENT_PARAM_VALUE && unsafe { e.param.param_id } == id
+        });
+        if let Some(e) = existing {
+            // SAFETY: oben als Parameter-Ereignis erkannt.
+            e.param.value = value;
             return;
         }
         if self.pending.events.len() < MAX_EVENTS {
-            self.pending.events.push(clap_event_param_value {
-                header: clap_event_header {
-                    size: std::mem::size_of::<clap_event_param_value>() as u32,
-                    time: 0,
-                    space_id: CLAP_CORE_EVENT_SPACE_ID,
-                    type_: CLAP_EVENT_PARAM_VALUE,
-                    flags: 0,
+            self.pending.events.push(AnyEvent {
+                param: clap_event_param_value {
+                    header: clap_event_header {
+                        size: std::mem::size_of::<clap_event_param_value>() as u32,
+                        time: 0,
+                        space_id: CLAP_CORE_EVENT_SPACE_ID,
+                        type_: CLAP_EVENT_PARAM_VALUE,
+                        flags: 0,
+                    },
+                    param_id: id,
+                    cookie: ptr::null_mut(),
+                    note_id: -1,
+                    port_index: -1,
+                    channel: -1,
+                    key: -1,
+                    value,
                 },
-                param_id: id,
-                cookie: ptr::null_mut(),
-                note_id: -1,
-                port_index: -1,
-                channel: -1,
-                key: -1,
-                value,
             });
         }
+    }
+
+    /// Note an oder aus, `time` = Frame im nächsten Block. Echtzeitsicher.
+    pub fn note(&mut self, time: u32, key: u8, velocity: f32, on: bool) {
+        if self.pending.events.len() >= MAX_EVENTS {
+            return;
+        }
+        self.pending.events.push(AnyEvent {
+            note: clap_event_note {
+                header: clap_event_header {
+                    size: std::mem::size_of::<clap_event_note>() as u32,
+                    time,
+                    space_id: CLAP_CORE_EVENT_SPACE_ID,
+                    type_: if on {
+                        CLAP_EVENT_NOTE_ON
+                    } else {
+                        CLAP_EVENT_NOTE_OFF
+                    },
+                    flags: 0,
+                },
+                note_id: -1,
+                port_index: 0,
+                channel: 0,
+                key: i16::from(key),
+                velocity: f64::from(velocity),
+            },
+        });
     }
 
     /// Bearbeitet Stereo an Ort und Stelle. Nur im Audio-Thread, echtzeitsicher.
@@ -545,6 +596,18 @@ impl ClapInstance {
                 in_events: &in_events,
                 out_events: &out_events,
             };
+            // CLAP verlangt zeitlich sortierte Ereignisse (sortiert an Ort und Stelle,
+            // ohne Allokation). Bei gleicher Zeit kommt Note-Off vor Note-On, damit
+            // eine direkt anschließende gleiche Note nicht abgeschnitten wird.
+            self.pending.events.sort_unstable_by_key(|e| {
+                let h = e.header();
+                let order = match h.type_ {
+                    CLAP_EVENT_NOTE_OFF => 0u8,
+                    CLAP_EVENT_NOTE_ON => 1,
+                    _ => 2,
+                };
+                (h.time, order)
+            });
             let status = p
                 .process
                 .map_or(CLAP_PROCESS_ERROR, |f| f(self.plugin, &process));

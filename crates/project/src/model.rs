@@ -60,6 +60,26 @@ pub struct Event {
     /// Fade-In und Fade-Out in Ticks (nicht-destruktiv, linear).
     pub fade_in: u64,
     pub fade_out: u64,
+    /// MIDI-Parts: Noten, Position relativ zum Part-Anfang.
+    #[serde(default)]
+    pub notes: Vec<Note>,
+}
+
+/// Eine MIDI-Note in einem Part (Spec „MIDI-Part“: Noten relativ zum Part-Start).
+/// `start` darf negativ sein oder hinter dem Part-Ende liegen: Beim Kürzen eines
+/// Parts bleiben Noten erhalten und sind nur ausgeblendet, wie in klassischen DAWs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct Note {
+    pub pitch: u8,
+    pub velocity: u8,
+    pub start: i64,
+    pub length: u64,
+}
+
+impl Note {
+    pub fn end(&self) -> i64 {
+        self.start + self.length as i64
+    }
 }
 
 impl Event {
@@ -90,6 +110,9 @@ pub struct Track {
     /// Insert-Effekte in Signalfluss-Reihenfolge.
     #[serde(default)]
     pub inserts: Vec<InsertSlot>,
+    /// Instrument-Spuren: das Instrument-Plugin.
+    #[serde(default)]
+    pub instrument: Option<InsertSlot>,
     pub events: Vec<Event>,
 }
 
@@ -248,6 +271,7 @@ impl Project {
                 pan: 0.0,
                 input: TrackInput::default(),
                 inserts: Vec::new(),
+                instrument: None,
                 events: Vec::new(),
             };
             if kind.holds_events() {
@@ -267,6 +291,7 @@ impl Project {
                         offset: 0,
                         fade_in: 0,
                         fade_out: 0,
+                        notes: Vec::new(),
                     });
                     at += len + ((i as u64 + 2 * k) % 3) * bar;
                     k += 1;
@@ -320,6 +345,18 @@ impl Project {
         right.start = Position(at);
         right.length = ev.end() - at;
         ev.length = at - ev.start.0;
+        // Noten: was ab dem Schnitt beginnt, wandert in den rechten Part.
+        let cut = (at - ev.start.0) as i64;
+        right.notes = ev
+            .notes
+            .iter()
+            .filter(|n| n.start >= cut)
+            .map(|n| Note {
+                start: n.start - cut,
+                ..*n
+            })
+            .collect();
+        ev.notes.retain(|n| n.start < cut);
         // Fade-In bleibt links, Fade-Out wandert nach rechts.
         right.fade_in = 0;
         ev.fade_out = 0;
@@ -395,6 +432,7 @@ impl Project {
                 offset: 0,
                 fade_in: 0,
                 fade_out: 0,
+                notes: Vec::new(),
             },
         );
         Some(id)
@@ -438,6 +476,11 @@ impl Project {
                     .offset
                     .saturating_sub(tempo.frames(old_start - start, rate));
             }
+        }
+        // Noten bleiben an ihrer Stelle im Projekt.
+        let shift = start as i64 - ev.start.0 as i64;
+        for n in &mut ev.notes {
+            n.start -= shift;
         }
         ev.start = Position(start);
         ev.length = end - start;
@@ -488,6 +531,7 @@ impl Project {
             pan: 0.0,
             input: TrackInput::default(),
             inserts: Vec::new(),
+            instrument: None,
             events: Vec::new(),
         });
         i
@@ -521,6 +565,7 @@ impl Project {
                 offset: 0,
                 fade_in: 0,
                 fade_out: 0,
+                notes: Vec::new(),
             },
         );
         Some(id)
@@ -573,6 +618,7 @@ impl Project {
             offset,
             fade_in: 0,
             fade_out: 0,
+            notes: Vec::new(),
         });
         Some(id)
     }
@@ -757,6 +803,45 @@ mod tests {
         let o = TrackInput::options(2);
         let labels: Vec<String> = o.iter().map(|i| i.label()).collect();
         assert_eq!(labels, ["Eingang 1/2", "Eingang 1", "Eingang 2"]);
+    }
+
+    #[test]
+    fn notes_follow_split_and_trim() {
+        let mut p = Project::default();
+        let t = p.add_track(TrackKind::Instrument, "Synth");
+        let q = TICKS_PER_QUARTER;
+        let id = p.create_event(t, 4 * q, 4 * q).unwrap();
+        let ev = p.event_mut(id).unwrap();
+        for (i, pitch) in [60u8, 62, 64, 65].into_iter().enumerate() {
+            ev.notes.push(Note {
+                pitch,
+                velocity: 100,
+                start: (i as u64 * q) as i64,
+                length: q,
+            });
+        }
+        // Anfang eine Viertel nach rechts: die Noten bleiben an ihrem Platz.
+        p.trim_start(id, 5 * q);
+        let ev = p.event(id).unwrap();
+        assert_eq!(
+            ev.notes[0].start,
+            -(q as i64),
+            "erste Note ist jetzt ausgeblendet"
+        );
+        assert_eq!(ev.notes[1].start, 0);
+        // Teilen bei Viertel 7: E und F gehen in den rechten Part.
+        let right = p.split(id, 7 * q).unwrap();
+        let pitches = |id| {
+            p.event(id)
+                .unwrap()
+                .notes
+                .iter()
+                .map(|n| n.pitch)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(pitches(id), [60, 62, 64]);
+        assert_eq!(pitches(right), [65]);
+        assert_eq!(p.event(right).unwrap().notes[0].start, 0);
     }
 
     #[test]

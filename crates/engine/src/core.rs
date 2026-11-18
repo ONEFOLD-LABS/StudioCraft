@@ -124,6 +124,10 @@ pub struct EngineCore {
     inserts: Vec<Option<Box<InsertChain>>>,
     /// Getrennte Kanäle für die Insert-Verarbeitung.
     planar: [Box<[f32]>; 2],
+    /// Gehaltene Noten je Spur (Bit = Tonhöhe), für „alle Noten aus“.
+    held: Vec<u128>,
+    /// Beim nächsten Block alle gehaltenen Noten beenden (Stopp, Sprung, Cycle).
+    panic: bool,
     status: Arc<EngineStatus>,
     meters: Arc<Meters>,
     /// Puffer für eine Spur, vorab angelegt (keine Allokation im Audio-Thread).
@@ -147,6 +151,8 @@ pub fn engine(sample_rate: u32, tempo: TempoMap) -> (EngineCore, EngineControl) 
         garbage: garbage_tx,
         plugin_garbage: plugin_tx,
         inserts: (0..MAX_METERED_TRACKS).map(|_| None).collect(),
+        held: vec![0; MAX_METERED_TRACKS],
+        panic: false,
         planar: [
             vec![0.0; SCRATCH_FRAMES].into(),
             vec![0.0; SCRATCH_FRAMES].into(),
@@ -195,13 +201,19 @@ impl EngineCore {
                     .store(self.block_played_at, Ordering::Relaxed);
                 t.record();
             }
-            Command::Stop => t.stop(false),
+            Command::Stop => {
+                t.stop(false);
+                self.panic = true;
+            }
             Command::ToggleCycle => t.cycle = !t.cycle,
             Command::SetLocators(l, r) => {
                 t.left_locator = l.min(r);
                 t.right_locator = l.max(r);
             }
-            Command::Locate(f) => t.cursor = f,
+            Command::Locate(f) => {
+                t.cursor = f;
+                self.panic = true;
+            }
             Command::SetInserts(track, chain) => {
                 if let Some(slot) = self.inserts.get_mut(track) {
                     if let Some(mut old) = std::mem::replace(slot, chain) {
@@ -213,14 +225,14 @@ impl EngineCore {
             }
             Command::SetParam(track, slot, id, value) => {
                 if let Some(Some(chain)) = self.inserts.get_mut(track)
-                    && let Some(ins) = chain.slots.get_mut(slot)
+                    && let Some(ins) = chain.slot_mut(slot)
                 {
                     ins.instance.set_param(id, value);
                 }
             }
             Command::SetBypass(track, slot, bypass) => {
                 if let Some(Some(chain)) = self.inserts.get_mut(track)
-                    && let Some(ins) = chain.slots.get_mut(slot)
+                    && let Some(ins) = chain.slot_mut(slot)
                 {
                     ins.bypass = bypass;
                 }
@@ -238,21 +250,66 @@ impl EngineCore {
         out.fill(0.0);
         let mut frames_left = (out.len() / 2) as u64;
         let mut offset = 0usize;
-        while frames_left > 0 && self.transport.is_running() {
-            let run = self
-                .transport
-                .frames_until_wrap(frames_left)
-                .min(SCRATCH_FRAMES as u64);
-            let n = run as usize * 2;
+        // Instrumente und Inserts laufen auch im Stopp weiter (Ausklingen, Live-Spiel).
+        while frames_left > 0 {
+            let running = self.transport.is_running();
+            let run = if running {
+                self.transport.frames_until_wrap(frames_left)
+            } else {
+                frames_left
+            }
+            .min(SCRATCH_FRAMES as u64);
+            let frames = run as usize;
+            let n = frames * 2;
+            let pos = self.transport.cursor;
+            let panic = std::mem::take(&mut self.panic);
             let dst = &mut out[offset..offset + n];
             let tmp = &mut self.scratch[..n];
             for track in &self.song.tracks {
+                let chain = self
+                    .inserts
+                    .get_mut(track.slot)
+                    .and_then(|c| c.as_deref_mut())
+                    .filter(|c| c.is_active());
+                if !running && chain.is_none() {
+                    continue;
+                }
                 tmp.fill(0.0);
-                track.render(tmp, self.transport.cursor, run as usize);
-                if let Some(Some(chain)) = self.inserts.get_mut(track.slot)
-                    && chain.is_active()
-                {
-                    let frames = run as usize;
+                if running {
+                    track.render(tmp, pos, frames);
+                }
+                if let Some(chain) = chain {
+                    let held = &mut self.held[track.slot.min(MAX_METERED_TRACKS - 1)];
+                    if panic {
+                        for key in 0..128u8 {
+                            if *held & (1 << key) != 0 {
+                                chain.note(0, key, 0.0, false);
+                            }
+                        }
+                        *held = 0;
+                    }
+                    if running && !track.notes.is_empty() {
+                        let end = pos + run;
+                        let last = track.notes.partition_point(|nt| nt.start < end);
+                        for nt in &track.notes[..last] {
+                            if nt.end < pos {
+                                continue;
+                            }
+                            if nt.start >= pos {
+                                chain.note(
+                                    (nt.start - pos) as u32,
+                                    nt.key,
+                                    f32::from(nt.velocity) / 127.0,
+                                    true,
+                                );
+                                *held |= 1 << nt.key;
+                            }
+                            if nt.end >= pos && nt.end < end {
+                                chain.note((nt.end - pos) as u32, nt.key, 0.0, false);
+                                *held &= !(1 << nt.key);
+                            }
+                        }
+                    }
                     let [pl, pr] = &mut self.planar;
                     for (i, f) in tmp.chunks_exact(2).enumerate() {
                         pl[i] = f[0];
@@ -274,7 +331,13 @@ impl EngineCore {
                 }
                 self.meters.feed_track(track.slot, pl, pr);
             }
-            self.transport.advance(run);
+            if running {
+                self.transport.advance(run);
+                // Cycle-Sprung: gehaltene Noten beenden.
+                if self.transport.cursor < pos + run {
+                    self.panic = true;
+                }
+            }
             offset += n;
             frames_left -= run;
         }

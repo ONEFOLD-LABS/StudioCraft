@@ -63,6 +63,17 @@ pub struct PlayTrack {
     pub slot: usize,
     /// Nach `start` sortiert.
     pub events: Vec<PlayEvent>,
+    /// Instrument-Spuren: Noten in Frames, nach `start` sortiert.
+    pub notes: Vec<PlayNote>,
+}
+
+/// Eine Note, wie der Audio-Thread sie braucht (Projektpositionen in Frames).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PlayNote {
+    pub start: u64,
+    pub end: u64,
+    pub key: u8,
+    pub velocity: u8,
 }
 
 #[derive(Debug, Clone)]
@@ -91,6 +102,7 @@ impl Song {
                 gain_r: 1.0,
                 slot: 0,
                 events: vec![PlayEvent::new(0, length, 0, samples)],
+                notes: Vec::new(),
             }],
             master: 1.0,
         }
@@ -104,7 +116,9 @@ impl Song {
             .tracks
             .iter()
             .enumerate()
-            .filter(|(i, t)| t.kind == TrackKind::Audio && project.audible(*i))
+            .filter(|(i, t)| {
+                matches!(t.kind, TrackKind::Audio | TrackKind::Instrument) && project.audible(*i)
+            })
             .map(|(slot, t)| {
                 // Wie in klassischen DAWs klingt auf einer Audiospur bei Überlappung nur das
                 // oberste Event (das spätere in der Liste). Verdeckte Teile fallen weg.
@@ -138,8 +152,26 @@ impl Song {
                     }
                 }
                 events.sort_by_key(|e| e.start);
+                // Noten aller nicht stummen Parts; nur der sichtbare Teil klingt.
+                let mut notes = Vec::new();
+                if t.kind == TrackKind::Instrument {
+                    for e in t.events.iter().filter(|e| !e.muted) {
+                        let len = e.length as i64;
+                        for n in e.notes.iter().filter(|n| n.start >= 0 && n.start < len) {
+                            let a = e.start.0 + n.start as u64;
+                            let b = e.start.0 + n.end().min(len) as u64;
+                            notes.push(PlayNote {
+                                start: tempo.frames(a, rate),
+                                end: tempo.frames(b, rate).max(tempo.frames(a, rate) + 1),
+                                key: n.pitch,
+                                velocity: n.velocity,
+                            });
+                        }
+                    }
+                    notes.sort_by_key(|n| n.start);
+                }
                 let (gain_l, gain_r) = t.gains();
-                let keep = !events.is_empty() || !t.inserts.is_empty();
+                let keep = !events.is_empty() || !t.inserts.is_empty() || t.instrument.is_some();
                 (
                     keep,
                     PlayTrack {
@@ -147,6 +179,7 @@ impl Song {
                         gain_r,
                         slot,
                         events,
+                        notes,
                     },
                 )
             })
@@ -253,6 +286,7 @@ mod tests {
             gain_r: gain,
             slot,
             events,
+            notes: Vec::new(),
         }
     }
 
@@ -368,6 +402,52 @@ mod tests {
         );
         assert_eq!(visible_parts((0, 10), [(0, 10)].into_iter()), []);
         assert_eq!(visible_parts((5, 10), [(0, 3)].into_iter()), [(5, 10)]);
+    }
+
+    #[test]
+    fn instrument_notes_become_frames_and_are_clipped_to_part() {
+        use studiocraft_project::Note;
+        let mut p = Project::default();
+        let t = p.add_track(TrackKind::Instrument, "Synth");
+        p.tracks[t].instrument = Some(studiocraft_project::InsertSlot {
+            plugin_id: "x".into(),
+            name: "X".into(),
+            bypass: false,
+            params: Vec::new(),
+        });
+        let q = TICKS_PER_QUARTER;
+        let id = p.create_event(t, 0, 2 * q).unwrap();
+        let ev = p.event_mut(id).unwrap();
+        ev.notes = vec![
+            Note {
+                pitch: 60,
+                velocity: 100,
+                start: 0,
+                length: q,
+            },
+            Note {
+                pitch: 64,
+                velocity: 90,
+                start: q as i64,
+                length: 4 * q,
+            }, // ragt über das Part-Ende
+            Note {
+                pitch: 67,
+                velocity: 80,
+                start: -(q as i64),
+                length: q,
+            }, // ausgeblendet
+        ];
+        let song = Song::build(&p, &HashMap::new(), 48_000);
+        assert_eq!(song.tracks.len(), 1);
+        let n = &song.tracks[0].notes;
+        assert_eq!(n.len(), 2);
+        assert_eq!((n[0].start, n[0].end, n[0].key), (0, 24_000, 60));
+        assert_eq!(
+            (n[1].start, n[1].end, n[1].key),
+            (24_000, 48_000, 64),
+            "am Part-Ende abgeschnitten"
+        );
     }
 
     #[test]

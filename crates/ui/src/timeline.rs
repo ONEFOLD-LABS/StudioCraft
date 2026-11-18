@@ -796,6 +796,15 @@ fn paint_event(
 
     let visible = rect.intersect(g.lanes);
     let body = Rect::from_min_max(pos2(rect.left(), head.bottom()), rect.max);
+    if !ev.notes.is_empty() {
+        paint_notes(
+            painter,
+            g,
+            ev,
+            body.intersect(g.lanes),
+            color.lerp_to_gamma(Color32::WHITE, 0.45),
+        );
+    }
     if let Some(clip) = ev.clip.and_then(|c| w.clip(c)) {
         let wave = if ev.muted {
             Color32::from_gray(110)
@@ -825,6 +834,33 @@ fn paint_event(
                 FontId::proportional(10.5),
                 Color32::from_gray(if ev.muted { 200 } else { 10 }),
             );
+    }
+}
+
+/// Mini-Noten in einem MIDI-Part: Tonhöhenbereich der Noten auf die Höhe verteilt.
+fn paint_notes(painter: &Painter, g: &Geo, ev: &Event, area: Rect, color: Color32) {
+    if area.height() < 4.0 || area.width() < 1.0 {
+        return;
+    }
+    let lo = ev.notes.iter().map(|n| n.pitch).min().unwrap_or(60).min(84) as f32;
+    let hi = ev
+        .notes
+        .iter()
+        .map(|n| n.pitch)
+        .max()
+        .unwrap_or(60)
+        .max(lo as u8 + 12) as f32;
+    let step = (area.height() - 2.0) / (hi - lo + 1.0);
+    let len = ev.length as i64;
+    for n in ev.notes.iter().filter(|n| n.start < len && n.end() > 0) {
+        let a = ev.start.0 as f64 + n.start.max(0) as f64;
+        let b = ev.start.0 as f64 + n.end().min(len) as f64;
+        let y = area.bottom() - 1.0 - (f32::from(n.pitch) - lo + 1.0) * step;
+        let r = Rect::from_min_max(
+            pos2(g.x(a), y),
+            pos2(g.x(b).max(g.x(a) + 2.0), y + step.clamp(1.5, 4.0)),
+        );
+        painter.rect_filled(r.intersect(area), 0.5, color);
     }
 }
 
@@ -990,7 +1026,12 @@ fn paint_headers(w: &ProjectWindow, painter: &Painter, g: &Geo) {
             0.0,
             track_color(track.color),
         );
-        painter.text(
+        // Name nur bis vor die Knöpfe, damit lange Namen nicht darüber laufen.
+        let name_clip = Rect::from_min_max(
+            rect.min,
+            pos2(g.header_buttons(row)[0].left() - 4.0, rect.max.y),
+        );
+        painter.with_clip_rect(name_clip.intersect(g.header)).text(
             rect.left_center() + vec2(12.0, -6.0),
             Align2::LEFT_CENTER,
             &track.name,

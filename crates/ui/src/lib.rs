@@ -547,7 +547,15 @@ impl ProjectWindow {
         }
         ui.label(format!("{} Events", track.events.len()));
         ui.separator();
-        if self.project.tracks[idx].kind == TrackKind::Audio {
+        if self.project.tracks[idx].kind == TrackKind::Instrument {
+            egui::CollapsingHeader::new("Instrument")
+                .default_open(true)
+                .show(ui, |ui| self.instrument_ui(ui, idx));
+        }
+        if matches!(
+            self.project.tracks[idx].kind,
+            TrackKind::Audio | TrackKind::Instrument
+        ) {
             egui::CollapsingHeader::new("Inserts")
                 .default_open(true)
                 .show(ui, |ui| self.inserts_ui(ui, idx));
@@ -1391,6 +1399,84 @@ mod tests {
                     });
                 w.sync_inserts();
             }
+            w.show_mixer = false;
+        });
+    }
+
+    fn melody(w: &mut ProjectWindow, track: usize, start: u64) -> EventId {
+        let q = TICKS_PER_QUARTER;
+        let id = w.project.create_event(track, start, 8 * q).unwrap();
+        let ev = w.project.event_mut(id).unwrap();
+        for (i, pitch) in [60u8, 64, 67, 72, 67, 64, 62, 59].into_iter().enumerate() {
+            ev.notes.push(studiocraft_project::Note {
+                pitch,
+                velocity: 100,
+                start: (i as u64 * q) as i64,
+                length: q - 120,
+            });
+        }
+        id
+    }
+
+    #[test]
+    fn instrument_track_plays_part_through_plugin() {
+        let (mut core, ctl) = studiocraft_engine::engine(48_000, TempoMap::default());
+        let mut w = ProjectWindow::new(Project::default(), Some(ctl), String::new());
+        let Some(instr) = w.plugin_list().iter().find(|p| p.is_instrument()).cloned() else {
+            eprintln!("kein CLAP-Instrument installiert – übersprungen");
+            return;
+        };
+        w.add_instrument_track(Some(instr.clone()));
+        assert_eq!(w.project.tracks[0].kind, TrackKind::Instrument);
+        melody(&mut w, 0, 0);
+        w.cycle = true;
+        w.left_locator = 0;
+        w.right_locator = 4 * TICKS_PER_QUARTER; // 2 s
+        w.send_locators();
+        w.send(Command::ToggleCycle);
+        w.sync_inserts();
+        w.rebuild_song();
+        assert_eq!(w.message, None, "{}", instr.name);
+        assert!(w.plugins.sent[0].instrument_ok);
+        w.send(Command::Play);
+        let mut out = vec![0.0f32; 2 * 4096];
+        for _ in 0..40 {
+            core.process(&mut out); // gut 3 s: einmal über den Cycle-Sprung
+        }
+        assert!(out.iter().all(|s| s.is_finite()));
+        w.stop_transport();
+        core.process(&mut out);
+        // Zurück: Spur weg, Instrument wird im Hauptthread zerstört.
+        w.undo();
+        w.sync_inserts();
+        core.process(&mut out);
+        if let Some(t) = &mut w.transport {
+            t.collect_garbage();
+        }
+        assert!(w.project.tracks.is_empty());
+    }
+
+    #[test]
+    fn audio_track_shortcut_and_undo() {
+        let mut w = ProjectWindow::new(Project::default(), None, String::new());
+        w.add_audio_track();
+        w.add_audio_track();
+        assert_eq!(w.project.tracks[1].name, "Audio 02");
+        w.undo();
+        assert_eq!(w.project.tracks.len(), 1);
+    }
+
+    #[test]
+    fn renders_instrument_track_with_part() {
+        shot("instrument", |w| {
+            w.project = Project::default();
+            let instr = w.plugin_list().iter().find(|p| p.is_instrument()).cloned();
+            w.add_instrument_track(instr);
+            melody(w, 0, 4 * TICKS_PER_QUARTER);
+            w.import_clip("Drums", None, tone_clip(8.0, 55.0), None)
+                .unwrap();
+            w.selected_track = Some(0);
+            w.sync_inserts();
             w.show_mixer = false;
         });
     }

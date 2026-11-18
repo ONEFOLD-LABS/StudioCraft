@@ -22,5 +22,5 @@ pub use input::{AudioInput, InputInfo, PreparedInput, Recorder, Recording};
 pub use inserts::{Insert, InsertChain};
 pub use meters::{MAX_METERED_TRACKS, Meters};
 pub use output::{AudioOutput, OutputInfo, PreparedOutput};
-pub use song::{PlayEvent, PlayTrack, Song};
+pub use song::{PlayEvent, PlayNote, PlayTrack, Song};
 pub use transport::{Transport, TransportState};
