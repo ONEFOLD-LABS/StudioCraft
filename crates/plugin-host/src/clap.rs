@@ -12,9 +12,9 @@ use clap_sys::{
     audio_buffer::clap_audio_buffer,
     entry::clap_plugin_entry,
     events::{
-        CLAP_CORE_EVENT_SPACE_ID, CLAP_EVENT_NOTE_OFF, CLAP_EVENT_NOTE_ON, CLAP_EVENT_PARAM_VALUE,
-        clap_event_header, clap_event_note, clap_event_param_value, clap_input_events,
-        clap_output_events,
+        CLAP_CORE_EVENT_SPACE_ID, CLAP_EVENT_MIDI, CLAP_EVENT_NOTE_OFF, CLAP_EVENT_NOTE_ON,
+        CLAP_EVENT_PARAM_VALUE, clap_event_header, clap_event_midi, clap_event_note,
+        clap_event_param_value, clap_input_events, clap_output_events,
     },
     ext::{
         audio_ports::{
@@ -218,6 +218,7 @@ union AnyEvent {
     header: clap_event_header,
     param: clap_event_param_value,
     note: clap_event_note,
+    midi: clap_event_midi,
 }
 
 impl AnyEvent {
@@ -621,6 +622,26 @@ impl ClapInstance {
                 },
             });
         }
+    }
+
+    /// Rohe MIDI-Nachricht (Controller, Pitchbend, Aftertouch). Echtzeitsicher.
+    pub fn midi(&mut self, time: u32, data: [u8; 3]) {
+        if self.pending.events.len() >= MAX_EVENTS {
+            return;
+        }
+        self.pending.events.push(AnyEvent {
+            midi: clap_event_midi {
+                header: clap_event_header {
+                    size: std::mem::size_of::<clap_event_midi>() as u32,
+                    time,
+                    space_id: CLAP_CORE_EVENT_SPACE_ID,
+                    type_: CLAP_EVENT_MIDI,
+                    flags: 0,
+                },
+                port_index: 0,
+                data,
+            },
+        });
     }
 
     /// Note an oder aus, `time` = Frame im nächsten Block. Echtzeitsicher.

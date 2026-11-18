@@ -39,6 +39,13 @@ impl InsertChain {
         }
     }
 
+    /// Rohe MIDI-Nachricht an das Instrument. Echtzeitsicher.
+    pub fn midi(&mut self, time: u32, data: [u8; 3]) {
+        if let Some(i) = &mut self.instrument {
+            i.instance.midi(time, data);
+        }
+    }
+
     /// Note an das Instrument (falls vorhanden). Echtzeitsicher.
     pub fn note(&mut self, time: u32, key: u8, velocity: f32, on: bool) {
         if let Some(i) = &mut self.instrument {

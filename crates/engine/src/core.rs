@@ -142,6 +142,9 @@ pub struct EngineCore {
     midi_in: rtrb::Consumer<MidiMsg>,
     midi_rec: rtrb::Producer<RecordedMidi>,
     midi_target: Option<usize>,
+    /// Haltepedal gedrückt; während der Aufnahme zurückgehaltene Note-Offs.
+    sustain: bool,
+    sustained: u128,
     /// Inserts je Projektspur, vorab angelegt (Austausch ohne Allokation).
     inserts: Vec<Option<Box<InsertChain>>>,
     /// Getrennte Kanäle für die Insert-Verarbeitung.
@@ -177,6 +180,8 @@ pub fn engine(sample_rate: u32, tempo: TempoMap) -> (EngineCore, EngineControl) 
         midi_in: midi_rx,
         midi_rec: rec_tx,
         midi_target: None,
+        sustain: false,
+        sustained: 0,
         inserts: (0..MAX_METERED_TRACKS).map(|_| None).collect(),
         held: vec![0; MAX_METERED_TRACKS],
         panic: false,
@@ -300,22 +305,61 @@ impl EngineCore {
             let Some(track) = self.midi_target else {
                 continue;
             };
-            if let Some(Some(chain)) = self.inserts.get_mut(track) {
-                chain.note(0, m.key, f32::from(m.velocity) / 127.0, m.on);
-                let held = &mut self.held[track.min(MAX_METERED_TRACKS - 1)];
-                if m.on {
-                    *held |= 1 << m.key;
-                } else {
-                    *held &= !(1 << m.key);
+            let recording = self.transport.state == TransportState::Recording;
+            let pos = self.transport.cursor;
+            let chain = self.inserts.get_mut(track).and_then(|c| c.as_deref_mut());
+            match m {
+                MidiMsg::Note { key, velocity, on } => {
+                    if let Some(chain) = chain {
+                        chain.note(0, key, f32::from(velocity) / 127.0, on);
+                        let held = &mut self.held[track.min(MAX_METERED_TRACKS - 1)];
+                        if on {
+                            *held |= 1 << key;
+                        } else {
+                            *held &= !(1 << key);
+                        }
+                    }
+                    if recording {
+                        // Pedal gedrückt: das Loslassen erst beim Pedal-Loslassen aufnehmen.
+                        if !on && self.sustain {
+                            self.sustained |= 1 << key;
+                        } else {
+                            if on {
+                                self.sustained &= !(1 << key);
+                            }
+                            let _ = self.midi_rec.push(RecordedMidi {
+                                pos,
+                                key,
+                                velocity,
+                                on,
+                            });
+                        }
+                    }
                 }
-            }
-            if self.transport.state == TransportState::Recording {
-                let _ = self.midi_rec.push(RecordedMidi {
-                    pos: self.transport.cursor,
-                    key: m.key,
-                    velocity: m.velocity,
-                    on: m.on,
-                });
+                MidiMsg::Other(data) => {
+                    if let Some(chain) = chain {
+                        chain.midi(0, data);
+                    }
+                    if data[0] & 0xf0 == 0xb0 && data[1] == crate::midi::SUSTAIN {
+                        let down = data[2] >= 64;
+                        if self.sustain && !down && recording {
+                            for key in 0..128u8 {
+                                if self.sustained & (1 << key) != 0 {
+                                    let _ = self.midi_rec.push(RecordedMidi {
+                                        pos,
+                                        key,
+                                        velocity: 0,
+                                        on: false,
+                                    });
+                                }
+                            }
+                        }
+                        if !down {
+                            self.sustained = 0;
+                        }
+                        self.sustain = down;
+                    }
+                }
             }
         }
 
@@ -359,6 +403,9 @@ impl EngineCore {
                             }
                         }
                         *held = 0;
+                        // Haltepedal lösen und Pitchbend zurück in die Mitte.
+                        chain.midi(0, [0xb0, crate::midi::SUSTAIN, 0]);
+                        chain.midi(0, [0xe0, 0, 64]);
                     }
                     if running && !track.notes.is_empty() {
                         let end = pos + run;
@@ -551,7 +598,7 @@ mod tests {
         core.process(&mut [0.0; 8]);
         {
             let mut m = ctl.midi.lock().unwrap();
-            m.push(crate::midi::MidiMsg {
+            m.push(crate::midi::MidiMsg::Note {
                 key: 60,
                 velocity: 90,
                 on: true,
@@ -567,7 +614,7 @@ mod tests {
         ctl.midi
             .lock()
             .unwrap()
-            .push(crate::midi::MidiMsg {
+            .push(crate::midi::MidiMsg::Note {
                 key: 62,
                 velocity: 90,
                 on: true,
@@ -575,6 +622,46 @@ mod tests {
             .unwrap();
         core.process(&mut [0.0; 8]);
         assert!(ctl.recorded_midi.pop().is_err());
+    }
+
+    #[test]
+    fn sustain_pedal_delays_recorded_note_off() {
+        use crate::midi::MidiMsg;
+        let (mut core, mut ctl) = ramp(10);
+        ctl.send(Command::SetMidiTarget(Some(0)));
+        ctl.send(Command::Record);
+        core.process(&mut [0.0; 8]);
+        let send = |ctl: &mut EngineControl, m: MidiMsg| ctl.midi.lock().unwrap().push(m).unwrap();
+        send(
+            &mut ctl,
+            MidiMsg::Note {
+                key: 60,
+                velocity: 80,
+                on: true,
+            },
+        );
+        send(&mut ctl, MidiMsg::Other([0xb0, crate::midi::SUSTAIN, 127]));
+        send(
+            &mut ctl,
+            MidiMsg::Note {
+                key: 60,
+                velocity: 0,
+                on: false,
+            },
+        );
+        core.process(&mut [0.0; 8]); // Position 4
+        core.process(&mut [0.0; 8]); // Position 8
+        send(&mut ctl, MidiMsg::Other([0xb0, crate::midi::SUSTAIN, 0]));
+        core.process(&mut [0.0; 8]);
+        let mut got = Vec::new();
+        while let Ok(r) = ctl.recorded_midi.pop() {
+            got.push((r.pos, r.key, r.on));
+        }
+        assert_eq!(
+            got,
+            [(4, 60, true), (12, 60, false)],
+            "Aus erst beim Lösen des Pedals"
+        );
     }
 
     #[test]
