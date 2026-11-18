@@ -105,6 +105,11 @@ pub struct ProjectWindow {
     midi_take: Vec<studiocraft_engine::midi::RecordedMidi>,
     /// Die laufende Aufnahme schreibt auch Audio.
     audio_recording: bool,
+    metronome: bool,
+    /// Zuletzt an die Engine gemeldetes Tempo.
+    sent_tempo: Option<studiocraft_project::TempoMap>,
+    /// Projektstand vor einer laufenden Tempo-Eingabe (ein Undo-Schritt pro Eingabe).
+    tempo_before: Option<Project>,
 }
 
 /// Inhalt der unteren Zone (Spec „Fenster-Architektur“).
@@ -167,6 +172,9 @@ impl ProjectWindow {
             midi_target_sent: None,
             midi_take: Vec::new(),
             audio_recording: false,
+            metronome: false,
+            sent_tempo: None,
+            tempo_before: None,
         };
         w.saved = Some(w.project.clone());
         w.send_locators();
@@ -320,6 +328,82 @@ impl ProjectWindow {
         self.dirty = true;
     }
 
+    fn toggle_metronome(&mut self) {
+        self.metronome = !self.metronome;
+        self.send(Command::SetMetronome(self.metronome));
+    }
+
+    /// Tempo und Taktart an die Engine geben, wenn sie sich geändert haben
+    /// (auch nach Undo oder Öffnen eines Projekts).
+    fn sync_tempo(&mut self) {
+        if self.sent_tempo.as_ref() == Some(&self.project.tempo) {
+            return;
+        }
+        let tempo = self.project.tempo.clone();
+        self.sent_tempo = Some(tempo.clone());
+        if let Some(t) = &mut self.transport {
+            t.tempo = tempo.clone();
+        }
+        self.send(Command::SetTempo(tempo));
+        self.send_locators();
+        self.dirty = true;
+    }
+
+    /// Tempo, Taktart und Metronom in der Transportleiste.
+    fn tempo_controls(&mut self, ui: &mut Ui) {
+        let mut tempo = self.project.tempo.clone();
+        let mut editing = false;
+        let mut changed = false;
+        let l = ui.label("Tempo");
+        let r = ui
+            .add(
+                egui::DragValue::new(&mut tempo.bpm)
+                    .range(20.0..=300.0)
+                    .speed(0.2)
+                    .fixed_decimals(1),
+            )
+            .labelled_by(l.id)
+            .on_hover_text("Tempo in BPM (ziehen oder eintippen)");
+        changed |= r.changed();
+        editing |= r.dragged() || r.has_focus();
+        let takt = ui.label("Takt");
+        let r = ui
+            .add(egui::DragValue::new(&mut tempo.signature.numerator).range(1..=16))
+            .labelled_by(takt.id);
+        changed |= r.changed();
+        editing |= r.dragged() || r.has_focus();
+        ui.label("/");
+        egui::ComboBox::from_id_salt("taktart-nenner")
+            .width(40.0)
+            .selected_text(tempo.signature.denominator.to_string())
+            .show_ui(ui, |ui| {
+                for d in [2u32, 4, 8, 16] {
+                    changed |= ui
+                        .selectable_value(&mut tempo.signature.denominator, d, d.to_string())
+                        .changed();
+                }
+            })
+            .response
+            .labelled_by(takt.id);
+        if changed {
+            if self.tempo_before.is_none() {
+                self.tempo_before = Some(self.project.clone());
+            }
+            self.project.set_tempo(tempo.bpm);
+            self.project.tempo.signature = tempo.signature;
+        }
+        if !editing && let Some(before) = self.tempo_before.take() {
+            self.checkpoint(before);
+        }
+        if ui
+            .selectable_label(self.metronome, "Klick")
+            .on_hover_text("Metronom (C)")
+            .clicked()
+        {
+            self.toggle_metronome();
+        }
+    }
+
     pub(crate) fn delete_selection(&mut self) {
         let before = self.project.clone();
         for id in std::mem::take(&mut self.selection) {
@@ -394,6 +478,7 @@ impl ProjectWindow {
                 Key::Slash,
                 Key::F3,
                 Key::O,
+                Key::C,
                 Key::Z,
                 Key::Y,
             ] {
@@ -449,6 +534,7 @@ impl ProjectWindow {
                 Key::I if alt => self.show_inspector = !self.show_inspector,
                 Key::I => self.punch_in = !self.punch_in,
                 Key::O => self.punch_out = !self.punch_out,
+                Key::C => self.toggle_metronome(),
                 _ => {}
             }
         }
@@ -511,6 +597,7 @@ impl ProjectWindow {
         }
         egui::CentralPanel::default().show(ui, |ui| timeline::show(self, ui));
 
+        self.sync_tempo();
         if self.dirty {
             self.dirty = false;
             self.sync_inserts();
@@ -701,10 +788,7 @@ impl ProjectWindow {
                 fmt(self.left_locator),
                 fmt(self.right_locator)
             ));
-            ui.label(format!(
-                "{} BPM  {}/{}",
-                tempo.bpm, tempo.signature.numerator, tempo.signature.denominator
-            ));
+            self.tempo_controls(ui);
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 ui.weak(format!("{:.1} ms/Frame", self.frame_ms));
                 ui.separator();
@@ -1855,6 +1939,43 @@ mod tests {
             .unwrap();
         assert_eq!(loaded, state_before, "Zustand nach Öffnen identisch");
         assert_eq!(w2.message, None);
+    }
+
+    #[test]
+    fn tempo_reaches_engine_and_is_undoable() {
+        let (_core, ctl) = studiocraft_engine::engine(48_000, TempoMap::default());
+        let mut w = ProjectWindow::new(Project::default(), Some(ctl), String::new());
+        let bar = w.bar_ticks();
+        let id = w
+            .import_clip("Ton", None, tone_clip(2.0, 220.0), Some((usize::MAX, bar)))
+            .unwrap();
+        w.clear_history();
+        let mut h = window_harness(w);
+        // Wie eine Eingabe in der Transportleiste: ändern, dann loslassen.
+        let st = h.state_mut();
+        st.tempo_before = Some(st.project.clone());
+        st.project.set_tempo(90.0);
+        h.run_steps(3);
+        let st = h.state_mut();
+        assert_eq!(
+            st.transport.as_ref().unwrap().tempo.bpm,
+            90.0,
+            "Engine kennt das neue Tempo"
+        );
+        let e = st.project.event(id).unwrap();
+        assert_eq!(
+            st.project.tempo.seconds(e.start),
+            2.0,
+            "Audio bleibt bei 2 s"
+        );
+        st.undo();
+        assert_eq!(st.project.tempo.bpm, 120.0);
+        h.run_steps(2);
+        assert_eq!(
+            h.state().transport.as_ref().unwrap().tempo.bpm,
+            120.0,
+            "Undo erreicht die Engine"
+        );
     }
 
     #[test]

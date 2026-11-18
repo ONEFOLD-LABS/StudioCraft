@@ -626,6 +626,30 @@ impl Project {
         Some(id)
     }
 
+    /// Neues Tempo. Wie in klassischen DAWs: Audio-Events behalten ihre Zeitposition
+    /// (lineare Zeitbasis), MIDI-Parts ihre Taktposition (musikalisch).
+    pub fn set_tempo(&mut self, bpm: f64) {
+        let bpm = bpm.clamp(20.0, 300.0);
+        let f = bpm / self.tempo.bpm;
+        if (f - 1.0).abs() < 1e-12 {
+            return;
+        }
+        let scale = |t: u64| (t as f64 * f).round() as u64;
+        for t in self
+            .tracks
+            .iter_mut()
+            .filter(|t| t.kind == TrackKind::Audio)
+        {
+            for e in &mut t.events {
+                e.start = Position(scale(e.start.0));
+                e.length = scale(e.length).max(1);
+                e.fade_in = scale(e.fade_in).min(e.length);
+                e.fade_out = scale(e.fade_out).min(e.length - e.fade_in);
+            }
+        }
+        self.tempo.bpm = bpm;
+    }
+
     /// Ob eine Spur zu hören ist: nicht stumm, und bei aktivem Solo selbst Solo.
     pub fn audible(&self, track: usize) -> bool {
         let any_solo = self.tracks.iter().any(|t| t.solo);
@@ -845,6 +869,31 @@ mod tests {
         assert_eq!(pitches(id), [60, 62, 64]);
         assert_eq!(pitches(right), [65]);
         assert_eq!(p.event(right).unwrap().notes[0].start, 0);
+    }
+
+    #[test]
+    fn tempo_change_keeps_audio_time_and_midi_bars() {
+        let (mut p, c) = pool_project(); // 2 s Audio = 1 Takt bei 120 BPM
+        let bar = p.tempo.signature.bar_ticks();
+        let a = p.add_audio_event(0, bar, c).unwrap(); // bei 2 s
+        let m = p.add_track(TrackKind::Instrument, "Synth");
+        let part = p.create_event(m, bar, bar).unwrap();
+        let secs = |p: &Project, id| {
+            let e = p.event(id).unwrap();
+            (
+                p.tempo.seconds(e.start),
+                p.tempo.seconds(Position(e.length)),
+            )
+        };
+        assert_eq!(secs(&p, a), (2.0, 2.0));
+        p.set_tempo(60.0);
+        assert_eq!(secs(&p, a), (2.0, 2.0), "Audio bleibt bei 2 s und 2 s lang");
+        assert_eq!(
+            p.event(part).unwrap().start.0,
+            bar,
+            "MIDI-Part bleibt bei Takt 2"
+        );
+        assert_eq!(secs(&p, part), (4.0, 4.0), "… und dauert nun 4 s");
     }
 
     #[test]

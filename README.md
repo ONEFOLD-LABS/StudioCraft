@@ -45,6 +45,8 @@ Mit dem Auswahl-Werkzeug hat jedes Event Smart-Bereiche: am Rand in der unteren 
 
 **MIDI-Keyboard:** Alle MIDI-Eingänge werden beim Start geöffnet. Gespielt wird auf der aufnahmebereiten Instrument-Spur, sonst auf der ausgewählten; die Noten gehen direkt in den Audio-Thread. Mit R auf einer Instrument-Spur nimmt ⏺ bzw. `*` MIDI auf (auch zusammen mit Audio): daraus wird ein Part auf Taktgrenzen, im Cycle über den Cycle-Bereich mit allen Durchgängen, Punch wirkt wie bei Audio. Controller, Pitchbend und Aftertouch gehen live ans Instrument; das Haltepedal wird bei der Aufnahme in die Notenlängen übernommen (eigene Controller-Spuren folgen).
 
+**Tempo und Metronom:** In der Transportleiste lassen sich Tempo und Taktart einstellen (rückgängig zu machen). Wie in klassischen DAWs behalten Audio-Events ihre Zeitposition, MIDI-Parts ihre Taktposition. *Klick* bzw. C schaltet das Metronom (Takt-Eins betont).
+
 F3 blendet den Mixer in der unteren Zone ein und aus: je Kanal Panorama, Mute/Solo, Fader mit Pegelanzeige, rechts der Ausgang. Strg + Klick setzt Fader auf 0 dB bzw. Panorama auf Mitte, Umschalt + Ziehen stellt fein ein.
 
 Benötigt Rust 1.85 oder neuer (Edition 2024). Unter Linux zusätzlich die Entwicklerdateien von ALSA und PipeWire (`libasound`, `libpipewire-0.3`) sowie `clang`. `cargo run -- --list-hosts` zeigt die verfügbaren Audio-Hosts, `--audio-host alsa` wählt einen anderen.

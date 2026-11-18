@@ -27,6 +27,10 @@ pub enum Command {
     /// Note live spielen (Anspielen im Editor, MIDI-Keyboard): Spur, Taste,
     /// Anschlag 0–127, an/aus. Klingt am Anfang des nächsten Blocks.
     LiveNote(usize, u8, u8, bool),
+    /// Tempo und Taktart (für das Metronom).
+    SetTempo(TempoMap),
+    /// Metronom ein/aus.
+    SetMetronome(bool),
     /// Ziel für das MIDI-Keyboard (Projektspur), `None`: niemand.
     SetMidiTarget(Option<usize>),
     /// Insert umgehen oder wieder einschalten: Spur, Slot, umgangen.
@@ -142,6 +146,13 @@ pub struct EngineCore {
     midi_in: rtrb::Consumer<MidiMsg>,
     midi_rec: rtrb::Producer<RecordedMidi>,
     midi_target: Option<usize>,
+    /// Metronom: Frames pro Zählzeit, Zählzeiten pro Takt, ein/aus, Klänge
+    /// (0 = Takt-Eins, 1 = übrige Zählzeiten) und der gerade klingende Klick.
+    beat_frames: f64,
+    beats_per_bar: u64,
+    metronome: bool,
+    clicks: [Box<[f32]>; 2],
+    click: Option<(usize, usize)>,
     /// Haltepedal gedrückt; während der Aufnahme zurückgehaltene Note-Offs.
     sustain: bool,
     sustained: u128,
@@ -159,6 +170,17 @@ pub struct EngineCore {
     scratch: Box<[f32]>,
     /// Wann der Anfang des aktuellen Blocks hörbar wird (Uhr aus [`crate::clock`]).
     block_played_at: u64,
+}
+
+/// Kurzer Klick: Sinus mit schnell abfallender Hülle, 30 ms.
+fn click_sound(rate: u32, hz: f32) -> Box<[f32]> {
+    let n = (rate as usize * 30) / 1000;
+    (0..n)
+        .map(|i| {
+            let t = i as f32 / rate as f32;
+            (t * hz * std::f32::consts::TAU).sin() * (-t * 180.0).exp()
+        })
+        .collect()
 }
 
 /// Erzeugt das zusammengehörige Paar aus Kern und Steuerung.
@@ -180,6 +202,15 @@ pub fn engine(sample_rate: u32, tempo: TempoMap) -> (EngineCore, EngineControl) 
         midi_in: midi_rx,
         midi_rec: rec_tx,
         midi_target: None,
+        beat_frames: f64::from(sample_rate) * 60.0 / tempo.bpm * 4.0
+            / f64::from(tempo.signature.denominator),
+        beats_per_bar: u64::from(tempo.signature.numerator.max(1)),
+        metronome: false,
+        clicks: [
+            click_sound(sample_rate, 1500.0),
+            click_sound(sample_rate, 1000.0),
+        ],
+        click: None,
         sustain: false,
         sustained: 0,
         inserts: (0..MAX_METERED_TRACKS).map(|_| None).collect(),
@@ -276,6 +307,18 @@ impl EngineCore {
                     }
                 }
             }
+            Command::SetTempo(tempo) => {
+                let rate = f64::from(self.sample_rate);
+                self.beat_frames =
+                    rate * 60.0 / tempo.bpm * 4.0 / f64::from(tempo.signature.denominator.max(1));
+                self.beats_per_bar = u64::from(tempo.signature.numerator.max(1));
+            }
+            Command::SetMetronome(on) => {
+                self.metronome = on;
+                if !on {
+                    self.click = None;
+                }
+            }
             Command::SetMidiTarget(t) => {
                 // Gehaltene Noten des alten Ziels beenden.
                 if self.midi_target != t {
@@ -290,6 +333,43 @@ impl EngineCore {
                     ins.bypass = bypass;
                 }
             }
+        }
+    }
+
+    /// Metronom-Klicks auf die Zählzeiten in `pos..pos + frames` legen (addiert).
+    fn render_click(&mut self, dst: &mut [f32], pos: u64, frames: usize) {
+        if !self.metronome || self.beat_frames <= 0.0 {
+            self.click = None;
+            return;
+        }
+        const LEVEL: f32 = 0.5;
+        let fpb = self.beat_frames;
+        let mut next = (pos as f64 / fpb).ceil() as u64;
+        let mut i = 0usize;
+        loop {
+            let beat_at = (next as f64 * fpb).round() as u64;
+            let until = if beat_at >= pos + frames as u64 {
+                frames
+            } else {
+                (beat_at.max(pos) - pos) as usize
+            };
+            if let Some((which, mut cp)) = self.click {
+                let sound = &self.clicks[which];
+                for j in i..until {
+                    let Some(&v) = sound.get(cp) else { break };
+                    dst[j * 2] += v * LEVEL;
+                    dst[j * 2 + 1] += v * LEVEL;
+                    cp += 1;
+                }
+                self.click = (cp < sound.len()).then_some((which, cp));
+            }
+            if until >= frames {
+                break;
+            }
+            let which = usize::from(next % self.beats_per_bar != 0);
+            self.click = Some((which, 0));
+            next += 1;
+            i = until;
         }
     }
 
@@ -451,6 +531,7 @@ impl EngineCore {
                 self.meters.feed_track(track.slot, pl, pr);
             }
             if running {
+                self.render_click(dst, pos, frames);
                 self.transport.advance(run);
                 // Cycle-Sprung: gehaltene Noten beenden.
                 if self.transport.cursor < pos + run {
@@ -662,6 +743,39 @@ mod tests {
             [(4, 60, true), (12, 60, false)],
             "Aus erst beim Lösen des Pedals"
         );
+    }
+
+    #[test]
+    fn metronome_clicks_on_beats_with_accent() {
+        // 120 BPM, 4/4, 48 kHz: Zählzeit alle 24 000 Frames.
+        let (mut core, mut ctl) = engine(48_000, TempoMap::default());
+        ctl.send(Command::SetMetronome(true));
+        ctl.send(Command::Play);
+        let mut out = vec![0.0f32; 2 * 120_000];
+        for block in out.chunks_mut(2 * 1000) {
+            core.process(block);
+        }
+        let left: Vec<f32> = out.chunks(2).map(|f| f[0]).collect();
+        // Klick beginnt genau auf den Zählzeiten 0, 24 000, 48 000 …, dazwischen Stille.
+        for beat in 0..5 {
+            let at = beat * 24_000;
+            let energy: f32 = left[at..at + 100].iter().map(|v| v.abs()).sum();
+            assert!(energy > 1.0, "Klick auf Zählzeit {beat}");
+            let gap: f32 = left[at + 2_000..at + 20_000].iter().map(|v| v.abs()).sum();
+            assert!(gap < 1e-6, "Stille nach Zählzeit {beat}");
+        }
+        // Takt-Eins höher: mehr Nulldurchgänge in den ersten 10 ms.
+        let crossings = |s: &[f32]| {
+            s.windows(2)
+                .filter(|w| w[0].signum() != w[1].signum())
+                .count()
+        };
+        assert!(crossings(&left[0..480]) > crossings(&left[24_000..24_480]));
+        // Aus: Stille.
+        ctl.send(Command::SetMetronome(false));
+        let mut quiet = vec![0.0f32; 2 * 30_000];
+        core.process(&mut quiet);
+        assert!(quiet.iter().all(|v| *v == 0.0));
     }
 
     #[test]
