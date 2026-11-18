@@ -8,3 +8,10 @@ license.workspace = true
 
 [dependencies]
 studiocraft-project.workspace = true
+hound = "3.5"
+rtrb = "0.4"
+pipewire = { version = "0.10", optional = true, features = ["v0_3_49"] }
+
+[features]
+default = ["pipewire"]
+pipewire = ["dep:pipewire"]

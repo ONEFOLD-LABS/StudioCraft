@@ -21,10 +21,11 @@ Native Linux-DAW in Rust. Teil der Craft-Familie. Das Bedienkonzept orientiert s
 ```sh
 cargo build
 cargo test
-cargo run
+cargo run -- <datei.wav>                    # interaktiv: Enter = Start/Stopp, c = Cycle, q = Ende
+cargo run -- <datei.wav> --loop 1 5         # Takt 1 bis 5 als Cycle
 ```
 
-Benötigt Rust 1.85 oder neuer (Edition 2024).
+Benötigt Rust 1.85 oder neuer (Edition 2024) und die PipeWire-Entwicklerdateien (`libpipewire-0.3`, `clang` für die Bindings).
 
 ## Lizenz
 
