@@ -1153,8 +1153,8 @@ mod tests {
         let n = w.place_recording(&rec, 96_000).unwrap();
         assert_eq!(n, 2);
         assert!(!rec.path.exists(), "Rohdatei aufgeräumt");
-        for t in 0..2 {
-            let ev = &w.project.tracks[t].events[0];
+        for track in &w.project.tracks {
+            let ev = &track.events[0];
             assert_eq!((ev.start.0, ev.length), (bar, 2 * bar));
         }
         let mic = &w.clips[&w.project.tracks[0].events[0].clip.unwrap()].samples;
