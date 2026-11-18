@@ -1,0 +1,10 @@
+[package]
+name = "studiocraft-plugin-host"
+description = "Plugin-Hosting: CLAP, später VST3 und LV2"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+

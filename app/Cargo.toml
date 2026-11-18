@@ -1,0 +1,11 @@
+[package]
+name = "studiocraft"
+description = "StudioCraft – native Linux-DAW"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+studiocraft-engine.workspace = true
+studiocraft-project.workspace = true

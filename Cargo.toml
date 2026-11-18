@@ -1,0 +1,24 @@
+[workspace]
+resolver = "3"
+members = [
+    "app",
+    "crates/engine",
+    "crates/graph",
+    "crates/plugin-host",
+    "crates/project",
+    "crates/ui",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+license = "MIT OR Apache-2.0"
+
+[workspace.dependencies]
+studiocraft-engine = { path = "crates/engine" }
+studiocraft-project = { path = "crates/project" }
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
