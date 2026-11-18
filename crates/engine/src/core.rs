@@ -94,7 +94,12 @@ pub fn engine(clip: AudioClip, tempo: TempoMap) -> (EngineCore, EngineControl) {
         commands: consumer,
         status: status.clone(),
     };
-    let control = EngineControl { commands: producer, status, tempo, sample_rate };
+    let control = EngineControl {
+        commands: producer,
+        status,
+        tempo,
+        sample_rate,
+    };
     (core, control)
 }
 
@@ -159,7 +164,10 @@ mod tests {
     /// Clip, dessen linker Kanal den Frame-Index enthält.
     fn ramp(frames: usize) -> AudioClip {
         let samples: Vec<f32> = (0..frames).flat_map(|i| [i as f32, -(i as f32)]).collect();
-        AudioClip { sample_rate: 48_000, samples: samples.into() }
+        AudioClip {
+            sample_rate: 48_000,
+            samples: samples.into(),
+        }
     }
 
     fn left(out: &[f32]) -> Vec<f32> {

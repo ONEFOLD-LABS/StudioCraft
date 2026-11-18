@@ -15,7 +15,10 @@ pub struct TimeSignature {
 }
 
 impl TimeSignature {
-    pub const COMMON: Self = Self { numerator: 4, denominator: 4 };
+    pub const COMMON: Self = Self {
+        numerator: 4,
+        denominator: 4,
+    };
 
     /// Länge eines Schlags in Ticks.
     pub fn beat_ticks(self) -> u64 {
@@ -38,7 +41,10 @@ pub struct TempoMap {
 
 impl Default for TempoMap {
     fn default() -> Self {
-        Self { bpm: 120.0, signature: TimeSignature::COMMON }
+        Self {
+            bpm: 120.0,
+            signature: TimeSignature::COMMON,
+        }
     }
 }
 
@@ -86,7 +92,10 @@ mod tests {
 
     #[test]
     fn six_eight_bar_length() {
-        let sig = TimeSignature { numerator: 6, denominator: 8 };
+        let sig = TimeSignature {
+            numerator: 6,
+            denominator: 8,
+        };
         assert_eq!(sig.bar_ticks(), 3 * TICKS_PER_QUARTER);
     }
 }

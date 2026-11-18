@@ -11,6 +11,7 @@ license = "MIT OR Apache-2.0"
 [workspace.dependencies]
 studiocraft-engine = { path = "crates/engine" }
 studiocraft-project = { path = "crates/project" }
+studiocraft-ui = { path = "crates/ui" }
 
 [profile.release]
 lto = "thin"

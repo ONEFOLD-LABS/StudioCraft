@@ -1,0 +1,15 @@
+[package]
+name = "studiocraft-cli"
+description = "StudioCraft auf der Kommandozeile: Wiedergabe mit Transport und Cycle"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "studiocraft-cli"
+path = "src/main.rs"
+
+[dependencies]
+studiocraft-engine.workspace = true
+studiocraft-project.workspace = true

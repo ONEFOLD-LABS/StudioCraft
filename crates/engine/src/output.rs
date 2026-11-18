@@ -49,7 +49,10 @@ pub struct AudioOutput {
 
 /// Namen aller Hosts, die in diesen Build einkompiliert sind.
 pub fn available_hosts() -> Vec<&'static str> {
-    cpal::available_hosts().into_iter().map(|h| h.name()).collect()
+    cpal::available_hosts()
+        .into_iter()
+        .map(|h| h.name())
+        .collect()
 }
 
 impl PreparedOutput {
@@ -86,8 +89,11 @@ impl PreparedOutput {
             .supported_output_configs()
             .ok()
             .and_then(|mut it| {
-                it.find(|c| c.sample_format() == default.sample_format() && c.channels() == default.channels())
-                    .and_then(|c| c.try_with_sample_rate(preferred_rate))
+                it.find(|c| {
+                    c.sample_format() == default.sample_format()
+                        && c.channels() == default.channels()
+                })
+                .and_then(|c| c.try_with_sample_rate(preferred_rate))
             })
             .unwrap_or(default);
 
@@ -111,12 +117,22 @@ impl PreparedOutput {
             block_frames: block,
             sample_format: format.to_string(),
         };
-        Ok(Self { device, config, format, info })
+        Ok(Self {
+            device,
+            config,
+            format,
+            info,
+        })
     }
 
     /// Startet den Stream; `core` muss mit `info.sample_rate` laufen.
     pub fn start(self, core: EngineCore) -> Result<AudioOutput, String> {
-        let Self { device, config, format, info } = self;
+        let Self {
+            device,
+            config,
+            format,
+            info,
+        } = self;
         let stream = match format {
             SampleFormat::F32 => build::<f32>(&device, &config, core),
             SampleFormat::F64 => build::<f64>(&device, &config, core),
@@ -127,7 +143,10 @@ impl PreparedOutput {
             other => Err(format!("Sampleformat {other} wird nicht unterstützt")),
         }?;
         stream.play().map_err(|e| format!("Stream-Start: {e}"))?;
-        Ok(AudioOutput { _stream: stream, info })
+        Ok(AudioOutput {
+            _stream: stream,
+            info,
+        })
     }
 }
 

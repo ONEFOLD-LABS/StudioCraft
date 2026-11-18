@@ -21,7 +21,10 @@ impl fmt::Display for ClipError {
         match self {
             Self::Wav(e) => write!(f, "WAV-Datei nicht lesbar: {e}"),
             Self::UnsupportedChannels(n) => {
-                write!(f, "{n} Kanäle werden nicht unterstützt (nur Mono und Stereo)")
+                write!(
+                    f,
+                    "{n} Kanäle werden nicht unterstützt (nur Mono und Stereo)"
+                )
             }
         }
     }
@@ -58,7 +61,10 @@ impl AudioClip {
         } else {
             raw
         };
-        Ok(Self { sample_rate: spec.sample_rate, samples: samples.into() })
+        Ok(Self {
+            sample_rate: spec.sample_rate,
+            samples: samples.into(),
+        })
     }
 
     pub fn frames(&self) -> u64 {
@@ -88,7 +94,10 @@ impl AudioClip {
                 out.push(a + (b - a) * t);
             }
         }
-        Self { sample_rate: rate, samples: out.into() }
+        Self {
+            sample_rate: rate,
+            samples: out.into(),
+        }
     }
 }
 
@@ -99,7 +108,10 @@ mod tests {
     #[test]
     fn resample_keeps_duration_and_shape() {
         let samples: Vec<f32> = (0..441).flat_map(|i| [i as f32, 0.0]).collect();
-        let clip = AudioClip { sample_rate: 44_100, samples: samples.into() };
+        let clip = AudioClip {
+            sample_rate: 44_100,
+            samples: samples.into(),
+        };
         let r = clip.resampled(48_000);
         assert_eq!(r.sample_rate, 48_000);
         assert_eq!(r.frames(), 480);
@@ -109,7 +121,10 @@ mod tests {
 
     #[test]
     fn same_rate_is_unchanged() {
-        let clip = AudioClip { sample_rate: 48_000, samples: vec![0.5; 8].into() };
+        let clip = AudioClip {
+            sample_rate: 48_000,
+            samples: vec![0.5; 8].into(),
+        };
         assert_eq!(clip.resampled(48_000).samples, clip.samples);
     }
 }

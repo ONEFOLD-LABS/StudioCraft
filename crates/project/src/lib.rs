@@ -4,6 +4,8 @@
 //! werden tempo-unabhängig in Ticks gespeichert und erst über die
 //! [`TempoMap`] in Sekunden umgerechnet.
 
+pub mod model;
 pub mod time;
 
-pub use time::{Position, TempoMap, TimeSignature, TICKS_PER_QUARTER};
+pub use model::{Event, EventId, Project, Track, TrackKind};
+pub use time::{Position, TICKS_PER_QUARTER, TempoMap, TimeSignature};

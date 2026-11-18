@@ -103,7 +103,10 @@ mod tests {
 
     #[test]
     fn double_stop_returns_to_zero() {
-        let mut t = Transport { cursor: 500, ..Default::default() };
+        let mut t = Transport {
+            cursor: 500,
+            ..Default::default()
+        };
         t.play();
         t.advance(100);
         t.stop(false);
@@ -114,7 +117,10 @@ mod tests {
 
     #[test]
     fn stop_returns_to_start_position() {
-        let mut t = Transport { cursor: 500, ..Default::default() };
+        let mut t = Transport {
+            cursor: 500,
+            ..Default::default()
+        };
         t.play();
         t.advance(1000);
         t.stop(true);

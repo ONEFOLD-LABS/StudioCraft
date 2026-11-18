@@ -1,9 +1,16 @@
 [package]
 name = "studiocraft-ui"
-description = "Oberfläche: Projektfenster, Mixer, Editoren"
+description = "Oberfläche: Projektfenster, Mixer, Editoren (egui)"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 
 [dependencies]
+studiocraft-project.workspace = true
+studiocraft-engine.workspace = true
+egui = { version = "0.37", features = ["default_fonts", "monochrome_emoji_fonts"] }
+
+[dev-dependencies]
+egui_kittest = { version = "0.37", features = ["wgpu", "snapshot"] }
+image = { version = "0.25", default-features = false, features = ["png"] }

@@ -20,11 +20,11 @@ Jedes Release bringt `SHA256SUMS.txt` und signierte Pakete mit (`.asc`/`.sig`). 
 | Bereich | Craft-Standard | Stand StudioCraft |
 | --- | --- | --- |
 | Audio-I/O | cpal 0.18 (ASIO als Feature, `wasm-bindgen` fürs Web) | umgesetzt, Linux getestet (PipeWire, ALSA) |
-| GUI | egui/eframe 0.37 + `craft-ui` | offen, nächster Meilenstein |
+| GUI | egui/eframe 0.37 + `craft-ui` | egui/eframe 0.37 umgesetzt (Projektfenster-Prototyp); `craft-ui` folgt, sobald Docking und Icons gebraucht werden |
 | Audio-Dateien | `craft-audio` aus craft-libs | noch `hound` (nur WAV), Wechsel geplant |
 | MIDI | `craft-midi` | offen |
 | Plugins | CLAP überall, VST3, AU nur macOS (eigene Host-Crates) | offen |
-| Fenster | winit mit X11 und Wayland unter Linux | kommt mit eframe |
+| Fenster | winit mit X11 und Wayland unter Linux | über eframe (Features `wayland`, `x11`) |
 | Übersetzungen | `craft-i18n` | offen |
 | Schriften | `craft-fonts` | offen |
 | Updates | `craft-update` | offen |
@@ -35,7 +35,7 @@ Hausregeln der Familie: nur Rust, kein Tauri, Electron oder handgeschriebenes JS
 
 ```
 apps/studiocraft        Desktop-App          (vorhanden)
-apps/studiocraft-cli    Kommandozeile        (geplant)
+apps/studiocraft-cli    Kommandozeile        (vorhanden)
 apps/studiocraft-web    WASM-Build           (geplant)
 crates/*                Bibliotheken         (vorhanden)
 xtask/                  cargo xtask ci, version, layers  (geplant)
