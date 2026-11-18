@@ -6,3 +6,9 @@ Licensed under the MIT License or the Apache License, Version 2.0, at your optio
 StudioCraft is an independent clean-room project. It is not affiliated with,
 endorsed by, or derived from the code of any other audio software vendor or
 any of its products. All trademarks belong to their respective owners.
+
+Theme: The colour tokens in crates/ui/src/theme.rs follow the DAW theme of
+SoundCraft (storytold/soundcraft, crates/ui-egui/src/theme.rs), licensed under
+MIT OR Apache-2.0, with adjusted neutrals and StudioCraft's wine red accent.
+
+App icon: assets/app-icon is original StudioCraft artwork (see its README).

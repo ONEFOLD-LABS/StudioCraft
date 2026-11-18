@@ -11,6 +11,8 @@ mod mixer;
 mod recording;
 mod routing;
 mod session;
+pub mod settings;
+pub mod theme;
 mod timeline;
 mod tools;
 pub mod waveform;
@@ -109,6 +111,9 @@ pub struct ProjectWindow {
     metronome: bool,
     /// Bereichsauswahl (Werkzeug 2): erste/letzte Spur, Anfang/Ende in Ticks.
     range: Option<(usize, usize, u64, u64)>,
+    /// Erscheinungsbild (Dunkel/Hell/System); installiert beim ersten Frame.
+    theme: egui::ThemePreference,
+    theme_installed: bool,
     /// Zuletzt an die Engine gemeldetes Tempo.
     sent_tempo: Option<studiocraft_project::TempoMap>,
     /// Projektstand vor einer laufenden Tempo-Eingabe (ein Undo-Schritt pro Eingabe).
@@ -177,6 +182,8 @@ impl ProjectWindow {
             audio_recording: false,
             metronome: false,
             range: None,
+            theme: settings::Settings::load().theme,
+            theme_installed: false,
             sent_tempo: None,
             tempo_before: None,
         };
@@ -330,6 +337,15 @@ impl ProjectWindow {
         }
         self.drag = None;
         self.dirty = true;
+    }
+
+    /// Erscheinungsbild wählen und für den nächsten Start merken.
+    pub(crate) fn set_theme(&mut self, ctx: &egui::Context, pref: egui::ThemePreference) {
+        self.theme = pref;
+        theme::install(ctx, pref);
+        if let Err(e) = (settings::Settings { theme: pref }).save() {
+            self.message = Some(format!("Einstellung nicht gespeichert: {e}"));
+        }
     }
 
     fn toggle_metronome(&mut self) {
@@ -578,6 +594,10 @@ impl ProjectWindow {
 
     /// Zeichnet das ganze Projektfenster.
     pub fn ui(&mut self, ui: &mut Ui) {
+        if !self.theme_installed {
+            theme::install(ui.ctx(), self.theme);
+            self.theme_installed = true;
+        }
         self.sync_from_engine();
         if let Some(t) = &mut self.transport {
             t.collect_garbage();
@@ -776,7 +796,7 @@ impl ProjectWindow {
                 self.toggle_play();
             }
             let rec = egui::RichText::new("⏺").color(if self.recording {
-                Color32::from_rgb(240, 60, 60)
+                crate::theme::tokens(ui.ctx()).rec
             } else {
                 ui.visuals().text_color()
             });
@@ -2133,6 +2153,23 @@ mod tests {
         let evs = &h.state().project.tracks[0].events;
         assert_eq!(evs.len(), 1);
         assert_eq!(evs[0].length, 6 * q);
+    }
+
+    #[test]
+    fn renders_light_theme() {
+        shot("hell", |w| {
+            w.theme = egui::ThemePreference::Light;
+            w.project = Project::default();
+            w.import_clip("Gesang", None, tone_clip(8.0, 330.0), None)
+                .unwrap();
+            w.add_instrument_track(None);
+            melody(w, 1, 4 * TICKS_PER_QUARTER);
+            w.project.tracks[0].solo = true;
+            w.project.tracks[1].mute = true;
+            w.cycle = true;
+            w.cursor = 3 * TICKS_PER_QUARTER;
+            w.meter_levels = vec![[0.8, 0.7], [0.0, 0.0]];
+        });
     }
 
     #[test]

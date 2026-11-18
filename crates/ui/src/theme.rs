@@ -196,7 +196,11 @@ impl Tokens {
 
     /// egui visuals for this token set; `dark` picks egui's matching base.
     pub fn visuals(&self, dark: bool) -> Visuals {
-        let mut v = if dark { Visuals::dark() } else { Visuals::light() };
+        let mut v = if dark {
+            Visuals::dark()
+        } else {
+            Visuals::light()
+        };
         v.panel_fill = self.panel_bg;
         v.window_fill = self.panel_bg2;
         v.window_stroke = Stroke::new(1.0, self.border_light);
@@ -265,7 +269,12 @@ mod tests {
     #[test]
     fn accent_and_recording_stay_apart() {
         for t in [Tokens::DARK, Tokens::LIGHT] {
-            assert!(distance(t.accent, t.rec) > 60, "accent {:?} too close to rec {:?}", t.accent, t.rec);
+            assert!(
+                distance(t.accent, t.rec) > 60,
+                "accent {:?} too close to rec {:?}",
+                t.accent,
+                t.rec
+            );
             assert!(distance(t.playhead, t.rec) > 200);
         }
     }

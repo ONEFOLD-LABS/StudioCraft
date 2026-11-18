@@ -18,6 +18,16 @@ Aufruf: studiocraft [projekt.studiocraft | datei.wav …] [--tracks <n>] [--audi
 
 Weitere Dateien lassen sich ins Projektfenster ziehen.";
 
+/// Fenster-Icon „Welle“; macOS bekommt die eigene Variante mit Rand.
+fn app_icon() -> egui::IconData {
+    #[cfg(target_os = "macos")]
+    let png: &[u8] = include_bytes!("../../../assets/app-icon/studiocraft-macos-512.png");
+    #[cfg(not(target_os = "macos"))]
+    let png: &[u8] =
+        include_bytes!("../../../assets/app-icon/hicolor/256x256/apps/studiocraft.png");
+    eframe::icon_data::from_png_bytes(png).unwrap_or_default()
+}
+
 struct App {
     window: ProjectWindow,
     /// Hält den Audio-Stream am Leben.
@@ -109,6 +119,7 @@ fn main() -> ExitCode {
             .with_title("StudioCraft")
             .with_app_id("studiocraft")
             .with_inner_size([1400.0, 860.0])
+            .with_icon(app_icon())
             .with_drag_and_drop(true),
         ..Default::default()
     };

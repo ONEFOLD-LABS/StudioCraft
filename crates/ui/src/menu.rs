@@ -149,6 +149,22 @@ impl ProjectWindow {
                     self.lower = crate::LowerZone::Editor;
                 }
                 ui.checkbox(&mut self.show_lower, "Untere Zone");
+                ui.separator();
+                ui.menu_button("Erscheinungsbild", |ui| {
+                    for pref in [
+                        egui::ThemePreference::Dark,
+                        egui::ThemePreference::Light,
+                        egui::ThemePreference::System,
+                    ] {
+                        if ui
+                            .selectable_label(self.theme == pref, crate::theme::label(pref))
+                            .clicked()
+                        {
+                            self.set_theme(ui.ctx(), pref);
+                            ui.close();
+                        }
+                    }
+                });
             });
         });
     }

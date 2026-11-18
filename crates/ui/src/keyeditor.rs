@@ -298,7 +298,7 @@ pub(crate) fn show(w: &mut ProjectWindow, ui: &mut Ui) {
         };
         p.rect_filled(rect, 2.0, fill);
         let stroke = if selected {
-            Stroke::new(2.0, Color32::WHITE)
+            Stroke::new(2.0, crate::theme::tokens(p.ctx()).note_selected)
         } else {
             Stroke::new(1.0, Color32::from_black_alpha(140))
         };
@@ -318,7 +318,7 @@ pub(crate) fn show(w: &mut ProjectWindow, ui: &mut Ui) {
     painter.with_clip_rect(ruler.union(grid)).vline(
         cx,
         ruler.top()..=grid.bottom(),
-        Stroke::new(1.5, Color32::from_rgb(230, 60, 60)),
+        Stroke::new(1.5, crate::theme::tokens(ui.ctx()).playhead),
     );
 }
 
@@ -674,10 +674,10 @@ fn paint_ruler(w: &ProjectWindow, p: &Painter, g: &KGeo) {
 
 fn paint_keys(p: &Painter, g: &KGeo, playing: Option<u8>) {
     // Erst eine weiße Tastenfläche, darauf die schwarzen Tasten – wie beim Klavier.
-    p.rect_filled(g.keys, 0.0, Color32::from_gray(228));
+    p.rect_filled(g.keys, 0.0, crate::theme::tokens(p.ctx()).key_white);
     let top = g.pitch(g.keys.top()).min(127);
     let bottom = g.pitch(g.keys.bottom()).max(0);
-    let line = Stroke::new(1.0, Color32::from_gray(150));
+    let line = Stroke::new(1.0, crate::theme::tokens(p.ctx()).key_line);
     for pitch in bottom..=top {
         let y = g.y(pitch);
         let row = Rect::from_min_max(
@@ -691,14 +691,20 @@ fn paint_keys(p: &Painter, g: &KGeo, playing: Option<u8>) {
                 r,
                 1.0,
                 if lit {
-                    Color32::from_rgb(90, 140, 220)
+                    crate::theme::tokens(p.ctx()).key_pressed
                 } else {
-                    Color32::from_gray(28)
+                    crate::theme::tokens(p.ctx()).key_black
                 },
             );
         } else {
             if lit {
-                p.rect_filled(row, 0.0, Color32::from_rgb(150, 190, 245));
+                p.rect_filled(
+                    row,
+                    0.0,
+                    crate::theme::tokens(p.ctx())
+                        .key_pressed
+                        .gamma_multiply(0.7),
+                );
             }
             // Trennlinie zwischen benachbarten weißen Tasten (E–F, H–C).
             if matches!(pitch.rem_euclid(12), 4 | 11) {
@@ -741,7 +747,7 @@ fn paint_velocity(p: &Painter, g: &KGeo, notes: &[Note], sel: &[usize], color: C
         let h = g.vel.height() * f32::from(n.velocity) / 127.0;
         let r = Rect::from_min_max(pos2(x, g.vel.bottom() - h), pos2(x + 4.0, g.vel.bottom()));
         let c = if sel.contains(&i) {
-            Color32::WHITE
+            crate::theme::tokens(p.ctx()).note_selected
         } else {
             color
         };

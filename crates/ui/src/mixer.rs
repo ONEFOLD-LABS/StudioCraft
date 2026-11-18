@@ -312,11 +312,11 @@ fn fader(ui: &mut Ui, name: &str, db: &mut f32, meter: [f32; 2], height: f32) ->
         if ldb > MIN_DB {
             let top = to_y(db_to_pos(ldb.min(MAX_DB)));
             let col = if ldb > 0.0 {
-                Color32::from_rgb(230, 60, 50)
+                crate::theme::tokens(ui.ctx()).meter_red
             } else if ldb > -6.0 {
-                Color32::from_rgb(230, 200, 60)
+                crate::theme::tokens(ui.ctx()).meter_yellow
             } else {
-                Color32::from_rgb(80, 200, 100)
+                crate::theme::tokens(ui.ctx()).meter_green
             };
             p.rect_filled(
                 Rect::from_x_y_ranges(bar.x_range(), top..=bar.bottom()),

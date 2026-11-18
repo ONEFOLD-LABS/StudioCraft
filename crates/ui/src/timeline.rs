@@ -759,7 +759,13 @@ fn paint_lanes(w: &ProjectWindow, painter: &Painter, g: &Geo) {
             g.x(w.left_locator as f64)..=g.x(w.right_locator as f64),
             g.lanes.y_range(),
         );
-        painter.rect_filled(r, 0.0, Color32::from_rgba_unmultiplied(120, 200, 120, 28));
+        painter.rect_filled(
+            r,
+            0.0,
+            crate::theme::tokens(painter.ctx())
+                .cycle_fill
+                .gamma_multiply(0.5),
+        );
     }
 
     let t0 = g.ticks(g.lanes.left()).max(0.0) as u64;
@@ -789,15 +795,11 @@ fn paint_lanes(w: &ProjectWindow, painter: &Painter, g: &Geo) {
                 g.row_top(r1) + g.view.row_h,
             ),
         );
-        painter.rect_filled(
-            rect,
-            0.0,
-            Color32::from_rgba_unmultiplied(120, 170, 255, 50),
-        );
+        painter.rect_filled(rect, 0.0, crate::theme::tokens(painter.ctx()).selection);
         painter.rect_stroke(
             rect,
             0.0,
-            Stroke::new(1.0, Color32::from_rgb(140, 185, 255)),
+            Stroke::new(1.0, crate::theme::tokens(painter.ctx()).accent),
             StrokeKind::Inside,
         );
     }
@@ -828,11 +830,15 @@ fn paint_recording(w: &ProjectWindow, painter: &Painter, g: &Geo) {
                 top + g.view.row_h - 4.0,
             ),
         );
-        painter.rect_filled(rect, 3.0, Color32::from_rgba_unmultiplied(220, 50, 50, 90));
+        painter.rect_filled(
+            rect,
+            3.0,
+            crate::theme::tokens(painter.ctx()).rec.gamma_multiply(0.55),
+        );
         painter.rect_stroke(
             rect,
             3.0,
-            Stroke::new(1.0, Color32::from_rgb(230, 70, 70)),
+            Stroke::new(1.0, crate::theme::tokens(painter.ctx()).rec),
             StrokeKind::Inside,
         );
     }
@@ -849,14 +855,16 @@ fn paint_event(
 ) {
     const HEAD: f32 = 13.0;
     let color = if ev.muted {
-        Color32::from_gray(120)
+        crate::theme::tokens(painter.ctx()).event_muted
     } else {
         track_color(track.color)
     };
     let body_fill = if ev.muted {
-        Color32::from_gray(45)
+        crate::theme::tokens(painter.ctx())
+            .event_muted
+            .lerp_to_gamma(crate::theme::tokens(painter.ctx()).event_shade, 0.6)
     } else {
-        color.lerp_to_gamma(Color32::from_gray(18), 0.62)
+        color.lerp_to_gamma(crate::theme::tokens(painter.ctx()).event_shade, 0.62)
     };
     painter.rect_filled(rect, 3.0, body_fill);
     let head = Rect::from_min_max(
@@ -887,7 +895,9 @@ fn paint_event(
     }
     if let Some(clip) = ev.clip.and_then(|c| w.clip(c)) {
         let wave = if ev.muted {
-            Color32::from_gray(110)
+            crate::theme::tokens(painter.ctx())
+                .event_text_muted
+                .gamma_multiply(0.7)
         } else {
             color.lerp_to_gamma(Color32::WHITE, 0.35)
         };
@@ -897,7 +907,7 @@ fn paint_event(
     paint_fades(painter, g, ev, body, selected);
 
     let stroke = if selected {
-        Stroke::new(2.0, Color32::WHITE)
+        Stroke::new(2.0, crate::theme::tokens(painter.ctx()).event_selected)
     } else {
         Stroke::new(1.0, color.gamma_multiply(0.8))
     };
@@ -912,7 +922,11 @@ fn paint_event(
                 Align2::LEFT_CENTER,
                 &ev.name,
                 FontId::proportional(10.5),
-                Color32::from_gray(if ev.muted { 200 } else { 10 }),
+                if ev.muted {
+                    crate::theme::tokens(painter.ctx()).event_text_muted
+                } else {
+                    crate::theme::tokens(painter.ctx()).event_text
+                },
             );
     }
 }
@@ -985,11 +999,11 @@ fn paint_fades(painter: &Painter, g: &Geo, ev: &Event, body: Rect, selected: boo
     if selected {
         for x in [fin, fout] {
             let handle = Rect::from_center_size(pos2(x, top + 1.0), egui::vec2(7.0, 7.0));
-            painter.rect_filled(handle, 1.0, Color32::WHITE);
+            painter.rect_filled(handle, 1.0, crate::theme::tokens(painter.ctx()).handle);
             painter.rect_stroke(
                 handle,
                 1.0,
-                Stroke::new(1.0, Color32::BLACK),
+                Stroke::new(1.0, crate::theme::tokens(painter.ctx()).border),
                 StrokeKind::Inside,
             );
         }
@@ -1080,9 +1094,9 @@ fn paint_ruler(w: &ProjectWindow, painter: &Painter, g: &Geo) {
         g.ruler.top() + 2.0..=g.ruler.top() + 10.0,
     );
     let col = if w.cycle {
-        Color32::from_rgb(90, 180, 90)
+        crate::theme::tokens(painter.ctx()).accent
     } else {
-        Color32::from_gray(110)
+        crate::theme::tokens(painter.ctx()).ruler_tick
     };
     painter.rect_filled(band, 2.0, col);
     paint_grid(w, painter, g, g.ruler, true);
@@ -1126,12 +1140,22 @@ fn paint_headers(w: &ProjectWindow, painter: &Painter, g: &Geo) {
             visuals.weak_text_color(),
         );
         let flags = [
-            ("M", track.mute, Color32::from_rgb(220, 170, 40), true),
-            ("S", track.solo, Color32::from_rgb(230, 210, 60), true),
+            (
+                "M",
+                track.mute,
+                crate::theme::tokens(painter.ctx()).mute,
+                true,
+            ),
+            (
+                "S",
+                track.solo,
+                crate::theme::tokens(painter.ctx()).solo,
+                true,
+            ),
             (
                 "R",
                 track.record,
-                Color32::from_rgb(220, 60, 60),
+                crate::theme::tokens(painter.ctx()).rec,
                 track.kind.holds_events(),
             ),
         ];
@@ -1169,5 +1193,9 @@ fn paint_headers(w: &ProjectWindow, painter: &Painter, g: &Geo) {
 fn paint_cursor(w: &ProjectWindow, painter: &Painter, g: &Geo) {
     let x = g.x(w.cursor as f64);
     let y = g.ruler.top()..=g.lanes.bottom();
-    painter.vline(x, y, Stroke::new(1.5, Color32::from_rgb(230, 60, 60)));
+    painter.vline(
+        x,
+        y,
+        Stroke::new(1.5, crate::theme::tokens(painter.ctx()).playhead),
+    );
 }

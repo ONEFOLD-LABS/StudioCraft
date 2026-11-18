@@ -49,6 +49,8 @@ Mit dem Auswahl-Werkzeug hat jedes Event Smart-Bereiche: am Rand in der unteren 
 
 **Gruppen, FX-Kanäle, Sends:** *Projekt → Gruppen-Spur / FX-Kanal hinzufügen*. Im Inspector legt *Ausgang* fest, ob eine Spur auf die Summe oder eine Gruppe geht; unter *Sends* gehen bis zu acht Sends (Pre/Post, ein/aus, Pegel) an FX-Kanäle oder Gruppen. Schleifen werden gar nicht erst angeboten. Gruppen und FX-Kanäle haben eigene Inserts und bleiben bei Solo hörbar.
 
+**Erscheinungsbild:** *Ansicht → Erscheinungsbild* wählt Dunkel, Hell oder „Wie das System“; die Wahl wird gemerkt. Akzentfarbe ist das Weinrot des App-Icons, Aufnahme bleibt davon unterscheidbar orangerot.
+
 F3 blendet den Mixer in der unteren Zone ein und aus: je Kanal Panorama, Mute/Solo, Fader mit Pegelanzeige, rechts der Ausgang. Strg + Klick setzt Fader auf 0 dB bzw. Panorama auf Mitte, Umschalt + Ziehen stellt fein ein.
 
 Benötigt Rust 1.85 oder neuer (Edition 2024). Unter Linux zusätzlich die Entwicklerdateien von ALSA und PipeWire (`libasound`, `libpipewire-0.3`) sowie `clang`. `cargo run -- --list-hosts` zeigt die verfügbaren Audio-Hosts, `--audio-host alsa` wählt einen anderen.
