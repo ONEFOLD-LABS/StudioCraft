@@ -667,6 +667,17 @@ fn interact(w: &mut ProjectWindow, ui: &Ui, resp: &egui::Response, g: &Geo) {
     if resp.clicked() || resp.drag_started() {
         w.key_editor.focused = false;
     }
+    // Doppelklick auf ein Audio-Event öffnet den Sample-Editor.
+    if resp.double_clicked()
+        && let Some(p) = resp.interact_pointer_pos()
+        && g.lanes.contains(p)
+        && let Some(row) = g.row_at(p.y)
+        && w.project.tracks[row].kind == TrackKind::Audio
+        && let Some(id) = hit_event(w, g, row, p.y, g.ticks(p.x).max(0.0) as u64)
+    {
+        // Kein `return`: der Klick wählt das Event wie gewohnt aus.
+        w.open_sample_editor(id);
+    }
     // Doppelklick auf einen Part öffnet den Key-Editor.
     if resp.double_clicked()
         && let Some(p) = resp.interact_pointer_pos()

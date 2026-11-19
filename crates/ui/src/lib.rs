@@ -22,6 +22,7 @@ mod quantize;
 mod recording;
 mod rightzone;
 mod routing;
+mod sampleeditor;
 mod session;
 pub mod settings;
 mod shortcuts;
@@ -73,6 +74,8 @@ pub struct ProjectWindow {
     /// Tastaturbelegung (Standard plus eigene Änderungen) und der Dialog dazu.
     keymap: keymap::Keymap,
     key_dialog: keymap::KeyDialog,
+    /// Sample-Editor in der unteren Zone.
+    sample_editor: sampleeditor::SampleEditor,
     /// Globaler Quantisierungswert mit Swing und Stärke (Taste Q).
     quantize: studiocraft_project::Quantize,
     /// Automation schreiben: Modus, Ausdünnen, laufende Durchgänge.
@@ -172,6 +175,7 @@ pub struct ProjectWindow {
 pub(crate) enum LowerZone {
     Mixer,
     Editor,
+    SampleEditor,
 }
 
 impl ProjectWindow {
@@ -192,6 +196,7 @@ impl ProjectWindow {
             color_popup_age: 0,
             keymap: keymap::Keymap::default(),
             key_dialog: keymap::KeyDialog::default(),
+            sample_editor: sampleeditor::SampleEditor::default(),
             quantize: studiocraft_project::Quantize::default(),
             auto_writer: automation_write::AutomationWriter::default(),
             show_quantize: false,
@@ -625,6 +630,11 @@ impl ProjectWindow {
                         ui.horizontal(|ui| {
                             ui.selectable_value(&mut self.lower, LowerZone::Mixer, "Mixer");
                             ui.selectable_value(&mut self.lower, LowerZone::Editor, "Key-Editor");
+                            ui.selectable_value(
+                                &mut self.lower,
+                                LowerZone::SampleEditor,
+                                "Sample-Editor",
+                            );
                             if self.lower == LowerZone::Editor
                                 && let Some(ev) =
                                     self.key_editor.part.and_then(|p| self.project.event(p))
@@ -639,6 +649,7 @@ impl ProjectWindow {
                         {
                             LowerZone::Mixer => mixer::show(self, ui),
                             LowerZone::Editor => keyeditor::show(self, ui),
+                            LowerZone::SampleEditor => sampleeditor::show(self, ui),
                         });
                     });
                 });
@@ -2508,6 +2519,86 @@ mod tests {
             }
             w.project.add_cycle_marker(5 * bar, 9 * bar);
             w.selected_track = w.marker_track();
+        });
+    }
+
+    #[test]
+    fn sample_editor_processes_non_destructively_and_trims_to_the_selection() {
+        let (mut w, id) = one_event_window();
+        let old_clip = w.project.event(id).and_then(|e| e.clip).unwrap();
+        let old_peak = {
+            let s = &w.clip(old_clip).unwrap().samples;
+            studiocraft_engine::offline::peak(s, 0..(s.len() / 2) as u64)
+        };
+        w.open_sample_editor(id);
+        assert_eq!(w.lower, LowerZone::SampleEditor);
+        w.process_clip(id, sampleeditor::Process::Normalize)
+            .unwrap();
+        let new_clip = w.project.event(id).and_then(|e| e.clip).unwrap();
+        assert_ne!(new_clip, old_clip, "a new clip, the original stays");
+        let s = &w.clip(new_clip).unwrap().samples;
+        let p = studiocraft_engine::offline::peak(s, 0..(s.len() / 2) as u64);
+        assert!((p - 1.0).abs() < 1e-4, "{p}");
+        let s = &w.clip(old_clip).unwrap().samples;
+        let p = studiocraft_engine::offline::peak(s, 0..(s.len() / 2) as u64);
+        assert_eq!(p, old_peak);
+        w.undo();
+        assert_eq!(w.project.event(id).and_then(|e| e.clip), Some(old_clip));
+        // Selection of one second from 0.5 s: the event follows, the audio stays in place.
+        let ev = w.project.event(id).cloned().unwrap();
+        w.sample_editor.selection = Some((24_000, 72_000));
+        w.event_to_selection(id);
+        let after = w.project.event(id).cloned().unwrap();
+        assert_eq!(after.offset, 24_000);
+        let tempo = &w.project.tempo;
+        assert_eq!(after.start.0, ev.start.0 + tempo.ticks(24_000, 48_000));
+        assert_eq!(after.length, tempo.ticks(48_000, 48_000));
+    }
+
+    #[test]
+    fn double_click_on_an_audio_event_opens_the_sample_editor() {
+        let (w, id) = one_event_window();
+        let mut h = window_harness(w);
+        let pos = {
+            let w = h.state();
+            let ev = w.project.event(id).unwrap();
+            let t = ev.start.0 + ev.length / 2;
+            egui::pos2(
+                w.lanes_rect.left()
+                    + ((t as f64 - w.view.scroll_ticks) / TPQ) as f32 * w.view.px_per_quarter,
+                w.lanes_rect.top() + 0.8 * w.view.row_h,
+            )
+        };
+        h.event(egui::Event::PointerMoved(pos));
+        h.run_steps(1);
+        for _ in 0..2 {
+            for pressed in [true, false] {
+                h.event(egui::Event::PointerButton {
+                    pos,
+                    button: egui::PointerButton::Primary,
+                    pressed,
+                    modifiers: egui::Modifiers::NONE,
+                });
+            }
+            h.run_steps(1);
+        }
+        h.run_steps(2);
+        assert!(h.state().show_lower);
+        assert_eq!(h.state().lower, LowerZone::SampleEditor);
+        assert_eq!(h.state().sample_editor.event, Some(id));
+        h.get_by_label("Normalisieren");
+        h.get_by_label("Event auf Auswahl");
+    }
+
+    #[test]
+    fn renders_sample_editor() {
+        shot("sample-editor", |w| {
+            w.project = Project::default();
+            let id = w
+                .import_clip("Gesang", None, tone_clip(4.0, 220.0), Some((usize::MAX, 0)))
+                .unwrap();
+            w.open_sample_editor(id);
+            w.sample_editor.selection = Some((48_000, 96_000));
         });
     }
 
