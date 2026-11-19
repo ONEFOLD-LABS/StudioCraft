@@ -46,17 +46,24 @@ impl PluginInfo {
     }
 }
 
-/// Suchpfade nach CLAP-Konvention: erst `CLAP_PATH`, dann die Standardorte.
-pub fn default_paths() -> Vec<PathBuf> {
+/// Liste aus einer Pfad-Variablen (`:`, unter Windows `;`), leere Einträge übersprungen.
+fn split_paths(value: &str) -> Vec<PathBuf> {
     let sep = if cfg!(windows) { ';' } else { ':' };
-    let mut paths: Vec<PathBuf> = std::env::var("CLAP_PATH")
-        .map(|v| {
-            v.split(sep)
-                .filter(|s| !s.is_empty())
-                .map(PathBuf::from)
-                .collect()
-        })
-        .unwrap_or_default();
+    value
+        .split(sep)
+        .filter(|s| !s.is_empty())
+        .map(PathBuf::from)
+        .collect()
+}
+
+/// Suchpfade: erst `CLAP_PATH` und `VST3_PATH` (z. B. Flatpak-Erweiterungen), dann die
+/// Standardorte beider Formate.
+pub fn default_paths() -> Vec<PathBuf> {
+    let mut paths: Vec<PathBuf> = ["CLAP_PATH", "VST3_PATH"]
+        .iter()
+        .filter_map(|v| std::env::var(v).ok())
+        .flat_map(|v| split_paths(&v))
+        .collect();
     let home = std::env::var_os("HOME").map(PathBuf::from);
     if cfg!(target_os = "macos") {
         if let Some(h) = &home {
@@ -180,6 +187,17 @@ pub(crate) fn cstr(p: *const std::ffi::c_char) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn path_variables_are_split_and_skip_empty_parts() {
+        let sep = if cfg!(windows) { ";" } else { ":" };
+        let v = format!("/opt/a{sep}{sep}/opt/vst3{sep}");
+        assert_eq!(
+            split_paths(&v),
+            vec![PathBuf::from("/opt/a"), PathBuf::from("/opt/vst3")]
+        );
+        assert!(split_paths("").is_empty());
+    }
 
     #[test]
     fn clap_path_comes_first() {
