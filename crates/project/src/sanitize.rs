@@ -112,6 +112,10 @@ impl Project {
                 clamp!(e.fade_in, e.fade_in.min(e.length));
                 let rest = e.length - e.fade_in;
                 clamp!(e.fade_out, e.fade_out.min(rest));
+                clamp!(
+                    e.gain_db,
+                    finite_f32(e.gain_db, (MIN_DB, crate::EVENT_MAX_DB), 0.0)
+                );
                 clamp!(e.lane, e.lane.map(|l| l.min(MAX_LANE)));
                 clamp!(e.comp, e.comp.min(MAX_LANE));
                 for n in &mut e.notes {

@@ -249,11 +249,16 @@ mod tests {
         let t = p.add_track(TrackKind::Audio, "Gesang");
         let id = p.add_audio_event(t, 0, c).unwrap();
         p.set_fades(id, 480, 960);
+        let e = p.event_mut(id).unwrap();
+        e.gain_db = -4.5;
+        e.fade_in_curve = crate::FadeCurve::SCurve;
+        e.fade_out_curve = crate::FadeCurve::Exponential;
         p.tracks[t].volume_db = -3.5;
         p.tracks[t].pan = 0.25;
         p.master_db = -1.0;
         let json = to_json(&p);
         assert!(json.contains("\"format\": \"studiocraft-project\""));
+        assert!(json.contains("\"fade_in_curve\": \"s_curve\""), "{json}");
         let back = from_json(&json).unwrap();
         assert_eq!(back, p);
         // Neue Events bekommen nach dem Laden weiter eindeutige Ids.

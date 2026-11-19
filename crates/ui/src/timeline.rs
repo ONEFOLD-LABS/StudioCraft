@@ -4,7 +4,9 @@
 use egui::{
     Align2, Color32, FontId, Painter, Pos2, Rect, Sense, Stroke, StrokeKind, Ui, pos2, vec2,
 };
-use studiocraft_project::{Event, EventId, TimeBase, Track, TrackKind};
+use studiocraft_project::{
+    EVENT_MAX_DB, Event, EventId, FadeCurve, MIN_DB, TimeBase, Track, TrackKind,
+};
 
 use crate::icons::Icon;
 use crate::{ProjectWindow, TPQ, Tool};
@@ -127,7 +129,17 @@ pub(crate) enum Drag {
     FadeOut {
         id: EventId,
     },
+    /// Lautstärkegriff oben in der Mitte eines Audio-Events: senkrecht ziehen.
+    EventGain {
+        id: EventId,
+        /// Mauszeiger-Höhe und Lautstärke beim Greifen.
+        y0: f32,
+        db0: f32,
+    },
 }
+
+/// dB je Pixel beim Ziehen am Lautstärkegriff (mit Umschalt ein Viertel davon).
+const GAIN_DB_PER_PX: f32 = 0.25;
 
 /// Fangbereich um Ränder und Fade-Griffe in Pixel.
 const EDGE: f32 = 7.0;
@@ -139,6 +151,8 @@ enum Zone {
     TrimEnd,
     FadeIn,
     FadeOut,
+    /// Lautstärkegriff oben in der Mitte (Audio-Events).
+    Gain,
 }
 
 /// Smart-Bereiche eines Events unter dem Mauszeiger (Spec „Werkzeuge“):
@@ -161,7 +175,14 @@ fn smart_zone(w: &ProjectWindow, g: &Geo, p: Pos2) -> Option<(EventId, usize, Zo
     let upper = p.y < lane_top + g.view.row_h * 0.5;
     let fin = g.x((ev.start.0 + ev.fade_in) as f64);
     let fout = g.x((ev.end() - ev.fade_out) as f64);
-    let zone = if upper && (p.x - fin).abs() <= EDGE && (p.x - fin).abs() <= (p.x - fout).abs() {
+    let mid = (x0 + x1) / 2.0;
+    let gain_handle = ev.clip.is_some()
+        && p.y < lane_top + EDGE * 2.0
+        && (p.x - mid).abs() <= EDGE
+        && x1 - x0 > EDGE * 6.0;
+    let zone = if gain_handle {
+        Zone::Gain
+    } else if upper && (p.x - fin).abs() <= EDGE && (p.x - fin).abs() <= (p.x - fout).abs() {
         Zone::FadeIn
     } else if upper && (p.x - fout).abs() <= EDGE {
         Zone::FadeOut
@@ -707,6 +728,21 @@ fn interact(w: &mut ProjectWindow, ui: &Ui, resp: &egui::Response, g: &Geo) {
     if resp.clicked() || resp.drag_started() {
         w.key_editor.focused = false;
     }
+    // Doppelklick auf einen Fade-Griff öffnet den Kurveneditor.
+    let fade_hit = resp
+        .double_clicked()
+        .then(|| resp.interact_pointer_pos())
+        .flatten()
+        .and_then(|p| smart_zone(w, g, p))
+        .and_then(|(id, _, z)| match z {
+            Zone::FadeIn => Some((id, crate::fades_ui::Side::In)),
+            Zone::FadeOut => Some((id, crate::fades_ui::Side::Out)),
+            _ => None,
+        });
+    if let Some((id, side)) = fade_hit {
+        w.open_fade_editor(id, side);
+        return;
+    }
     // Doppelklick auf ein Audio-Event öffnet den Sample-Editor.
     if resp.double_clicked()
         && let Some(p) = resp.interact_pointer_pos()
@@ -768,6 +804,7 @@ fn interact(w: &mut ProjectWindow, ui: &Ui, resp: &egui::Response, g: &Geo) {
         let zone = match w.drag {
             Some(Drag::TrimStart { .. } | Drag::TrimEnd { .. }) => Some(Zone::TrimStart),
             Some(Drag::FadeIn { .. } | Drag::FadeOut { .. }) => Some(Zone::FadeIn),
+            Some(Drag::EventGain { .. }) => Some(Zone::Gain),
             Some(_) => None,
             None => smart_zone(w, g, p).map(|(_, _, z)| z),
         };
@@ -776,6 +813,7 @@ fn interact(w: &mut ProjectWindow, ui: &Ui, resp: &egui::Response, g: &Geo) {
                 ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal)
             }
             Some(Zone::FadeIn | Zone::FadeOut) => ui.ctx().set_cursor_icon(egui::CursorIcon::Grab),
+            Some(Zone::Gain) => ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeVertical),
             _ => {}
         }
     }
@@ -818,6 +856,19 @@ fn live_drag(w: &mut ProjectWindow, g: &Geo, d: Drag, p: Pos2, mods: egui::Modif
                 let len = ev.end().saturating_sub(raw as u64);
                 let fin = ev.fade_in;
                 w.project.set_fades(id, fin, len.min(ev.length - fin));
+            }
+        }
+        Drag::EventGain { id, y0, db0 } => {
+            let per_px = if mods.shift {
+                GAIN_DB_PER_PX / 4.0
+            } else {
+                GAIN_DB_PER_PX
+            };
+            let db = (db0 + (y0 - p.y) * per_px).clamp(MIN_DB, EVENT_MAX_DB);
+            // Ein Zehntel dB genügt; ganz unten stumm.
+            let db = (db * 10.0).round() / 10.0;
+            if let Some(ev) = w.project.event_mut(id) {
+                ev.gain_db = db;
             }
         }
         Drag::Range { row, start } => {
@@ -907,6 +958,11 @@ fn start_drag(w: &mut ProjectWindow, g: &Geo, p: Pos2, mods: egui::Modifiers) ->
                 Zone::TrimEnd => Drag::TrimEnd { id },
                 Zone::FadeIn => Drag::FadeIn { id },
                 Zone::FadeOut => Drag::FadeOut { id },
+                Zone::Gain => Drag::EventGain {
+                    id,
+                    y0: p.y,
+                    db0: w.project.event(id).map_or(0.0, |e| e.gain_db),
+                },
             })
         }
         Tool::Range => {
@@ -997,6 +1053,7 @@ fn finish_drag(w: &mut ProjectWindow, g: &Geo, d: Drag, p: Pos2, mods: egui::Mod
         | Drag::TrimEnd { .. }
         | Drag::FadeIn { .. }
         | Drag::FadeOut { .. }
+        | Drag::EventGain { .. }
         | Drag::AutoPoint { .. }
         | Drag::AutoDraw { .. }
         | Drag::Marker { .. } => {}
@@ -1590,17 +1647,37 @@ fn paint_notes(painter: &Painter, g: &Geo, ev: &Event, area: Rect, color: Color3
     }
 }
 
-/// Linearer Fade-Faktor an Tick `k` relativ zum Event-Anfang (wie in der Engine).
+/// Faktor aus Fades (mit Kurvenform) und Event-Lautstärke an Tick `k` relativ zum
+/// Event-Anfang, wie in der Engine.
 fn fade_gain(ev: &Event, k: f64) -> f32 {
-    let mut g = 1.0f32;
-    if (ev.fade_in as f64) > 0.0 && k < ev.fade_in as f64 {
-        g = (k / ev.fade_in as f64).max(0.0) as f32;
+    let mut g = studiocraft_project::db_to_gain(ev.gain_db);
+    if ev.fade_in > 0 && k < ev.fade_in as f64 {
+        g *= ev.fade_in_curve.shape((k / ev.fade_in as f64) as f32);
     }
     let rest = ev.length as f64 - k;
-    if (ev.fade_out as f64) > 0.0 && rest < ev.fade_out as f64 {
-        g *= (rest / ev.fade_out as f64).max(0.0) as f32;
+    if ev.fade_out > 0 && rest < ev.fade_out as f64 {
+        g *= ev.fade_out_curve.shape((rest / ev.fade_out as f64) as f32);
     }
     g
+}
+
+/// Punkte einer Fade-Kurve von `x0` (stumm) nach `x1` (voll) bzw. umgekehrt.
+fn curve_points(curve: FadeCurve, x0: f32, x1: f32, top: f32, bottom: f32) -> Vec<Pos2> {
+    const STEPS: usize = 16;
+    (0..=STEPS)
+        .map(|i| {
+            let t = i as f32 / STEPS as f32;
+            pos2(x0 + (x1 - x0) * t, bottom - curve.shape(t) * (bottom - top))
+        })
+        .collect()
+}
+
+/// Abgedunkelter Bereich über einer Kurve, in konvexen Streifen.
+fn shade_above(painter: &Painter, pts: &[Pos2], top: f32, color: Color32) {
+    for w in pts.windows(2) {
+        let quad = vec![pos2(w[0].x, top), pos2(w[1].x, top), w[1], w[0]];
+        painter.add(egui::Shape::convex_polygon(quad, color, Stroke::NONE));
+    }
 }
 
 /// Fade-Bereiche abdunkeln, Kurve zeichnen, Griffe am ausgewählten Event.
@@ -1611,22 +1688,35 @@ fn paint_fades(painter: &Painter, g: &Geo, ev: &Event, body: Rect, selected: boo
     let fin = g.x((ev.start.0 + ev.fade_in) as f64);
     let fout = g.x((ev.end() - ev.fade_out) as f64);
     if ev.fade_in > 0 {
-        let pts = vec![
-            pos2(body.left(), top),
-            pos2(fin, top),
-            pos2(body.left(), bottom),
-        ];
-        painter.add(egui::Shape::convex_polygon(pts, shade, Stroke::NONE));
-        painter.line_segment([pos2(body.left(), bottom), pos2(fin, top)], line);
+        let pts = curve_points(ev.fade_in_curve, body.left(), fin, top, bottom);
+        shade_above(painter, &pts, top, shade);
+        painter.add(egui::Shape::line(pts, line));
     }
     if ev.fade_out > 0 {
-        let pts = vec![
-            pos2(fout, top),
-            pos2(body.right(), top),
-            pos2(body.right(), bottom),
-        ];
-        painter.add(egui::Shape::convex_polygon(pts, shade, Stroke::NONE));
-        painter.line_segment([pos2(fout, top), pos2(body.right(), bottom)], line);
+        let pts = curve_points(ev.fade_out_curve, body.right(), fout, top, bottom);
+        shade_above(painter, &pts, top, shade);
+        painter.add(egui::Shape::line(pts, line));
+    }
+    // Lautstärkegriff oben in der Mitte (Audio-Events), mit Wert, wenn nicht 0 dB.
+    if ev.clip.is_some() && body.width() > EDGE * 6.0 {
+        let t = crate::theme::tokens(painter.ctx());
+        let c = pos2(body.center().x, top + 3.0);
+        painter.circle_filled(c, 3.0, t.handle);
+        painter.circle_stroke(c, 3.0, Stroke::new(1.0, t.border));
+        if ev.gain_db != 0.0 {
+            let text = if ev.gain_db <= MIN_DB {
+                "stumm".to_owned()
+            } else {
+                format!("{:+.1} dB", ev.gain_db)
+            };
+            painter.text(
+                c + egui::vec2(6.0, 0.0),
+                egui::Align2::LEFT_CENTER,
+                text,
+                egui::FontId::proportional(10.0),
+                t.text,
+            );
+        }
     }
     if selected {
         for x in [fin, fout] {

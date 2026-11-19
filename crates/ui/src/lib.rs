@@ -20,6 +20,7 @@ mod automation_panel;
 mod automation_write;
 mod colors;
 mod eq_ui;
+mod fades_ui;
 mod focus;
 mod folders_ui;
 mod icons;
@@ -90,6 +91,8 @@ pub struct ProjectWindow {
     key_dialog: keymap::KeyDialog,
     /// Nummernblock-Drücke aus der App (ohne: Nummernblock wie Zahlenreihe).
     keypad: Option<keypad::KeypadTap>,
+    /// Kurveneditor eines Fades (Doppelklick auf den Fade-Griff).
+    fade_editor: Option<fades_ui::FadeEditor>,
     /// Dialog „Wiederholen“ (Strg+K).
     repeat_dialog: shortcuts::RepeatDialog,
     /// Sample-Editor in der unteren Zone.
@@ -215,6 +218,7 @@ impl ProjectWindow {
             keymap: keymap::Keymap::default(),
             key_dialog: keymap::KeyDialog::default(),
             keypad: None,
+            fade_editor: None,
             repeat_dialog: shortcuts::RepeatDialog::default(),
             sample_editor: sampleeditor::SampleEditor::default(),
             quantize: studiocraft_project::Quantize::default(),
@@ -715,6 +719,7 @@ impl ProjectWindow {
         self.color_popup(ui.ctx());
         self.key_commands_dialog(ui.ctx());
         self.repeat_dialog(ui.ctx());
+        self.fade_editor_dialog(ui.ctx());
 
         self.sync_tempo();
         let playing = self.is_playing();
@@ -2343,6 +2348,96 @@ mod tests {
         assert!(h.query_by_label("Last –").is_none());
         // Without the status line, messages show in the transport bar.
         h.get_by_label("Datei fehlt");
+    }
+
+    fn double_click_at(h: &mut Harness<'_, ProjectWindow>, at: egui::Pos2) {
+        h.event(egui::Event::PointerMoved(at));
+        h.run_steps(1);
+        for _ in 0..2 {
+            for pressed in [true, false] {
+                h.event(egui::Event::PointerButton {
+                    pos: at,
+                    button: egui::PointerButton::Primary,
+                    pressed,
+                    modifiers: egui::Modifiers::NONE,
+                });
+                h.run_steps(1);
+            }
+        }
+        h.run_steps(1);
+    }
+
+    #[test]
+    fn render_fade_curves_volume_handle_and_curve_editor() {
+        shot("fades", |w| {
+            let bar = w.bar_ticks();
+            let id = w
+                .import_clip("Take", None, tone_clip(8.0, 220.0), Some((0, bar)))
+                .unwrap();
+            w.project.set_fades(id, 2 * bar, 3 * bar);
+            let e = w.project.event_mut(id).unwrap();
+            e.fade_in_curve = studiocraft_project::FadeCurve::SCurve;
+            e.fade_out_curve = studiocraft_project::FadeCurve::Exponential;
+            e.gain_db = 3.0;
+            w.selection = vec![id];
+            w.view.scroll_ticks = 0.0;
+            w.view.px_per_quarter = 40.0;
+            w.view.row_h = 90.0;
+            w.open_fade_editor(id, fades_ui::Side::In);
+        });
+    }
+
+    #[test]
+    fn the_volume_handle_sets_event_gain_in_one_undo_step() {
+        let (mut w, id) = one_event_window();
+        w.view.scroll_ticks = 0.0;
+        let mut h = window_harness(w);
+        let (start, end) = {
+            let e = h.state().project.event(id).unwrap();
+            (e.start.0, e.end())
+        };
+        let top = screen(&h, (start + end) / 2, 0.0) + egui::vec2(0.0, 3.0);
+        drag_with(
+            &mut h,
+            top,
+            top - egui::vec2(0.0, 20.0),
+            egui::Modifiers::NONE,
+            egui::Modifiers::NONE,
+        );
+        let e = h.state().project.event(id).unwrap();
+        assert_eq!(e.gain_db, 5.0, "20 px up at 0.25 dB per px");
+        assert_eq!(e.start.0, start, "the handle does not move the event");
+        h.state_mut().undo();
+        assert_eq!(h.state().project.event(id).unwrap().gain_db, 0.0);
+    }
+
+    #[test]
+    fn double_click_on_a_fade_handle_opens_the_curve_editor() {
+        let (mut w, id) = one_event_window();
+        w.view.scroll_ticks = 0.0;
+        w.project.set_fades(id, 960, 0);
+        w.clear_history();
+        let mut h = window_harness(w);
+        let start = h.state().project.event(id).unwrap().start.0;
+        let handle = screen(&h, start + 960, 0.2);
+        double_click_at(&mut h, handle);
+        assert!(h.state().fade_editor.is_some(), "curve editor is open");
+        assert!(
+            !h.state().show_lower || h.state().lower != LowerZone::SampleEditor,
+            "a fade double-click does not open the sample editor"
+        );
+        // The fade that was clicked comes first.
+        h.get_all_by_label("S-Kurve").next().unwrap().click();
+        h.run_steps(3);
+        let e = h.state().project.event(id).unwrap();
+        assert_eq!(e.fade_in_curve, studiocraft_project::FadeCurve::SCurve);
+        assert_eq!(e.fade_out_curve, studiocraft_project::FadeCurve::Linear);
+        assert_eq!(e.fade_in, 960, "the length stays");
+        h.state_mut().undo();
+        assert_eq!(
+            h.state().project.event(id).unwrap().fade_in_curve,
+            studiocraft_project::FadeCurve::Linear
+        );
     }
 
     #[test]
