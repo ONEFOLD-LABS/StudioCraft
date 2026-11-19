@@ -208,6 +208,10 @@ pub struct Track {
     /// Ordnerspuren: zugeklappt, die enthaltenen Spuren sind ausgeblendet.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub folded: bool,
+    /// Platz in der Spurliste, nachdem Spuren umsortiert wurden (siehe `folders.rs`); ohne
+    /// Wert gilt der Index. Die Reihenfolge in `tracks` selbst ändert sich nie.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub order: Option<u32>,
     /// Kanal-EQ (4 Bänder); Standard: neutral, wird dann nicht gespeichert.
     #[serde(default, skip_serializing_if = "crate::ChannelEq::is_default")]
     pub eq: crate::ChannelEq,
@@ -622,6 +626,7 @@ impl Project {
                 eq: crate::ChannelEq::default(),
                 parent: None,
                 folded: false,
+                order: None,
                 volume_db: 0.0,
                 pan: 0.0,
                 input: TrackInput::default(),
@@ -1160,6 +1165,7 @@ impl Project {
             eq: crate::ChannelEq::default(),
             parent: None,
             folded: false,
+            order: None,
             volume_db: 0.0,
             pan: 0.0,
             input: TrackInput::default(),
