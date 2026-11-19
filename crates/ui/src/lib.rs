@@ -87,6 +87,8 @@ pub struct ProjectWindow {
     /// Offene Farbpalette (Klick auf die Farbleiste im Spurkopf) und ihr Alter in Bildern.
     color_popup: Option<(colors::Target, egui::Pos2)>,
     color_popup_age: u8,
+    /// Modus der Objektauswahl beim Ziehen am Rand (Rechtsklick auf das Werkzeug).
+    resize_mode: tools::ResizeMode,
     /// Werkzeugpalette am Mauszeiger (Rechtsklick in die Event-Anzeige) und ihr Alter in
     /// Bildern, damit der öffnende Klick sie nicht gleich wieder schließt.
     tool_palette: Option<egui::Pos2>,
@@ -232,6 +234,7 @@ impl ProjectWindow {
             grid_zoom: false,
             color_popup: None,
             color_popup_age: 0,
+            resize_mode: tools::ResizeMode::default(),
             tool_palette: None,
             tool_palette_age: 0,
             keymap: keymap::Keymap::default(),
@@ -873,8 +876,22 @@ impl ProjectWindow {
                 if !tool.implemented() {
                     hint.push_str(" – im Prototyp noch ohne Funktion");
                 }
-                if icon_button(ui, tool.icon(), self.tool == tool, None, &hint).clicked() {
+                let r = icon_button(ui, tool.icon(), self.tool == tool, None, &hint);
+                if r.clicked() {
                     self.tool = tool;
+                }
+                // Untermenü am Werkzeugknopf: Modus für das Ziehen am Rand (Spec).
+                if tool == Tool::Select {
+                    r.context_menu(|ui| {
+                        ui.label("Ziehen am Rand");
+                        for mode in tools::ResizeMode::ALL {
+                            if ui.radio(self.resize_mode == mode, mode.label()).clicked() {
+                                self.resize_mode = mode;
+                                self.tool = Tool::Select;
+                                ui.close();
+                            }
+                        }
+                    });
                 }
             }
             icons::group_gap(ui);
@@ -3555,6 +3572,60 @@ mod tests {
         assert!(
             h.query_by_label("Trennen (Palette)").is_none(),
             "palette closes"
+        );
+    }
+
+    #[test]
+    fn select_tool_menu_sets_the_resize_mode_and_stretch_scales_notes() {
+        let (mut w, _) = one_event_window();
+        let row = w.project.add_track(TrackKind::Midi, String::from("Noten"));
+        let q = TPQ as u64;
+        let id = w.project.create_event(row, 0, 4 * q).expect("part created");
+        if let Some(ev) = w.project.event_mut(id) {
+            ev.notes = vec![studiocraft_project::Note {
+                pitch: 60,
+                velocity: 100,
+                start: 2 * q as i64,
+                length: q,
+            }];
+        }
+        w.snap = false;
+        let mut h = window_harness(w);
+        // Right-click on the select tool opens its menu; pick "stretch".
+        let button = h.get_by_label("Auswahl (1)").rect().center();
+        h.event(egui::Event::PointerMoved(button));
+        h.run_steps(1);
+        for pressed in [true, false] {
+            h.event(egui::Event::PointerButton {
+                pos: button,
+                button: egui::PointerButton::Secondary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            });
+        }
+        h.run_steps(2);
+        h.get_by_label("Größe ändern, Inhalt strecken").click();
+        h.run_steps(2);
+        assert_eq!(h.state().resize_mode, tools::ResizeMode::Stretch);
+        // Drag the right edge (lower half) from 4 to 8 quarters: the note doubles too.
+        let edge = |h: &Harness<'_, ProjectWindow>, t: u64| {
+            let w = h.state();
+            let r = w.lanes_rect;
+            let x =
+                r.left() + ((t as f64 - w.view.scroll_ticks) / TPQ) as f32 * w.view.px_per_quarter;
+            egui::pos2(x, r.top() + (row as f32 + 0.8) * w.view.row_h)
+        };
+        let (a, b) = (
+            edge(&h, 4 * q) - egui::vec2(2.0, 0.0),
+            edge(&h, 8 * q) - egui::vec2(2.0, 0.0),
+        );
+        drag_with(&mut h, a, b, egui::Modifiers::NONE, egui::Modifiers::NONE);
+        let ev = h.state().project.event(id).cloned().expect("part exists");
+        assert!(ev.length.abs_diff(8 * q) < q / 4, "{}", ev.length);
+        assert!(
+            ev.notes[0].start.abs_diff(4 * q as i64) < q / 4,
+            "{:?}",
+            ev.notes
         );
     }
 

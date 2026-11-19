@@ -3,6 +3,30 @@
 use egui::Key;
 use studiocraft_project::{Project, QuantizeValue, TICKS_PER_QUARTER};
 
+/// Was Ziehen am Rand eines Events mit der Objektauswahl tut (Spec „Varianten pro Werkzeug“).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ResizeMode {
+    /// Länge ändern, der Inhalt bleibt an seiner Stelle.
+    #[default]
+    Normal,
+    /// Der Inhalt wandert mit dem gezogenen Rand.
+    Slide,
+    /// Der Inhalt wird gestreckt bzw. gestaucht (bisher nur MIDI-Parts).
+    Stretch,
+}
+
+impl ResizeMode {
+    pub const ALL: [ResizeMode; 3] = [ResizeMode::Normal, ResizeMode::Slide, ResizeMode::Stretch];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            ResizeMode::Normal => "Größe ändern",
+            ResizeMode::Slide => "Größe ändern, Inhalt mitschieben",
+            ResizeMode::Stretch => "Größe ändern, Inhalt strecken",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Tool {
     Select,
