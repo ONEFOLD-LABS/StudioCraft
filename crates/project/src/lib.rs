@@ -39,4 +39,4 @@ pub use model::{
     Project, SendSlot, TRACK_COLORS, TimeBase, Track, TrackId, TrackInput, TrackKind, db_to_gain,
 };
 pub use quantize::{Feel, NoteValue, Quantize, QuantizeValue};
-pub use time::{Position, TICKS_PER_QUARTER, TempoMap, TimeSignature};
+pub use time::{BPM_RANGE, Position, TICKS_PER_QUARTER, TempoEvent, TempoMap, TimeSignature};

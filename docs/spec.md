@@ -178,6 +178,8 @@ Die Transportleiste unten im Projektfenster bedient Wiedergabe, Aufnahme und Loc
 
 **Audio- und MIDI-Geräte:** Menü Transport → „Audio- und MIDI-Geräte …“: Host, Aus- und Eingang, Abtastrate, Blockgröße (mit Latenz) und MIDI-Eingänge an/aus. Die Wahl liegt in den Einstellungen. Ein Wechsel von Gerät oder Blockgröße gilt sofort, eine andere Abtastrate nach einem Neustart. Verschwindet das Gerät, meldet die Statuszeile es.
 
+**Tempospur:** Projekt → „Tempospur hinzufügen“ legt die Spur an und schaltet sie ein; „Spur“ in der Transportleiste schaltet zwischen Tempospur und festem Tempo um (die Punkte bleiben). In der Spur setzt der Stift einen Tempowechsel, die Objektauswahl zieht ihn (Takt mit Snap, Tempo nach Höhe), der Radiergummi löscht ihn. Im Inspector stehen alle Punkte mit Tempo und „Rampe“ (das Tempo gleitet vom vorigen Punkt). Mit Tempospur zeigt die Transportleiste das Tempo am Cursor. Audio auf Spuren mit linearer Zeitbasis behält bei jeder Tempoänderung seine Zeit, MIDI seine Takte; Metronom und Export folgen der Kurve.
+
 **Vorzähler und Metronom:** Metronom an/aus mit C; Vorzähler in Takten einstellbar. Klick-Sound, Lautstärke und Ausgang sind Projekteinstellungen.
 
 **Aufnahmemodi**
