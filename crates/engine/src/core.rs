@@ -5,7 +5,7 @@
 
 use std::sync::{
     Arc,
-    atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering},
+    atomic::{AtomicBool, AtomicU8, AtomicU32, AtomicU64, Ordering},
 };
 
 use studiocraft_project::{Position, TempoMap};
@@ -65,6 +65,9 @@ pub struct EngineStatus {
     cycle: AtomicBool,
     /// Vorhören läuft.
     previewing: AtomicBool,
+    /// Audio-Last in Promille: Rechenzeit eines Blocks im Verhältnis zu seiner Dauer,
+    /// schnell steigend, langsam fallend.
+    load: AtomicU32,
     /// Projektposition (Frames), an der die letzte Aufnahme begann.
     rec_start: AtomicU64,
     /// Zeitpunkt (Uhr aus [`crate::clock`]), zu dem `rec_start` hörbar wurde; 0 = unbekannt.
@@ -87,6 +90,11 @@ impl EngineStatus {
     pub fn rec_played_at(&self) -> Option<u64> {
         Some(self.rec_played_at.load(Ordering::Relaxed)).filter(|&n| n > 0)
     }
+    /// Audio-Last: Anteil der Blockdauer, den das Rechnen braucht (1.0 = 100 %).
+    pub fn load(&self) -> f32 {
+        self.load.load(Ordering::Relaxed) as f32 / 1000.0
+    }
+
     /// Ob gerade etwas vorgehört wird.
     pub fn previewing(&self) -> bool {
         self.previewing.load(Ordering::Relaxed)
@@ -200,6 +208,8 @@ pub struct EngineCore {
     scratch: Box<[f32]>,
     /// Wann der Anfang des aktuellen Blocks hörbar wird (Uhr aus [`crate::clock`]).
     block_played_at: u64,
+    /// Geglättete Audio-Last (siehe [`EngineStatus::load`]).
+    load_avg: f32,
 }
 
 /// Kurzer Klick: Sinus mit schnell abfallender Hülle, 30 ms.
@@ -268,6 +278,7 @@ pub fn engine(sample_rate: u32, tempo: TempoMap) -> (EngineCore, EngineControl) 
         meters: meters.clone(),
         scratch: vec![0.0; SCRATCH_FRAMES * 2].into_boxed_slice(),
         block_played_at: 0,
+        load_avg: 0.0,
     };
     let control = EngineControl {
         commands: producer,
@@ -435,6 +446,24 @@ impl EngineCore {
     /// Rendert einen Block verschachteltes Stereo. Echtzeitsicher:
     /// keine Allokation, kein Lock.
     pub fn process(&mut self, out: &mut [f32]) {
+        let started = crate::clock::now_nanos();
+        self.render(out);
+        // Last: Rechenzeit gegen Blockdauer; Spitzen sofort, Abfall langsam.
+        let busy = crate::clock::now_nanos().saturating_sub(started) as f64;
+        let budget = (out.len() / 2) as f64 / f64::from(self.sample_rate.max(1)) * 1e9;
+        if budget > 0.0 {
+            let ratio = (busy / budget) as f32;
+            self.load_avg = if ratio > self.load_avg {
+                ratio
+            } else {
+                self.load_avg * 0.95 + ratio * 0.05
+            };
+            let permille = (self.load_avg * 1000.0).clamp(0.0, 100_000.0) as u32;
+            self.status.load.store(permille, Ordering::Relaxed);
+        }
+    }
+
+    fn render(&mut self, out: &mut [f32]) {
         while let Ok(cmd) = self.commands.pop() {
             self.apply(cmd);
         }
@@ -865,6 +894,18 @@ mod tests {
         assert_eq!(out, [0.0; 4]);
         // Old buffers come back to the main thread.
         ctl.collect_garbage();
+    }
+
+    #[test]
+    fn load_is_published_as_a_share_of_the_block() {
+        let (mut core, ctl) = engine(48_000, TempoMap::default());
+        let mut out = [0.0f32; 512];
+        core.process(&mut out);
+        let l = ctl.status.load();
+        assert!(l.is_finite() && l >= 0.0, "{l}");
+        // An empty block has no duration: the value stays as it was.
+        core.process(&mut []);
+        assert_eq!(ctl.status.load(), l);
     }
 
     #[test]

@@ -153,6 +153,7 @@ impl ProjectWindow {
                 ui.checkbox(&mut self.show_inspector, "Inspector (Alt+I, Alt+L)");
                 ui.checkbox(&mut self.show_info, "Info-Zeile");
                 ui.checkbox(&mut self.show_transport, "Transportleiste (F2)");
+                ui.checkbox(&mut self.show_status, "Statuszeile");
                 ui.checkbox(&mut self.show_right, "Rechte Zone (Alt+R)");
                 if ui
                     .selectable_label(

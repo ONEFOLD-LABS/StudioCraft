@@ -77,6 +77,8 @@ pub struct ProjectWindow {
     show_info: bool,
     /// Transportleiste sichtbar (F2).
     show_transport: bool,
+    /// Statuszeile am unteren Fensterrand sichtbar.
+    show_status: bool,
     clipboard: shortcuts::Clipboard,
     /// Rechte Zone (Medien, Plugins) sichtbar.
     show_right: bool,
@@ -187,6 +189,7 @@ impl ProjectWindow {
             show_inspector: true,
             show_info: true,
             show_transport: true,
+            show_status: true,
             clipboard: shortcuts::Clipboard::default(),
             show_right: false,
             right: rightzone::RightZone::default(),
@@ -682,6 +685,12 @@ impl ProjectWindow {
         if self.show_info {
             egui::Panel::top("info-zeile").show(ui, |ui| infoline::show(self, ui));
         }
+        // Zuerst angelegt, also ganz unten: die Statuszeile unter der Transportleiste.
+        if self.show_status {
+            egui::Panel::bottom("statuszeile")
+                .exact_size(22.0)
+                .show(ui, |ui| self.status_line(ui));
+        }
         if self.show_transport {
             egui::Panel::bottom("transportleiste").show(ui, |ui| self.transport_bar(ui));
         }
@@ -1162,28 +1171,69 @@ impl ProjectWindow {
             icons::group_gap(ui);
             self.tempo_controls(ui);
 
-            // Status rechts: nimmt nur den freien Platz und wird sonst gekürzt (voller Text
-            // als Tooltip), damit er nie über Tempo und Takt läuft.
+            // Ohne Statuszeile: Meldungen rechts in der Transportleiste, gekürzt auf den freien
+            // Platz, damit sie nie über Tempo und Takt laufen.
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                ui.weak(format!("{:.1} ms/Frame", self.frame_ms));
-                ui.separator();
-                let mut status = self.audio_status.clone();
-                if !self.midi_status.is_empty() {
-                    status.push_str("  ·  ");
-                    status.push_str(&self.midi_status);
+                if !self.show_status
+                    && let Some(m) = &self.message
+                    && ui.available_width() > 24.0
+                {
+                    let text = RichText::new(m.as_str()).color(ui.visuals().warn_fg_color);
+                    ui.add(egui::Label::new(text).truncate())
+                        .on_hover_text(m.as_str());
                 }
-                let text = match &self.message {
-                    Some(m) => RichText::new(m.as_str()).color(ui.visuals().warn_fg_color),
-                    None => RichText::new(status.as_str()).weak(),
-                };
-                if ui.available_width() > 24.0 {
+            });
+        });
+    }
+
+    /// Statuszeile (docs/ui-parity.md, Element 7): Audio-Ausgang, Eingang und MIDI links,
+    /// Meldungen in der Mitte, Audio-Last und Bildzeit rechts. Lange Texte werden gekürzt,
+    /// der volle Text steht im Tooltip.
+    fn status_line(&mut self, ui: &mut Ui) {
+        let t = theme::tokens(ui.ctx());
+        let load = self.transport.as_ref().map(|e| e.status.load());
+        ui.horizontal_centered(|ui| {
+            ui.spacing_mut().item_spacing.x = 6.0;
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.weak(format!("UI {:.1} ms", self.frame_ms))
+                    .on_hover_text("Zeit pro Bild der Oberfläche");
+                ui.separator();
+                match load {
+                    Some(l) => {
+                        let pct = format!("Last {:.0} %", l * 100.0);
+                        let text = if l >= 0.8 {
+                            RichText::new(pct).color(t.rec)
+                        } else {
+                            RichText::new(pct).weak()
+                        };
+                        ui.label(text)
+                            .on_hover_text("Audio-Last: Rechenzeit pro Block gegen seine Dauer");
+                    }
+                    None => {
+                        ui.weak("Last –");
+                    }
+                }
+                ui.separator();
+                ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                    let mut parts = vec![self.audio_status.clone()];
+                    if !self.input_status.is_empty() {
+                        parts.push(format!("Eingang: {}", self.input_status));
+                    }
+                    if !self.midi_status.is_empty() {
+                        parts.push(self.midi_status.clone());
+                    }
+                    let status = parts.join("  ·  ");
+                    let text = match &self.message {
+                        Some(m) => RichText::new(m.as_str()).color(ui.visuals().warn_fg_color),
+                        None => RichText::new(status.as_str()).weak(),
+                    };
                     let full = match &self.message {
                         Some(m) => format!("{m}\n{status}"),
                         None => status.clone(),
                     };
                     ui.add(egui::Label::new(text).truncate())
                         .on_hover_text(full);
-                }
+                });
             });
         });
     }
@@ -2103,6 +2153,24 @@ mod tests {
                 .map(|i| i.plugin_id.as_str()),
             Some("test.synth")
         );
+    }
+
+    #[test]
+    fn status_line_shows_device_and_load_and_can_be_hidden() {
+        let (mut w, _) = one_event_window();
+        w.audio_status = "pipewire · default_output · 48000 Hz".into();
+        w.message = Some("Datei fehlt".into());
+        let mut h = window_harness(w);
+        h.get_by_label("Last –");
+        h.get_by_label("Datei fehlt");
+        h.get_by_label("Ansicht").click();
+        h.run_steps(2);
+        h.get_by_label("Statuszeile").click();
+        h.run_steps(2);
+        assert!(!h.state().show_status);
+        assert!(h.query_by_label("Last –").is_none());
+        // Without the status line, messages show in the transport bar.
+        h.get_by_label("Datei fehlt");
     }
 
     #[test]

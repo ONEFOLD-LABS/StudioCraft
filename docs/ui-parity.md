@@ -24,7 +24,7 @@ Status: ✅ umgesetzt · 🟡 teilweise · ⬜ offen
 | 4 | Mitte | linke Zone · Spurliste · Lineal/Event-Anzeige · rechte Zone | ✅ |
 | 5 | Untere Zone | Reiter (Mixer, Editor, …) am unteren Rand der Zone | ✅ |
 | 6 | Transportleiste | fest am unteren Fensterrand, F2 blendet aus | ✅ |
-| 7 | Statuszeile | Audio-Gerät, Abtastrate, Last, Meldungen | 🟡 (in Transportleiste) |
+| 7 | Statuszeile | Audio-Gerät, Abtastrate, Eingang, MIDI, Meldungen, Audio-Last, Bildzeit; Ansicht → Statuszeile | ✅ |
 
 ## Werkzeugzeile
 
@@ -98,12 +98,14 @@ Zonen-Schalter.
 
 Gruppen von links nach rechts, durch Trenner getrennt:
 
-1. Leistung/Status (Audio-Last, Gerät)
-2. Locatoren: L und R mit Position, Punch-In, Cycle, Punch-Out dazwischen
-3. Hauptanzeige: Position in Takten groß, darunter/daneben Zeit
-4. Transportknöpfe: Zum Anfang, Zurückspulen, Vorspulen, Stopp, Start, Aufnahme, Cycle
-5. Automationsmodus „Auto: Touch / Auto-Latch“, rot während geschrieben wird
-6. Tempo und Taktart, Metronom (Klick), Vorzähler
+1. Locatoren: L und R mit Position, Punch-In, Cycle, Punch-Out dazwischen
+2. Hauptanzeige: Position in Takten groß, darunter/daneben Zeit
+3. Transportknöpfe: Zum Anfang, Zurückspulen, Vorspulen, Stopp, Start, Aufnahme, Cycle
+4. Automationsmodus „Auto: Touch / Auto-Latch“, rot während geschrieben wird
+5. Tempo und Taktart, Metronom (Klick), Vorzähler
+
+Gerät, Last und Meldungen stehen in der Statuszeile darunter; ist sie ausgeblendet, erscheinen
+Meldungen rechts in der Transportleiste.
 
 Die Positionsanzeige hat einen dunklen Hintergrund (`counter_bg`) mit heller Schrift.
 
