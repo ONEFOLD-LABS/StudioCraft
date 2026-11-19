@@ -59,6 +59,7 @@ impl ProjectWindow {
         path: Option<PathBuf>,
     ) {
         self.project = project;
+        self.apply_layout(self.project.layout.clone());
         self.clips = clips;
         self.project_path = path;
         self.selection.clear();

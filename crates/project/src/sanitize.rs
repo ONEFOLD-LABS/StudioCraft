@@ -39,6 +39,18 @@ impl Project {
             }};
         }
 
+        fix(self.layout.sanitize());
+        if self.layouts.len() > crate::layout::MAX_LAYOUTS {
+            self.layouts.truncate(crate::layout::MAX_LAYOUTS);
+            fix(true);
+        }
+        for l in &mut self.layouts {
+            fix(l.layout.sanitize());
+            let name = crate::layout::clip_name(&l.name);
+            fix(name != l.name);
+            l.name = name;
+        }
+
         let bpm = self.tempo.bpm;
         clamp!(
             self.tempo.bpm,

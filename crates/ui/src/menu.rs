@@ -144,11 +144,16 @@ impl ProjectWindow {
             });
             ui.menu_button("Transport", |ui| self.transport_menu(ui));
             ui.menu_button("Ansicht", |ui| {
-                ui.checkbox(&mut self.show_inspector, "Inspector (Alt+I, Alt+L)");
+                ui.checkbox(&mut self.show_inspector, "Linke Zone (Alt+L)");
+                ui.add_enabled(
+                    self.show_inspector,
+                    egui::Checkbox::new(&mut self.show_inspector_column, "Inspector (Alt+I)"),
+                );
                 ui.checkbox(&mut self.show_info, "Info-Zeile");
                 ui.checkbox(&mut self.show_transport, "Transportleiste (F2)");
                 ui.checkbox(&mut self.show_status, "Statuszeile");
                 ui.checkbox(&mut self.show_right, "Rechte Zone (Alt+R)");
+                ui.menu_button("Layouts", |ui| self.layouts_menu(ui));
                 if ui
                     .selectable_label(
                         self.show_lower && self.lower == crate::LowerZone::Mixer,

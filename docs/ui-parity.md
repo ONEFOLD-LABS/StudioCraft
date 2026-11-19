@@ -43,7 +43,7 @@ Eine Zeile, Gruppen durch schmale Trenner getrennt, Knöpfe quadratisch mit Symb
    X (Stumm), Stift (Zeichnen), Lautsprecher (Wiedergabe), Metronom-ähnliche Uhr (Zeitkorrektur).
    Danach die **Snap-Gruppe:** Snap an/aus (Magnet-Symbol, J), Snap-Modus, Raster-Typ,
    Quantisierungswert, Knopf für das Quantisierungs-Panel (Swing, Stärke).
-3. **Rechts:** die Zonen-Schalter linke Zone (Alt+I), untere Zone, rechte Zone (Alt+R),
+3. **Rechts:** die Zonen-Schalter linke Zone (Alt+L), untere Zone, rechte Zone (Alt+R),
    hervorgehoben, wenn die Zone sichtbar ist.
 
 ## Info-Zeile
@@ -165,6 +165,7 @@ Die Positionsanzeige hat einen dunklen Hintergrund (`counter_bg`) mit heller Sch
 21. ✅ Inspector: Sektionen mit Titelleiste, Eingang und Ausgang unter „Routing“
 22. ✅ Werkzeugzeile: globale Zustände links, Werkzeuge zentriert, Zonen-Schalter rechts
 23. ✅ Rechte Zone: Startseite mit Kacheln, Plugin-Filter Instrumente/Effekte
+24. ✅ Zonen: Größen und Sichtbarkeit im Projekt gespeichert, Alt+L linke Zone, Alt+I Inspector-Spalte, benannte Layouts (Ansicht → Layouts, Strg+Alt+1 bis 9)
 
 **Als Nächstes:** Aus dieser Liste ist nichts mehr offen. Weitere Angleichungen ergeben sich aus
 `docs/spec.md`.
