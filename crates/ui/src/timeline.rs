@@ -2151,25 +2151,27 @@ fn paint_waveform(
     };
     let mid = area.center().y;
     let half = area.height() * 0.5 - 1.0;
-    let mut shapes = Vec::with_capacity(area.width() as usize + 1);
-    let mut x = area.left().floor();
+    // In echten Bildschirmpixeln zeichnen, als lückenloses Mesh aus Spalten: Linien an
+    // halben Punkten würden bei nicht ganzzahliger Skalierung (z. B. 1,25) die Pixel
+    // schneiden und durch die Kantenglättung senkrechte Streifen bilden.
+    let ppp = painter.ctx().pixels_per_point().max(0.1);
+    let step = 1.0 / ppp;
+    let snap = |v: f32| (v * ppp).round() / ppp;
+    let mut mesh = egui::Mesh::default();
+    let mut x = snap(area.left());
     while x < area.right() {
+        let x1 = (x + step).min(area.right());
         let f0 = frame_at(g.ticks(x));
-        let f1 = frame_at(g.ticks(x + 1.0));
+        let f1 = frame_at(g.ticks(x1));
         let (lo, hi) = clip.peaks.range(f0, f1.max(f0 + 1.0));
-        let fade = fade_gain(ev, g.ticks(x + 0.5) - ev.start.0 as f64);
+        let fade = fade_gain(ev, g.ticks((x + x1) * 0.5) - ev.start.0 as f64);
         let (lo, hi) = (lo * fade, hi * fade);
-        let (y0, y1) = (
-            mid - hi.clamp(-1.0, 1.0) * half,
-            mid - lo.clamp(-1.0, 1.0) * half,
-        );
-        shapes.push(egui::Shape::line_segment(
-            [pos2(x + 0.5, y0), pos2(x + 0.5, y1.max(y0 + 1.0))],
-            Stroke::new(1.0, color),
-        ));
-        x += 1.0;
+        let y0 = snap(mid - hi.clamp(-1.0, 1.0) * half);
+        let y1 = snap(mid - lo.clamp(-1.0, 1.0) * half).max(y0 + step);
+        mesh.add_colored_rect(Rect::from_min_max(pos2(x, y0), pos2(x1, y1)), color);
+        x += step;
     }
-    painter.extend(shapes);
+    painter.add(egui::Shape::mesh(mesh));
 }
 
 fn paint_drag_preview(w: &ProjectWindow, painter: &Painter, g: &Geo) {
