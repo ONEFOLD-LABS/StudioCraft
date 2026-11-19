@@ -22,46 +22,111 @@ const BLOCK: usize = 2048;
 
 /// Was gerendert wird.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RenderTarget {
+    /// Eine Spur; bei Gruppen und FX-Kanälen samt allem, was hineinläuft.
+    Track(usize),
+    /// Der Hauptmix (Summe).
+    Main,
+}
+
+/// Ein Render-Auftrag.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct RenderSpec {
-    pub track: usize,
+    pub target: RenderTarget,
     /// Bereich in Ticks.
     pub range: (u64, u64),
-    /// Mit Fader, Panorama und EQ der Spur; sonst nur Instrument und Inserts.
+    /// Mit Fader, Panorama und EQ des Ziels (beim Hauptmix: mit Summenfader).
     pub with_channel: bool,
+    /// Mit den Inserts des Ziels (Instrumente spielen immer).
+    pub inserts: bool,
+}
+
+impl RenderSpec {
+    /// Eine Spur, wie „An Ort und Stelle rendern“ sie braucht.
+    pub(crate) fn track(track: usize, range: (u64, u64), with_channel: bool) -> Self {
+        Self {
+            target: RenderTarget::Track(track),
+            range,
+            with_channel,
+            inserts: true,
+        }
+    }
 }
 
 impl ProjectWindow {
+    /// Spuren, die (direkt, über Gruppen oder Sends) in `track` laufen, samt `track`.
+    fn feeding(&self, track: usize) -> Vec<usize> {
+        let mut set = vec![track];
+        loop {
+            let ids: Vec<u32> = set.iter().map(|&i| self.project.tracks[i].id).collect();
+            let more: Vec<usize> = (0..self.project.tracks.len())
+                .filter(|i| !set.contains(i))
+                .filter(|&i| {
+                    let t = &self.project.tracks[i];
+                    t.output.is_some_and(|o| ids.contains(&o))
+                        || t.sends.iter().any(|s| ids.contains(&s.target))
+                })
+                .collect();
+            if more.is_empty() {
+                return set;
+            }
+            set.extend(more);
+        }
+    }
+
     /// Rendert `spec` als verschachteltes Stereo bei der Projekt-Abtastrate, mit Nachklang.
     pub(crate) fn render_offline(&mut self, spec: RenderSpec) -> Result<Vec<f32>, String> {
-        let RenderSpec {
-            track,
-            range: (a, b),
-            with_channel,
-        } = spec;
-        if track >= self.project.tracks.len() || b <= a {
+        let (a, b) = spec.range;
+        if b <= a {
             return Err("Nichts zu rendern".into());
         }
         // Aktuelle Plugin-Zustände ins Projekt, damit die frischen Instanzen sie laden.
         self.capture_plugin_states();
         let mut project = self.project.clone();
+        // Spuren, die klingen; beim Hauptmix alle, sonst das Ziel und seine Quellen.
+        let keep: Vec<usize> = match spec.target {
+            RenderTarget::Main => (0..project.tracks.len()).collect(),
+            RenderTarget::Track(t) if t < project.tracks.len() => self.feeding(t),
+            RenderTarget::Track(_) => return Err("Nichts zu rendern".into()),
+        };
+        let ids: Vec<u32> = keep.iter().map(|&i| project.tracks[i].id).collect();
         for (i, t) in project.tracks.iter_mut().enumerate() {
-            t.solo = false;
-            t.mute = i != track && !matches!(t.kind, TrackKind::Group | TrackKind::Fx);
+            if !keep.contains(&i) {
+                t.mute = true;
+                continue;
+            }
+            if spec.target != RenderTarget::Main {
+                t.solo = false;
+                t.mute = false;
+                // Nur Wege, die im Gerenderten bleiben.
+                t.sends.retain(|s| ids.contains(&s.target));
+            }
         }
-        let t = &mut project.tracks[track];
-        t.mute = false;
-        if !with_channel {
-            t.volume_db = 0.0;
-            t.pan = 0.0;
-            t.eq.on = false;
-            t.automation.retain(|l| {
-                !matches!(
-                    l.param,
-                    AutoParam::Volume | AutoParam::Pan | AutoParam::Mute
-                )
-            });
+        if let RenderTarget::Track(target) = spec.target {
+            let t = &mut project.tracks[target];
+            t.output = None;
+            t.out_bus = None;
+            t.sends.clear();
+            if !spec.with_channel {
+                t.volume_db = 0.0;
+                t.pan = 0.0;
+                t.eq.on = false;
+                t.automation.retain(|l| {
+                    !matches!(
+                        l.param,
+                        AutoParam::Volume | AutoParam::Pan | AutoParam::Mute
+                    )
+                });
+            }
+            if !spec.inserts {
+                for slot in &mut t.inserts {
+                    slot.bypass = true;
+                }
+            }
+            project.master_db = 0.0;
+        } else if !spec.with_channel {
+            project.master_db = 0.0;
         }
-        project.master_db = 0.0;
         let samples: HashMap<u32, Arc<[f32]>> = self
             .clips
             .iter()
@@ -69,39 +134,46 @@ impl ProjectWindow {
             .collect();
         let rate = self.sample_rate;
         let mut song = Song::build(&project, &samples, rate);
-        // Nur diese Spur, direkt auf den Ausgang, ohne Sends.
-        song.tracks.retain(|t| t.slot == track);
         for t in &mut song.tracks {
-            t.output = studiocraft_engine::song::Output::Master;
-            t.sends.clear();
-            t.bus = None;
             t.monitor = None;
-        }
-        song.master = 1.0;
-        // Frische Plugin-Kette (Instrument und eingeschaltete Inserts).
-        let mut chain = InsertChain::default();
-        let mut missing = Vec::new();
-        let pt = project.tracks[track].clone();
-        if let Some(slot) = pt.instrument.as_ref().filter(|s| !s.bypass) {
-            match self.instantiate(slot) {
-                Ok(instance) => {
-                    chain.instrument = Some(Insert {
-                        instance,
-                        bypass: false,
-                        model: INSTRUMENT,
-                    })
-                }
-                Err(e) => missing.push(e),
+            // Weitere Ausgangsbusse landen im Gerenderten auf der Summe.
+            if matches!(t.output, studiocraft_engine::song::Output::Hw(_)) {
+                t.output = studiocraft_engine::song::Output::Master;
             }
         }
-        for (k, slot) in pt.inserts.iter().enumerate().filter(|(_, s)| !s.bypass) {
-            match self.instantiate(slot) {
-                Ok(instance) => chain.slots.push(Insert {
-                    instance,
-                    bypass: false,
-                    model: k,
-                }),
-                Err(e) => missing.push(e),
+        // Frische Plugin-Ketten für alle klingenden Spuren.
+        let mut chains = Vec::new();
+        let mut missing = Vec::new();
+        for &i in &keep {
+            let pt = project.tracks[i].clone();
+            if pt.mute {
+                continue;
+            }
+            let mut chain = InsertChain::default();
+            if let Some(slot) = pt.instrument.as_ref().filter(|s| !s.bypass) {
+                match self.instantiate(slot) {
+                    Ok(instance) => {
+                        chain.instrument = Some(Insert {
+                            instance,
+                            bypass: false,
+                            model: INSTRUMENT,
+                        })
+                    }
+                    Err(e) => missing.push(e),
+                }
+            }
+            for (k, slot) in pt.inserts.iter().enumerate().filter(|(_, s)| !s.bypass) {
+                match self.instantiate(slot) {
+                    Ok(instance) => chain.slots.push(Insert {
+                        instance,
+                        bypass: false,
+                        model: k,
+                    }),
+                    Err(e) => missing.push(e),
+                }
+            }
+            if chain.instrument.is_some() || !chain.slots.is_empty() {
+                chains.push((i, chain));
             }
         }
         if !missing.is_empty() {
@@ -112,9 +184,9 @@ impl ProjectWindow {
         let end = tempo.frames(b, rate) + (TAIL_SECONDS * f64::from(rate)) as u64;
         let (mut core, mut ctl) = engine(rate, tempo);
         ctl.send(Command::SetSong(Arc::new(song)));
-        let has_chain = chain.instrument.is_some() || !chain.slots.is_empty();
-        if has_chain {
-            ctl.send(Command::SetInserts(track, Some(Box::new(chain))));
+        let slots: Vec<usize> = chains.iter().map(|(i, _)| *i).collect();
+        for (i, chain) in chains {
+            ctl.send(Command::SetInserts(i, Some(Box::new(chain))));
         }
         ctl.send(Command::Locate(start));
         ctl.send(Command::Play);
@@ -133,12 +205,12 @@ impl ProjectWindow {
         let (mut core, out) = worker
             .join()
             .map_err(|_| "Rendern abgebrochen".to_owned())?;
-        // Kette zurück in den Hauptthread und hier freigeben.
-        if has_chain {
-            ctl.send(Command::SetInserts(track, None));
-            core.process(&mut [0.0; 2]);
-            ctl.collect_garbage();
+        // Ketten zurück in den Hauptthread und hier freigeben.
+        for i in slots {
+            ctl.send(Command::SetInserts(i, None));
         }
+        core.process(&mut [0.0; 2]);
+        ctl.collect_garbage();
         drop(core);
         Ok(out)
     }
@@ -157,14 +229,17 @@ impl ProjectWindow {
             self.message = Some("Rendern: nur Stille".into());
             return;
         }
+        let RenderTarget::Track(source) = spec.target else {
+            return;
+        };
         let before = self.project.clone();
-        let src = &self.project.tracks[spec.track];
+        let src = &self.project.tracks[source];
         let name = format!("{} (gerendert)", src.name);
         let color = src.color;
         let t = self.project.add_track(TrackKind::Audio, &name);
         // Unter die Quelle legen.
         let new = self.project.tracks.remove(t);
-        let at = (spec.track + 1).min(self.project.tracks.len());
+        let at = (source + 1).min(self.project.tracks.len());
         self.project.tracks.insert(at, new);
         self.project.tracks[at].color = color;
         let clip = studiocraft_engine::AudioClip {
@@ -204,11 +279,7 @@ impl ProjectWindow {
                 ] {
                     if ui.button(label).clicked() {
                         ui.close();
-                        self.render_in_place(RenderSpec {
-                            track,
-                            range,
-                            with_channel,
-                        });
+                        self.render_in_place(RenderSpec::track(track, range, with_channel));
                     }
                 }
             });
