@@ -138,9 +138,7 @@ impl crate::ProjectWindow {
             }
             // Stopp mit dem Stopp-Verhalten aus den Einstellungen (zweimal: Anfang/Locator).
             KeypadKey::Digit(0) => self.stop(),
-            KeypadKey::Multiply if p.shift => {
-                self.message = Some("Nachträgliche Aufnahme ist noch nicht verfügbar".into())
-            }
+            KeypadKey::Multiply if p.shift => self.retrospective_record(),
             KeypadKey::Multiply => self.toggle_record(),
             KeypadKey::Decimal => self.locate(0),
             KeypadKey::Digit(1) => self.locate(self.left_locator),

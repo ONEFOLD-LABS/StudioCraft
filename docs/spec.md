@@ -192,6 +192,8 @@ Die Transportleiste unten im Projektfenster bedient Wiedergabe, Aufnahme und Loc
 | Aufnahme im Cycle | Pro Durchgang eine Lane (Takes) | Stacked (je Durchgang ein Part), Mix (alle in einem Part) oder Ersetzen |
 | Nachträgliches Retrospective Record | – | Gespielte Noten ohne Aufnahme nachträglich als Part übernehmen (Umschalt + Nummernblock-Mal) |
 
+Die MIDI-Modi stehen unter Transport → „MIDI-Aufnahme“ (Projekteinstellung; Standard: neuer Part, im Cycle gestapelt). „Nachträgliche Aufnahme“ (Umschalt + Nummernblock-Mal, auch im Menü Transport) übernimmt die zuletzt gespielten, nicht aufgenommenen Noten der Keyboard-Spur als neuen Part: während der Wiedergabe an ihrer Position (im Cycle der letzte Durchgang), im Stopp ab dem Cursor im gespielten Abstand.
+
 **Takes und Lanes:** Takes einer Spur liegen in Lanes unter ihr. Mit dem Comp-Werkzeug wählt man pro Abschnitt den besten Take; die Spur spielt nur die gewählten Abschnitte. Comping kommt nach dem MVP.
 
 **Nummernblock-Belegung**

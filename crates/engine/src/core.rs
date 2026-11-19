@@ -210,6 +210,8 @@ pub struct EngineCore {
     scratch: Box<[f32]>,
     /// Wann der Anfang des aktuellen Blocks hörbar wird (Uhr aus [`crate::clock`]).
     block_played_at: u64,
+    /// Frei laufender Frame-Zähler (zählt immer, auch im Stopp).
+    clock: u64,
     /// Geglättete Audio-Last (siehe [`EngineStatus::load`]).
     load_avg: f32,
 }
@@ -278,6 +280,7 @@ pub fn engine(sample_rate: u32, tempo: TempoMap) -> (EngineCore, EngineControl) 
         meters: meters.clone(),
         scratch: vec![0.0; SCRATCH_FRAMES * 2].into_boxed_slice(),
         block_played_at: 0,
+        clock: 0,
         load_avg: 0.0,
     };
     let control = EngineControl {
@@ -482,7 +485,9 @@ impl EngineCore {
                 continue;
             };
             let recording = self.transport.state == TransportState::Recording;
+            let running = self.transport.is_running();
             let pos = self.transport.cursor;
+            let clock = self.clock;
             let chain = self.inserts.get_mut(track).and_then(|c| c.as_deref_mut());
             match m {
                 MidiMsg::Note { key, velocity, on } => {
@@ -495,21 +500,23 @@ impl EngineCore {
                             *held &= !(1 << key);
                         }
                     }
-                    if recording {
-                        // Pedal gedrückt: das Loslassen erst beim Pedal-Loslassen aufnehmen.
-                        if !on && self.sustain {
-                            self.sustained |= 1 << key;
-                        } else {
-                            if on {
-                                self.sustained &= !(1 << key);
-                            }
-                            let _ = self.midi_rec.push(RecordedMidi {
-                                pos,
-                                key,
-                                velocity,
-                                on,
-                            });
+                    // Jede Note melden (Aufnahme oder nachträgliche Aufnahme). Pedal gedrückt: das
+                    // Loslassen erst beim Pedal-Loslassen.
+                    if !on && self.sustain {
+                        self.sustained |= 1 << key;
+                    } else {
+                        if on {
+                            self.sustained &= !(1 << key);
                         }
+                        let _ = self.midi_rec.push(RecordedMidi {
+                            pos,
+                            key,
+                            velocity,
+                            on,
+                            recording,
+                            running,
+                            clock,
+                        });
                     }
                 }
                 MidiMsg::Other(data) => {
@@ -518,7 +525,7 @@ impl EngineCore {
                     }
                     if data[0] & 0xf0 == 0xb0 && data[1] == crate::midi::SUSTAIN {
                         let down = data[2] >= 64;
-                        if self.sustain && !down && recording {
+                        if self.sustain && !down {
                             for key in 0..128u8 {
                                 if self.sustained & (1 << key) != 0 {
                                     let _ = self.midi_rec.push(RecordedMidi {
@@ -526,6 +533,9 @@ impl EngineCore {
                                         key,
                                         velocity: 0,
                                         on: false,
+                                        recording,
+                                        running,
+                                        clock,
                                     });
                                 }
                             }
@@ -766,6 +776,7 @@ impl EngineCore {
         s.state.store(self.transport.state as u8, Ordering::Relaxed);
         s.cycle.store(self.transport.cycle, Ordering::Relaxed);
         s.blocks.fetch_add(1, Ordering::Relaxed);
+        self.clock = self.clock.wrapping_add((out.len() / 2) as u64);
     }
 }
 
@@ -1097,7 +1108,8 @@ mod tests {
         core.process(&mut [0.0; 8]);
         let r = ctl.recorded_midi.pop().unwrap();
         assert_eq!((r.pos, r.key, r.velocity, r.on), (1004, 60, 90, true));
-        // Ohne Aufnahme wird nichts mitgeschrieben.
+        assert!(r.recording && r.running);
+        // Ohne Aufnahme wird gemeldet, aber nicht als Aufnahme (nachträgliche Aufnahme).
         ctl.send(Command::Stop);
         core.process(&mut [0.0; 8]);
         ctl.midi
@@ -1110,6 +1122,10 @@ mod tests {
             })
             .unwrap();
         core.process(&mut [0.0; 8]);
+        let r = ctl.recorded_midi.pop().unwrap();
+        assert_eq!(r.key, 62);
+        assert!(!r.recording && !r.running);
+        assert!(r.clock > 0, "the free-running clock counts while stopped");
         assert!(ctl.recorded_midi.pop().is_err());
     }
 

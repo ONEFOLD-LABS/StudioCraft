@@ -64,6 +64,9 @@ pub(crate) fn passes(start: u64, frames: u64, cycle: Option<(u64, u64)>) -> Vec<
     out
 }
 
+/// Höchstens so viele nicht aufgenommene Noten für die nachträgliche Aufnahme.
+const RETRO_MAX: usize = 20_000;
+
 impl ProjectWindow {
     pub fn is_recording(&self) -> bool {
         self.recording
@@ -192,10 +195,90 @@ impl ProjectWindow {
         }
         if let Some(t) = &mut self.transport {
             while let Ok(m) = t.recorded_midi.pop() {
-                if self.recording {
+                if self.recording && m.recording {
                     self.midi_take.push(m);
+                } else if !m.recording {
+                    // Für die nachträgliche Aufnahme merken (begrenzt).
+                    if self.retro.len() >= RETRO_MAX {
+                        self.retro.pop_front();
+                    }
+                    self.retro.push_back(m);
                 }
             }
+        }
+    }
+
+    /// Untermenü „MIDI-Aufnahme“: Modus ohne und mit Cycle (Projekteinstellung, Undo).
+    pub(crate) fn record_mode_menu(&mut self, ui: &mut egui::Ui) {
+        ui.menu_button("MIDI-Aufnahme", |ui| {
+            let mut r = self.project.record;
+            ui.label(egui::RichText::new("Über bestehenden Parts").weak());
+            for m in studiocraft_project::MidiRecordMode::ALL {
+                ui.radio_value(&mut r.midi, m, m.label());
+            }
+            ui.separator();
+            ui.label(egui::RichText::new("Im Cycle").weak());
+            for m in studiocraft_project::CycleRecordMode::ALL {
+                ui.radio_value(&mut r.cycle_midi, m, m.label());
+            }
+            if r != self.project.record {
+                let before = self.project.clone();
+                self.project.record = r;
+                self.checkpoint(before);
+            }
+        });
+    }
+
+    /// Nachträgliche Aufnahme (Umschalt + Nummernblock-Mal): die zuletzt gespielten Noten,
+    /// die nicht aufgenommen wurden, als neuer Part auf die Keyboard-Spur. Genommen wird der
+    /// letzte zusammenhängende Abschnitt: während der Wiedergabe an ihrer Position, im Stopp
+    /// ab dem Cursor im gespielten Zeitabstand.
+    pub(crate) fn retrospective_record(&mut self) {
+        self.sync_midi();
+        let Some(track) = self.midi_target() else {
+            self.message = Some("Nachträgliche Aufnahme: keine Instrument-Spur gewählt".into());
+            return;
+        };
+        let Some(last) = self.retro.back().copied() else {
+            self.message = Some("Nachträgliche Aufnahme: nichts gespielt".into());
+            return;
+        };
+        let n = self
+            .retro
+            .iter()
+            .rev()
+            .take_while(|m| m.running == last.running)
+            .count();
+        let mut take: Vec<studiocraft_engine::midi::RecordedMidi> = self
+            .retro
+            .iter()
+            .skip(self.retro.len() - n)
+            .copied()
+            .collect();
+        if !last.running {
+            // Im Stopp stand die Position still: ab dem Cursor im gespielten Abstand.
+            let rate = self.sample_rate;
+            let base = self.project.tempo.frames(self.cursor, rate);
+            let first = take.first().map_or(0, |m| m.clock);
+            for m in &mut take {
+                m.pos = base + m.clock.wrapping_sub(first);
+            }
+        }
+        // Wiedergabe im Cycle kann zurückspringen: dann nur der letzte Durchgang.
+        if let Some(i) = take.windows(2).rposition(|w| w[1].pos < w[0].pos) {
+            take.drain(..=i);
+        }
+        let (start, stop) = (
+            take.iter().map(|m| m.pos).min().unwrap_or(0),
+            take.iter().map(|m| m.pos).max().unwrap_or(0),
+        );
+        let before = self.project.tracks[track].events.len();
+        self.place_midi_take_mode(track, &take, start, stop.max(start + 1), false);
+        if self.project.tracks[track].events.len() > before {
+            self.retro.clear();
+            self.message = None;
+        } else {
+            self.message = Some("Nachträgliche Aufnahme: keine vollständige Note".into());
         }
     }
 
@@ -305,40 +388,59 @@ impl ProjectWindow {
         start: u64,
         stop: u64,
     ) {
+        self.place_midi_take_mode(track, take, start, stop, true);
+    }
+
+    /// Wie [`Self::place_midi_take`]; ohne `with_cycle` gilt der Cycle nicht (nachträgliche
+    /// Aufnahme: immer ein neuer Part).
+    pub(crate) fn place_midi_take_mode(
+        &mut self,
+        track: usize,
+        take: &[studiocraft_engine::midi::RecordedMidi],
+        start: u64,
+        stop: u64,
+        with_cycle: bool,
+    ) {
         let rate = self.sample_rate;
         let tempo = self.project.tempo.clone();
         let ticks = |f: u64| tempo.ticks(f, rate);
-        // Noten aus An/Aus-Paaren; offene Noten enden beim Stopp.
-        let mut open: [Option<(u64, u8)>; 128] = [None; 128];
-        let mut notes: Vec<(u64, u64, u8, u8)> = Vec::new();
+        // Noten aus An/Aus-Paaren; offene Noten enden beim Stopp. Im Cycle beginnt ein neuer
+        // Durchgang, wenn die Position zurückspringt.
+        let mut open: [Option<(u64, u8, u32)>; 128] = [None; 128];
+        let mut notes: Vec<(u64, u64, u8, u8, u32)> = Vec::new();
+        let (mut pass, mut last_pos) = (0u32, 0u64);
         for m in take {
+            if m.pos < last_pos {
+                pass += 1;
+            }
+            last_pos = m.pos;
             let k = usize::from(m.key);
             if m.on {
-                if let Some((s, v)) = open[k].take() {
-                    notes.push((s, m.pos.max(s + 1), m.key, v));
+                if let Some((s, v, p)) = open[k].take() {
+                    notes.push((s, m.pos.max(s + 1), m.key, v, p));
                 }
-                open[k] = Some((m.pos, m.velocity));
-            } else if let Some((s, v)) = open[k].take() {
+                open[k] = Some((m.pos, m.velocity, pass));
+            } else if let Some((s, v, p)) = open[k].take() {
                 // Im Cycle kann das Aus hinter dem Sprung liegen: dann bis zum rechten Locator.
                 let end = if m.pos > s {
                     m.pos
                 } else {
                     tempo.frames(self.right_locator, rate).max(s + 1)
                 };
-                notes.push((s, end, m.key, v));
+                notes.push((s, end, m.key, v, p));
             }
         }
         for (k, o) in open.iter().enumerate() {
-            if let Some((s, v)) = *o {
-                notes.push((s, stop.max(s + 1), k as u8, v));
+            if let Some((s, v, p)) = *o {
+                notes.push((s, stop.max(s + 1), k as u8, v, p));
             }
         }
         if notes.is_empty() {
             return;
         }
         let bar = self.bar_ticks();
-        let (mut part_start, mut part_end) = if self.cycle && self.right_locator > self.left_locator
-        {
+        let cycle = with_cycle && self.cycle && self.right_locator > self.left_locator;
+        let (mut part_start, mut part_end) = if cycle {
             (self.left_locator, self.right_locator)
         } else {
             let first = notes.iter().map(|n| n.0).min().unwrap_or(start).min(start);
@@ -354,33 +456,40 @@ impl ProjectWindow {
         if part_end <= part_start {
             return;
         }
-        let before = self.project.clone();
-        let Some(id) = self
-            .project
-            .create_event(track, part_start, part_end - part_start)
-        else {
-            return;
-        };
-        // Obenauf legen (zuletzt in der Liste) und Noten eintragen.
-        let i = self.project.find(id).map(|(_, i)| i).unwrap_or(0);
-        let mut ev = self.project.tracks[track].events.remove(i);
-        ev.name = format!(
+        let take: Vec<studiocraft_project::TakeNote> = notes
+            .into_iter()
+            .map(
+                |(a, b, key, velocity, pass)| studiocraft_project::TakeNote {
+                    start: ticks(a),
+                    end: ticks(b).max(ticks(a) + 1),
+                    key,
+                    velocity,
+                    pass,
+                },
+            )
+            .collect();
+        let name = format!(
             "{} {:02}",
             self.project.tracks[track].name,
             self.project.tracks[track].events.len() + 1
         );
-        ev.notes = notes
-            .into_iter()
-            .map(|(a, b, key, v)| studiocraft_project::Note {
-                pitch: key,
-                velocity: v.max(1),
-                start: ticks(a) as i64 - part_start as i64,
-                length: ticks(b).saturating_sub(ticks(a)).max(1),
-            })
-            .filter(|n| n.start >= 0 && n.start < (part_end - part_start) as i64)
-            .collect();
-        self.project.tracks[track].events.push(ev);
-        self.selection = vec![id];
+        let before = self.project.clone();
+        let mut settings = self.project.record;
+        if !with_cycle {
+            settings.midi = studiocraft_project::MidiRecordMode::NewPart;
+        }
+        let ids = self.project.place_midi_recording(
+            track,
+            &take,
+            (part_start, part_end),
+            cycle,
+            settings,
+            &name,
+        );
+        if ids.is_empty() {
+            return;
+        }
+        self.selection = ids;
         self.checkpoint(before);
     }
 

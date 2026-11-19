@@ -219,6 +219,8 @@ pub struct ProjectWindow {
     midi_target_sent: Option<Option<usize>>,
     /// Während der Aufnahme gespielte Noten.
     midi_take: Vec<studiocraft_engine::midi::RecordedMidi>,
+    /// Zuletzt gespielte, nicht aufgenommene Noten (nachträgliche Aufnahme).
+    retro: std::collections::VecDeque<studiocraft_engine::midi::RecordedMidi>,
     /// Die laufende Aufnahme schreibt auch Audio.
     audio_recording: bool,
     metronome: bool,
@@ -342,6 +344,7 @@ impl ProjectWindow {
             midi_status: String::new(),
             midi_target_sent: None,
             midi_take: Vec::new(),
+            retro: std::collections::VecDeque::new(),
             audio_recording: false,
             metronome: false,
             range: None,
@@ -5325,7 +5328,110 @@ mod tests {
             key,
             velocity: 100,
             on,
+            recording: true,
+            running: true,
+            clock: pos,
         }
+    }
+
+    fn played(
+        pos: u64,
+        clock: u64,
+        key: u8,
+        on: bool,
+        running: bool,
+    ) -> studiocraft_engine::midi::RecordedMidi {
+        studiocraft_engine::midi::RecordedMidi {
+            pos,
+            key,
+            velocity: 90,
+            on,
+            recording: false,
+            running,
+            clock,
+        }
+    }
+
+    #[test]
+    fn retrospective_record_while_stopped_starts_at_the_cursor() {
+        let mut w = ProjectWindow::new(Project::default(), None, String::new());
+        let t = w.project.add_track(TrackKind::Instrument, "Synth");
+        w.selected_track = Some(t);
+        let bar = w.bar_ticks();
+        w.cursor = 2 * bar;
+        // While stopped the position stands still at 0; the clock runs: 0.5 s apart.
+        w.retro.extend([
+            played(0, 1_000, 60, true, false),
+            played(0, 13_000, 60, false, false),
+            played(0, 25_000, 64, true, false),
+            played(0, 37_000, 64, false, false),
+        ]);
+        w.retrospective_record();
+        let ev = w.project.tracks[t].events.last().expect("a part");
+        let notes: Vec<(u64, u8)> = ev
+            .notes
+            .iter()
+            .map(|n| ((ev.start.0 as i64 + n.start) as u64, n.pitch))
+            .collect();
+        // At 120 BPM, 24 000 frames are one quarter (960 ticks).
+        assert_eq!(notes, [(2 * bar, 60), (2 * bar + 960, 64)]);
+        assert!(w.retro.is_empty(), "taken");
+        assert!(!w.undo.is_empty(), "one undo step");
+    }
+
+    #[test]
+    fn retrospective_record_during_playback_keeps_positions_of_the_last_pass() {
+        let mut w = ProjectWindow::new(Project::default(), None, String::new());
+        let t = w.project.add_track(TrackKind::Instrument, "Synth");
+        w.selected_track = Some(t);
+        // Two cycle passes while playing: the jump back starts the second one.
+        w.retro.extend([
+            played(48_000, 0, 50, true, true),
+            played(60_000, 0, 50, false, true),
+            played(24_000, 0, 62, true, true),
+            played(36_000, 0, 62, false, true),
+        ]);
+        w.retrospective_record();
+        let ev = w.project.tracks[t].events.last().expect("a part");
+        let pitches: Vec<u8> = ev.notes.iter().map(|n| n.pitch).collect();
+        assert_eq!(pitches, [62], "only the last pass");
+        assert_eq!((ev.start.0 as i64 + ev.notes[0].start) as u64, 960);
+        // Nothing played: a message, no part.
+        w.retrospective_record();
+        assert_eq!(w.project.tracks[t].events.len(), 1);
+        assert!(
+            w.message
+                .as_deref()
+                .is_some_and(|m| m.contains("nichts gespielt"))
+        );
+    }
+
+    #[test]
+    fn the_midi_record_menu_sets_the_modes() {
+        let (w, _) = one_event_window();
+        let mut h = window_harness(w);
+        h.get_by_label("Transport").click();
+        h.run_steps(2);
+        h.get_by_label("MIDI-Aufnahme").click();
+        h.run_steps(2);
+        h.get_by_label("Mischen").click();
+        h.run_steps(2);
+        assert_eq!(
+            h.state().project.record.midi,
+            studiocraft_project::MidiRecordMode::Merge
+        );
+        if h.query_by_label("Mix").is_none() {
+            h.get_by_label("Transport").click();
+            h.run_steps(2);
+            h.get_by_label("MIDI-Aufnahme").click();
+            h.run_steps(2);
+        }
+        h.get_by_label("Mix").click();
+        h.run_steps(2);
+        assert_eq!(
+            h.state().project.record.cycle_midi,
+            studiocraft_project::CycleRecordMode::Mix
+        );
     }
 
     #[test]
