@@ -743,7 +743,7 @@ fn scroll_and_zoom(
 
 /// Während der Wiedergabe blättert die Ansicht mit, wenn der Cursor rechts hinausläuft.
 fn follow_cursor(w: &mut ProjectWindow, lanes: Rect) {
-    if !w.is_playing() {
+    if !w.is_playing() || !w.follow_playback {
         return;
     }
     let visible = f64::from(lanes.width() / w.view.px_per_quarter) * TPQ;

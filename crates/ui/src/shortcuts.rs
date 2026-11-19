@@ -95,6 +95,11 @@ pub(crate) enum EditCommand {
     ZoomToProject,
     PrevTrack,
     NextTrack,
+    /// Umschalt+Pfeil hoch/runter: gewählte Noten eine Oktave höher/tiefer (Key-Editor).
+    OctaveUp,
+    OctaveDown,
+    /// F: Projektfenster und Editor folgen der Wiedergabe.
+    ToggleFollow,
     PrevEvent,
     NextEvent,
     Mute,
@@ -123,6 +128,10 @@ impl ProjectWindow {
             EditCommand::Paste if self.key_editor_active() => self.paste_notes(),
             EditCommand::PrevTrack if self.key_editor_active() => self.transpose_notes(1),
             EditCommand::NextTrack if self.key_editor_active() => self.transpose_notes(-1),
+            EditCommand::OctaveUp if self.key_editor_active() => self.transpose_notes(12),
+            EditCommand::OctaveDown if self.key_editor_active() => self.transpose_notes(-12),
+            EditCommand::OctaveUp | EditCommand::OctaveDown => {}
+            EditCommand::ToggleFollow => self.follow_playback = !self.follow_playback,
             EditCommand::Copy => self.copy_selection(),
             EditCommand::Cut => {
                 self.copy_selection();
