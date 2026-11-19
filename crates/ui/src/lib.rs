@@ -7,6 +7,7 @@
 mod automation_panel;
 mod automation_write;
 mod colors;
+mod eq_ui;
 mod focus;
 mod icons;
 mod infoline;
@@ -1036,13 +1037,16 @@ impl ProjectWindow {
                 .default_open(false)
                 .show(ui, |ui| self.automation_ui(ui, idx));
         }
-        for section in ["EQ", "Notizen"] {
-            egui::CollapsingHeader::new(section)
+        if crate::mixer::has_channel(self.project.tracks[idx].kind) {
+            egui::CollapsingHeader::new("EQ")
                 .default_open(false)
-                .show(ui, |ui| {
-                    ui.weak("Kommt mit dem Mixer");
-                });
+                .show(ui, |ui| self.eq_ui(ui, idx));
         }
+        egui::CollapsingHeader::new("Notizen")
+            .default_open(false)
+            .show(ui, |ui| {
+                ui.weak("Kommt später");
+            });
     }
 
     /// Transportleiste (docs/ui-parity.md, „Transportleiste“): Locatoren mit Punch und Cycle,
@@ -2171,6 +2175,34 @@ mod tests {
         assert!(h.query_by_label("Last –").is_none());
         // Without the status line, messages show in the transport bar.
         h.get_by_label("Datei fehlt");
+    }
+
+    #[test]
+    fn eq_section_shapes_the_curve_and_saves_with_the_project() {
+        let mut w = ProjectWindow::new(Project::demo(4), None, "kein Audio (Test)".into());
+        w.selected_track = Some(0);
+        w.project.tracks[0].eq.bands[1].gain = 6.0;
+        w.project.tracks[0].eq.bands[0].kind = studiocraft_project::BandKind::LowCut;
+        w.project.tracks[0].eq.bands[3].gain = -4.0;
+        let mut h = Harness::builder()
+            .with_size(egui::vec2(1400.0, 1000.0))
+            .with_step_dt(1.0 / 60.0)
+            .wgpu()
+            .build_ui_state(|ui, w: &mut ProjectWindow| w.ui(ui), w);
+        h.run_steps(2);
+        h.get_by_label("EQ").click();
+        h.run_steps(3);
+        // The section is open: band 2's gain field is there, labelled "dB".
+        assert!(h.query_all_by_label("dB").count() >= 4);
+        if let (Ok(dir), Ok(img)) = (std::env::var("STUDIOCRAFT_SHOTS"), h.render()) {
+            img.save(std::path::Path::new(&dir).join("eq.png")).unwrap();
+        }
+        h.get_by_label("EQ an").click();
+        h.run_steps(2);
+        assert!(!h.state().project.tracks[0].eq.on);
+        let json = studiocraft_project::file::to_json(&h.state().project);
+        let back = studiocraft_project::file::from_json(&json).unwrap();
+        assert_eq!(back.tracks[0].eq, h.state().project.tracks[0].eq);
     }
 
     #[test]

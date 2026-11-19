@@ -5,12 +5,14 @@
 //! [`TempoMap`] in Sekunden umgerechnet.
 
 pub mod automation;
+pub mod eq;
 pub mod file;
 pub mod model;
 pub mod quantize;
 pub mod time;
 
 pub use automation::{AutoParam, AutoPoint, AutomationLane};
+pub use eq::{BandKind, ChannelEq, EQ_FREQ, EQ_GAIN, EQ_Q, EqBand};
 pub use model::{
     ClipId, Event, EventId, InsertSlot, MAX_DB, MIN_DB, Note, PoolClip, Project, SendSlot,
     TRACK_COLORS, TimeBase, Track, TrackId, TrackInput, TrackKind, db_to_gain,

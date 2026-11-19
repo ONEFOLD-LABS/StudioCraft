@@ -139,6 +139,9 @@ pub struct Track {
     /// Automationsspuren (Spec „Automation“).
     #[serde(default)]
     pub automation: Vec<crate::AutomationLane>,
+    /// Kanal-EQ (4 Bänder); Standard: neutral, wird dann nicht gespeichert.
+    #[serde(default, skip_serializing_if = "crate::ChannelEq::is_default")]
+    pub eq: crate::ChannelEq,
     /// Fader in dB; [`MIN_DB`] und darunter gilt als −∞.
     pub volume_db: f32,
     /// Panorama: −1 links, 0 Mitte, +1 rechts (Stereo-Balance).
@@ -490,6 +493,7 @@ impl Project {
                 time_base: None,
                 show_lanes: false,
                 automation: Vec::new(),
+                eq: crate::ChannelEq::default(),
                 volume_db: 0.0,
                 pan: 0.0,
                 input: TrackInput::default(),
@@ -834,6 +838,7 @@ impl Project {
             time_base: None,
             show_lanes: false,
             automation: Vec::new(),
+            eq: crate::ChannelEq::default(),
             volume_db: 0.0,
             pan: 0.0,
             input: TrackInput::default(),

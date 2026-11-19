@@ -198,6 +198,8 @@ pub struct EngineCore {
     auto_gain: [Box<[f32]>; 2],
     /// Faktor pro Frame eines automatisierten Sends.
     send_gain: Box<[f32]>,
+    /// Filterzustände des Kanal-EQs je Projektspur, vorab angelegt.
+    eq_state: Vec<crate::eq::EqState>,
     /// Gehaltene Noten je Spur (Bit = Tonhöhe), für „alle Noten aus“.
     held: Vec<u128>,
     /// Beim nächsten Block alle gehaltenen Noten beenden (Stopp, Sprung, Cycle).
@@ -274,6 +276,7 @@ pub fn engine(sample_rate: u32, tempo: TempoMap) -> (EngineCore, EngineControl) 
             vec![0.0; SCRATCH_FRAMES].into(),
         ],
         send_gain: vec![0.0; SCRATCH_FRAMES].into(),
+        eq_state: vec![Default::default(); MAX_METERED_TRACKS],
         status: status.clone(),
         meters: meters.clone(),
         scratch: vec![0.0; SCRATCH_FRAMES * 2].into_boxed_slice(),
@@ -631,6 +634,12 @@ impl EngineCore {
                         f[1] = pr[i];
                     }
                 }
+                // Kanal-EQ hinter den Inserts, vor Sends und Fader.
+                if !track.eq.is_empty()
+                    && let Some(state) = self.eq_state.get_mut(track.slot)
+                {
+                    crate::eq::process(&track.eq, state, tmp);
+                }
                 // Sends vor dem Fader.
                 for send in track.sends.iter().filter(|s| s.pre_fader) {
                     let sg = &mut self.send_gain[..frames];
@@ -906,6 +915,30 @@ mod tests {
         // An empty block has no duration: the value stays as it was.
         core.process(&mut []);
         assert_eq!(ctl.status.load(), l);
+    }
+
+    #[test]
+    fn channel_eq_shapes_the_track_before_the_fader() {
+        let mut eq = studiocraft_project::ChannelEq::default();
+        eq.bands[2].gain = 6.0;
+        eq.bands[2].freq = 1000.0;
+        let samples: Vec<f32> = (0..48_000)
+            .flat_map(|i| {
+                let v = (std::f32::consts::TAU * 1000.0 * i as f32 / 48_000.0).sin() * 0.25;
+                [v, v]
+            })
+            .collect();
+        let mut song = Song::single(samples.into());
+        song.tracks[0].eq = crate::eq::design(&eq, 48_000);
+        let (mut core, mut ctl) = engine(48_000, TempoMap::default());
+        ctl.send(Command::SetSong(Arc::new(song)));
+        ctl.send(Command::Play);
+        let mut out = vec![0.0f32; 2 * 4800];
+        for _ in 0..5 {
+            core.process(&mut out);
+        }
+        let peak = out.chunks(2).map(|f| f[0].abs()).fold(0.0, f32::max);
+        assert!((peak - 0.5).abs() < 0.01, "{peak}");
     }
 
     #[test]

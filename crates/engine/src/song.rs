@@ -74,6 +74,8 @@ pub struct PlayTrack {
     pub monitor: Option<(u16, bool)>,
     /// Automation (nur mit R und wirksamen Kurven).
     pub auto: Option<Box<crate::automation::TrackAuto>>,
+    /// Kanal-EQ: wirksame Bänder (Platz im EQ, Filter); leer, wenn er nichts ändert.
+    pub eq: Vec<(usize, crate::eq::Biquad)>,
 }
 
 /// Ziel des Ausgangs einer Spur.
@@ -226,6 +228,7 @@ impl Song {
                         notes,
                         monitor,
                         auto,
+                        eq: crate::eq::design(&t.eq, rate),
                         ..Default::default()
                     },
                 )
