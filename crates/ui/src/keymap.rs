@@ -43,6 +43,8 @@ pub(crate) enum Cmd {
     GotoMarker(u32),
     /// Makro in diesem Platz (1–[`MACROS`]): mehrere Befehle nacheinander.
     Macro(u8),
+    /// Benanntes Fensterlayout in diesem Platz abrufen (1–9).
+    Layout(u8),
 }
 
 /// Anzahl der Makroplätze.
@@ -564,6 +566,69 @@ pub(crate) const COMMANDS: &[CommandInfo] = &[
         "Marker",
         []
     ),
+    cmd!(
+        Cmd::Layout(1),
+        "window.layout_1",
+        "Layout 1",
+        "Fenster",
+        [k(CA, Key::Num1)]
+    ),
+    cmd!(
+        Cmd::Layout(2),
+        "window.layout_2",
+        "Layout 2",
+        "Fenster",
+        [k(CA, Key::Num2)]
+    ),
+    cmd!(
+        Cmd::Layout(3),
+        "window.layout_3",
+        "Layout 3",
+        "Fenster",
+        [k(CA, Key::Num3)]
+    ),
+    cmd!(
+        Cmd::Layout(4),
+        "window.layout_4",
+        "Layout 4",
+        "Fenster",
+        [k(CA, Key::Num4)]
+    ),
+    cmd!(
+        Cmd::Layout(5),
+        "window.layout_5",
+        "Layout 5",
+        "Fenster",
+        [k(CA, Key::Num5)]
+    ),
+    cmd!(
+        Cmd::Layout(6),
+        "window.layout_6",
+        "Layout 6",
+        "Fenster",
+        [k(CA, Key::Num6)]
+    ),
+    cmd!(
+        Cmd::Layout(7),
+        "window.layout_7",
+        "Layout 7",
+        "Fenster",
+        [k(CA, Key::Num7)]
+    ),
+    cmd!(
+        Cmd::Layout(8),
+        "window.layout_8",
+        "Layout 8",
+        "Fenster",
+        [k(CA, Key::Num8)]
+    ),
+    cmd!(
+        Cmd::Layout(9),
+        "window.layout_9",
+        "Layout 9",
+        "Fenster",
+        [k(CA, Key::Num9)]
+    ),
     cmd!(Cmd::Macro(1), "macro.1", "Makro 1", "Makros", []),
     cmd!(Cmd::Macro(2), "macro.2", "Makro 2", "Makros", []),
     cmd!(Cmd::Macro(3), "macro.3", "Makro 3", "Makros", []),
@@ -941,12 +1006,21 @@ impl crate::ProjectWindow {
                     self.lower = LowerZone::Mixer;
                 }
             }
-            Cmd::ToggleInspector => self.show_inspector = !self.show_inspector,
+            // Alt+I: Inspector-Spalte; ist die linke Zone zu, öffnet sie mit Inspector.
+            Cmd::ToggleInspector => {
+                if self.show_inspector {
+                    self.show_inspector_column = !self.show_inspector_column;
+                } else {
+                    self.show_inspector = true;
+                    self.show_inspector_column = true;
+                }
+            }
             Cmd::ToggleRightZone => self.show_right = !self.show_right,
             Cmd::InsertMarker => self.insert_marker(),
             Cmd::CycleMarkerFromLocators => self.cycle_marker_from_locators(),
             Cmd::GotoMarker(id) => self.locate_marker(id),
             Cmd::Macro(slot) => self.run_macro(ui, slot),
+            Cmd::Layout(slot) => self.recall_layout(slot),
         }
     }
 

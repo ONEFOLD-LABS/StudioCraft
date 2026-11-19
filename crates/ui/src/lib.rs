@@ -30,6 +30,7 @@ mod inserts;
 mod keyeditor;
 mod keymap;
 pub mod keypad;
+mod layouts_ui;
 mod macros;
 mod markers_ui;
 mod menu;
@@ -70,6 +71,16 @@ pub struct LoadedClip {
 
 pub use tools::{Grid, Tool};
 
+/// Standardgrößen der Zonen in Punkten (gilt, solange im Projekt 0 steht).
+const LEFT_DEFAULT: f32 = 200.0 + mixer::COLUMN_W;
+const RIGHT_DEFAULT: f32 = 240.0;
+const LOWER_DEFAULT: f32 = 300.0;
+
+/// Gespeicherte Zonengröße oder, bei 0, der Standard.
+fn layout_size(saved: f32, default: f32) -> f32 {
+    if saved > 0.0 { saved } else { default }
+}
+
 /// Der Zustand des Projektfensters.
 pub struct ProjectWindow {
     pub project: Project,
@@ -87,6 +98,16 @@ pub struct ProjectWindow {
     /// Offene Farbpalette (Klick auf die Farbleiste im Spurkopf) und ihr Alter in Bildern.
     color_popup: Option<(colors::Target, egui::Pos2)>,
     color_popup_age: u8,
+    /// Inspector-Spalte in der linken Zone (Alt+I); die Zone selbst ist `show_inspector`
+    /// (Alt+L).
+    show_inspector_column: bool,
+    /// Zählt angewandte Layouts: Teil der Panel-Kennungen, damit gespeicherte Größen nach
+    /// dem Laden oder Abrufen eines Layouts greifen.
+    layout_gen: u32,
+    /// Größe der linken, rechten und unteren Zone im letzten Bild.
+    zone_sizes: [Option<f32>; 3],
+    /// Eingabefeld für den Namen eines neuen Layouts (Menü Ansicht → Layouts).
+    layout_name: String,
     /// Modus der Objektauswahl beim Ziehen am Rand (Rechtsklick auf das Werkzeug).
     resize_mode: tools::ResizeMode,
     /// Wiedergabe-Werkzeug bei gedrückter Maustaste (Spec „Werkzeuge“, Taste 9).
@@ -236,6 +257,10 @@ impl ProjectWindow {
             grid_zoom: false,
             color_popup: None,
             color_popup_age: 0,
+            show_inspector_column: true,
+            layout_gen: 0,
+            zone_sizes: [None; 3],
+            layout_name: String::new(),
             resize_mode: tools::ResizeMode::default(),
             audition: None,
             tool_palette: None,
@@ -314,6 +339,7 @@ impl ProjectWindow {
             sent_tempo: None,
             tempo_before: None,
         };
+        w.apply_layout(w.project.layout.clone());
         w.saved = Some(w.project.clone());
         w.send_locators();
         w
@@ -437,15 +463,91 @@ impl ProjectWindow {
 
     pub fn undo(&mut self) {
         if let Some(prev) = self.undo.pop() {
+            let keep = self.window_state();
             self.redo.push(std::mem::replace(&mut self.project, prev));
+            self.restore_window_state(keep);
             self.after_history_step();
         }
     }
 
     pub fn redo(&mut self) {
         if let Some(next) = self.redo.pop() {
+            let keep = self.window_state();
             self.undo.push(std::mem::replace(&mut self.project, next));
+            self.restore_window_state(keep);
             self.after_history_step();
+        }
+    }
+
+    /// Fensterlayout und benannte Layouts gehören nicht zum Undo-Verlauf: Undo und Redo
+    /// lassen sie, wie sie gerade sind.
+    fn window_state(
+        &self,
+    ) -> (
+        studiocraft_project::WindowLayout,
+        Vec<studiocraft_project::NamedLayout>,
+    ) {
+        (self.project.layout.clone(), self.project.layouts.clone())
+    }
+
+    fn restore_window_state(
+        &mut self,
+        (layout, layouts): (
+            studiocraft_project::WindowLayout,
+            Vec<studiocraft_project::NamedLayout>,
+        ),
+    ) {
+        self.project.layout = layout;
+        self.project.layouts = layouts;
+    }
+
+    /// Übernimmt `layout` in die Zonen (nach dem Laden oder Abrufen eines Layouts). Die
+    /// Panels bekommen neue Kennungen, damit die gespeicherten Größen greifen.
+    pub(crate) fn apply_layout(&mut self, layout: studiocraft_project::WindowLayout) {
+        self.show_inspector = layout.left;
+        self.show_inspector_column = layout.inspector;
+        self.show_lower = layout.lower;
+        self.show_right = layout.right;
+        self.show_transport = layout.transport;
+        self.project.layout = layout;
+        self.layout_gen = self.layout_gen.wrapping_add(1);
+    }
+
+    /// Schreibt Sichtbarkeit und Größen der Zonen ins Projekt, wenn sie sich geändert haben.
+    /// Eine Größe zählt nur, wenn sie sich bei gedrückter Maustaste ändert (Trenner ziehen):
+    /// Zonen, die mit ihrem Inhalt wachsen, machen ein Projekt nicht „geändert“.
+    fn capture_layout(&mut self, zones: &focus::ZoneRects, dragging: bool) {
+        let measured = [
+            zones
+                .left
+                .filter(|_| self.show_inspector_column)
+                .map(|r| r.width()),
+            zones.right.map(|r| r.width()),
+            zones.lower.map(|r| r.height()),
+        ];
+        let old = self.project.layout.clone();
+        let mut sizes = [old.left_width, old.right_width, old.lower_height];
+        for (k, m) in measured.iter().enumerate() {
+            if let (Some(m), Some(prev)) = (m, self.zone_sizes[k])
+                && dragging
+                && (m - prev).abs() > 0.5
+            {
+                sizes[k] = m.round();
+            }
+        }
+        self.zone_sizes = measured;
+        let new = studiocraft_project::WindowLayout {
+            left: self.show_inspector,
+            inspector: self.show_inspector_column,
+            lower: self.show_lower,
+            right: self.show_right,
+            transport: self.show_transport,
+            left_width: sizes[0],
+            right_width: sizes[1],
+            lower_height: sizes[2],
+        };
+        if new != old {
+            self.project.layout = new;
         }
     }
 
@@ -719,9 +821,9 @@ impl ProjectWindow {
         }
         let mut zones = focus::ZoneRects::default();
         if self.show_lower {
-            let r = egui::Panel::bottom("untere-zone")
+            let r = egui::Panel::bottom(("untere-zone", self.layout_gen))
                 .resizable(true)
-                .default_size(300.0)
+                .default_size(layout_size(self.project.layout.lower_height, LOWER_DEFAULT))
                 .min_size(200.0)
                 .show(ui, |ui| {
                     // Reiter am unteren Rand der Zone, Inhalt darüber (docs/ui-parity.md).
@@ -755,19 +857,29 @@ impl ProjectWindow {
             zones.lower = Some(r.response.rect);
         }
         if self.show_right {
-            let r = egui::Panel::right("rechte-zone")
+            let r = egui::Panel::right(("rechte-zone", self.layout_gen))
                 .resizable(true)
-                .default_size(240.0)
+                .default_size(layout_size(self.project.layout.right_width, RIGHT_DEFAULT))
                 .show(ui, |ui| rightzone::show(self, ui));
             zones.right = Some(r.response.rect);
         }
         if self.show_inspector {
             // Linke Zone in zwei Spalten: Kanalzug der gewählten Spur, daneben der
             // Inspector (docs/ui-parity.md, „Linke Zone“).
-            let r = egui::Panel::left("inspector")
-                .resizable(true)
-                .default_size(200.0 + mixer::COLUMN_W)
-                .min_size(200.0 + mixer::COLUMN_W)
+            // Ohne Inspector-Spalte bleibt nur der Kanalzug: schmale Zone mit eigener Kennung.
+            let column = self.show_inspector_column;
+            let (default, min) = if column {
+                (
+                    layout_size(self.project.layout.left_width, LEFT_DEFAULT),
+                    LEFT_DEFAULT,
+                )
+            } else {
+                (mixer::COLUMN_W + 8.0, mixer::COLUMN_W + 8.0)
+            };
+            let r = egui::Panel::left(("inspector", column, self.layout_gen))
+                .resizable(column)
+                .default_size(default)
+                .min_size(min)
                 .show(ui, |ui| {
                     let height = ui.available_height();
                     ui.horizontal_top(|ui| {
@@ -775,16 +887,20 @@ impl ProjectWindow {
                             ui.set_min_height(height);
                             mixer::channel_column(self, ui);
                         });
-                        ui.separator();
-                        ui.vertical(|ui| {
-                            egui::ScrollArea::vertical().show(ui, |ui| self.inspector(ui));
-                        });
+                        if column {
+                            ui.separator();
+                            ui.vertical(|ui| {
+                                egui::ScrollArea::vertical().show(ui, |ui| self.inspector(ui));
+                            });
+                        }
                     });
                 });
             zones.left = Some(r.response.rect);
         }
         let r = egui::CentralPanel::default().show(ui, |ui| timeline::show(self, ui));
         zones.project = Some(r.response.rect);
+        let dragging = ui.input(|i| i.pointer.primary_down());
+        self.capture_layout(&zones, dragging);
         self.update_focus(ui.ctx(), zones);
         quantize::panel(self, ui.ctx());
         self.color_popup(ui.ctx());
@@ -938,7 +1054,7 @@ impl ProjectWindow {
                     Icon::ZoneLeft,
                     self.show_inspector,
                     Some(t.accent),
-                    "Linke Zone (Alt+I)",
+                    "Linke Zone (Alt+L)",
                 )
                 .clicked()
                 {
@@ -3359,7 +3475,7 @@ mod tests {
         h.get_by_label("Snap an/aus (J)").click();
         h.run_steps(2);
         assert!(!h.state().snap);
-        h.get_by_label("Linke Zone (Alt+I)").click();
+        h.get_by_label("Linke Zone (Alt+L)").click();
         h.run_steps(2);
         assert!(!h.state().show_inspector);
         h.get_by_label("Untere Zone").click();
@@ -3670,6 +3786,127 @@ mod tests {
             "{:?}",
             ev.notes
         );
+    }
+
+    #[test]
+    fn saved_layout_sets_zone_sizes_and_does_not_mark_the_project_modified() {
+        let (w, _) = one_event_window();
+        let mut p = w.project.clone();
+        p.layout.right = true;
+        p.layout.right_width = 400.0;
+        p.layout.lower = false;
+        // Opening a project goes through the same path as `new`: apply the layout, then
+        // remember the state as saved.
+        let w = ProjectWindow::new(p, None, String::new());
+        let mut h = window_harness(w);
+        h.run_steps(3);
+        assert!(h.state().show_right && !h.state().show_lower);
+        let right = h.get_by_label("Start").rect();
+        let window_w = 1400.0;
+        assert!(
+            right.left() > window_w - 400.0 - 20.0,
+            "right zone uses the saved width: {right:?}"
+        );
+        assert!(
+            !h.state().is_modified(),
+            "opening does not count as a change: {:?} vs {:?}",
+            h.state().project.layout,
+            h.state().saved.as_ref().map(|p| &p.layout)
+        );
+        // Hiding a zone is a change that gets saved with the project.
+        h.state_mut().show_right = false;
+        h.run_steps(2);
+        assert!(!h.state().project.layout.right);
+        assert!(h.state().is_modified());
+        let json = studiocraft_project::file::to_json(&h.state().project);
+        let back = studiocraft_project::file::from_json(&json).unwrap();
+        assert_eq!(back.layout, h.state().project.layout);
+    }
+
+    #[test]
+    fn dragging_a_zone_divider_saves_its_size() {
+        let (mut w, _) = one_event_window();
+        w.show_right = true;
+        let mut h = window_harness(w);
+        h.run_steps(2);
+        // The divider sits on the left edge of the right zone (its tab row starts there).
+        let edge = h.get_by_label("Start").rect().left() - 8.0;
+        let y = 400.0;
+        let (a, b) = (egui::pos2(edge, y), egui::pos2(edge - 100.0, y));
+        drag_with(&mut h, a, b, egui::Modifiers::NONE, egui::Modifiers::NONE);
+        let width = h.state().project.layout.right_width;
+        assert!(width > 300.0, "divider drag widens the right zone: {width}");
+    }
+
+    #[test]
+    fn named_layouts_are_saved_and_recalled_by_shortcut() {
+        let (mut w, _) = one_event_window();
+        w.show_right = true;
+        w.show_lower = false;
+        let mut h = window_harness(w);
+        h.run_steps(2);
+        h.state_mut().save_layout("Mischen");
+        assert_eq!(h.state().project.layouts.len(), 1);
+        // Change the zones, then recall slot 1 with Ctrl+Alt+1.
+        h.state_mut().show_right = false;
+        h.state_mut().show_lower = true;
+        h.run_steps(2);
+        h.key_press_modifiers(egui::Modifiers::COMMAND | egui::Modifiers::ALT, Key::Num1);
+        h.run_steps(2);
+        assert!(h.state().show_right && !h.state().show_lower);
+        // An empty slot only reports it.
+        h.key_press_modifiers(egui::Modifiers::COMMAND | egui::Modifiers::ALT, Key::Num5);
+        h.run_steps(1);
+        assert_eq!(
+            h.state().message.as_deref(),
+            Some("Layout 5 ist nicht belegt")
+        );
+        // Same name replaces; at most nine layouts.
+        h.state_mut().save_layout("Mischen");
+        for k in 0..12 {
+            h.state_mut().save_layout(&format!("L{k}"));
+        }
+        assert_eq!(
+            h.state().project.layouts.len(),
+            studiocraft_project::layout::MAX_LAYOUTS
+        );
+        // Layouts survive saving and loading.
+        let json = studiocraft_project::file::to_json(&h.state().project);
+        let back = studiocraft_project::file::from_json(&json).unwrap();
+        assert_eq!(back.layouts, h.state().project.layouts);
+    }
+
+    #[test]
+    fn alt_l_toggles_the_left_zone_and_alt_i_the_inspector_column() {
+        let (w, _) = one_event_window();
+        let mut h = window_harness(w);
+        h.key_press_modifiers(egui::Modifiers::ALT, Key::I);
+        h.run_steps(2);
+        assert!(h.state().show_inspector && !h.state().show_inspector_column);
+        assert!(
+            h.query_by_label("Name").is_none(),
+            "inspector column hidden"
+        );
+        h.key_press_modifiers(egui::Modifiers::ALT, Key::L);
+        h.run_steps(2);
+        assert!(!h.state().show_inspector);
+        // Alt+I on a hidden left zone opens it with the inspector.
+        h.key_press_modifiers(egui::Modifiers::ALT, Key::I);
+        h.run_steps(2);
+        assert!(h.state().show_inspector && h.state().show_inspector_column);
+    }
+
+    #[test]
+    fn undo_leaves_the_window_layout_alone() {
+        let (mut w, id) = one_event_window();
+        let before = w.project.clone();
+        w.project.delete(id);
+        w.checkpoint(before);
+        w.project.layout.right = true;
+        w.show_right = true;
+        w.undo();
+        assert!(w.project.event(id).is_some());
+        assert!(w.project.layout.right && w.show_right);
     }
 
     #[test]

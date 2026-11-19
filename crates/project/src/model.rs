@@ -458,6 +458,12 @@ pub struct Project {
     /// Marker und Cycle-Marker, nach Position sortiert (siehe `markers.rs`).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub markers: Vec<crate::Marker>,
+    /// Sichtbarkeit und Größe der Zonen (Spec „Fenster-Architektur“).
+    #[serde(default)]
+    pub layout: crate::WindowLayout,
+    /// Benannte Fensterlayouts, abrufbar per Taste.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub layouts: Vec<crate::NamedLayout>,
 }
 
 /// Farben neuer Spuren, reihum; auch die Palette der Farbauswahl.
@@ -482,6 +488,8 @@ impl Default for Project {
             next_id: 1,
             next_track_id: 1,
             markers: Vec::new(),
+            layout: crate::WindowLayout::default(),
+            layouts: Vec::new(),
         }
     }
 }
