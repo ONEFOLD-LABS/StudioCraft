@@ -6,6 +6,7 @@
 
 mod automation_panel;
 mod automation_write;
+mod colors;
 mod focus;
 mod icons;
 mod infoline;
@@ -62,6 +63,9 @@ pub struct ProjectWindow {
     grid: Grid,
     /// „An Zoom anpassen“: musikalisches Raster beim Einzoomen verfeinern.
     grid_zoom: bool,
+    /// Offene Farbpalette (Klick auf die Farbleiste im Spurkopf) und ihr Alter in Bildern.
+    color_popup: Option<(colors::Target, egui::Pos2)>,
+    color_popup_age: u8,
     /// Globaler Quantisierungswert mit Swing und Stärke (Taste Q).
     quantize: studiocraft_project::Quantize,
     /// Automation schreiben: Modus, Ausdünnen, laufende Durchgänge.
@@ -175,6 +179,8 @@ impl ProjectWindow {
             snap_mode: tools::SnapMode::Grid,
             grid: Grid::Beat,
             grid_zoom: false,
+            color_popup: None,
+            color_popup_age: 0,
             quantize: studiocraft_project::Quantize::default(),
             auto_writer: automation_write::AutomationWriter::default(),
             show_quantize: false,
@@ -730,6 +736,7 @@ impl ProjectWindow {
         zones.project = Some(r.response.rect);
         self.update_focus(ui.ctx(), zones);
         quantize::panel(self, ui.ctx());
+        self.color_popup(ui.ctx());
 
         self.sync_tempo();
         let playing = self.is_playing();
@@ -1803,6 +1810,63 @@ mod tests {
             w.project.comp(a, 2 * bar, 4 * bar);
             w.project.tracks[0].show_lanes = true;
             w.tool = Tool::Comp;
+        });
+    }
+
+    #[test]
+    fn colour_strip_opens_the_palette_and_events_follow_the_track() {
+        let (w, id) = one_event_window();
+        let mut h = window_harness(w);
+        let strip = {
+            let w = h.state();
+            egui::pos2(
+                w.lanes_rect.left() - 290.0 + 2.0,
+                w.lanes_rect.top() + w.view.row_h / 2.0,
+            )
+        };
+        h.event(egui::Event::PointerMoved(strip));
+        h.run_steps(1);
+        for pressed in [true, false] {
+            h.event(egui::Event::PointerButton {
+                pos: strip,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            });
+        }
+        h.run_steps(2);
+        assert!(h.state().color_popup.is_some());
+        h.get_by_label("Blau").click();
+        h.run_steps(2);
+        let blue = studiocraft_project::TRACK_COLORS[5];
+        let w = h.state();
+        assert_eq!(w.project.tracks[0].color, blue);
+        assert!(w.color_popup.is_none());
+        let ev = w.project.event(id).unwrap();
+        assert_eq!(
+            ev.color_on(&w.project.tracks[0]),
+            blue,
+            "the event follows its track"
+        );
+        // An own colour sticks; "Spurfarbe übernehmen" goes back to the track's.
+        let w = h.state_mut();
+        w.selection = vec![id];
+        w.set_event_color(Some([1, 2, 3]));
+        assert_eq!(w.project.event(id).unwrap().color, Some([1, 2, 3]));
+        w.set_event_color(None);
+        assert_eq!(w.project.event(id).unwrap().color, None);
+        w.undo();
+        assert_eq!(w.project.event(id).unwrap().color, Some([1, 2, 3]));
+    }
+
+    #[test]
+    fn renders_colour_palette_and_event_colours() {
+        shot("farben", |w| {
+            let first = w.project.tracks[0].events[1].id;
+            w.selection = vec![first];
+            w.set_event_color(Some(studiocraft_project::TRACK_COLORS[3]));
+            w.selection.clear();
+            w.open_color_popup(colors::Target::Track(0), egui::pos2(260.0, 150.0));
         });
     }
 

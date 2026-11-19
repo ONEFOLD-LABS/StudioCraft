@@ -70,6 +70,9 @@ pub struct Event {
     /// das spätere in der Liste.
     #[serde(default, skip_serializing_if = "is_zero")]
     pub comp: u32,
+    /// Eigene Farbe; `None`: die Farbe der Spur (Spec „Farbe“: neue Events erben sie).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color: Option<[u8; 3]>,
 }
 
 fn is_zero(v: &u32) -> bool {
@@ -94,6 +97,11 @@ impl Note {
 }
 
 impl Event {
+    /// Farbe des Events auf `track`: die eigene oder die der Spur.
+    pub fn color_on(&self, track: &Track) -> [u8; 3] {
+        self.color.unwrap_or(track.color)
+    }
+
     pub fn end(&self) -> u64 {
         self.start.0 + self.length
     }
@@ -371,7 +379,8 @@ pub struct Project {
     next_track_id: TrackId,
 }
 
-const PALETTE: [[u8; 3]; 8] = [
+/// Farben neuer Spuren, reihum; auch die Palette der Farbauswahl.
+pub const TRACK_COLORS: [[u8; 3]; 8] = [
     [214, 84, 84],
     [222, 150, 60],
     [204, 190, 70],
@@ -471,7 +480,7 @@ impl Project {
                 id: 0,
                 name: format!("{} {}", kind.label(), i + 1),
                 kind,
-                color: PALETTE[i % PALETTE.len()],
+                color: TRACK_COLORS[i % TRACK_COLORS.len()],
                 mute: false,
                 solo: false,
                 record: false,
@@ -510,6 +519,7 @@ impl Project {
                         notes: Vec::new(),
                         lane: None,
                         comp: 0,
+                        color: None,
                     });
                     at += len + ((i as u64 + 2 * k) % 3) * bar;
                     k += 1;
@@ -669,6 +679,7 @@ impl Project {
                 notes: Vec::new(),
                 lane: None,
                 comp: 0,
+                color: None,
             },
         );
         Some(id)
@@ -813,7 +824,7 @@ impl Project {
             id,
             name: name.into(),
             kind,
-            color: PALETTE[i % PALETTE.len()],
+            color: TRACK_COLORS[i % TRACK_COLORS.len()],
             mute: false,
             solo: false,
             record: false,
@@ -866,6 +877,7 @@ impl Project {
                 notes: Vec::new(),
                 lane: None,
                 comp: 0,
+                color: None,
             },
         );
         Some(id)
@@ -921,6 +933,7 @@ impl Project {
             notes: Vec::new(),
             lane: None,
             comp: 0,
+            color: None,
         });
         Some(id)
     }
@@ -1058,6 +1071,27 @@ impl Project {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn events_follow_the_track_colour_unless_they_have_their_own() {
+        let mut p = Project::default();
+        let t = p.add_track(TrackKind::Audio, "A");
+        let a = p.create_event(t, 0, 960).expect("a");
+        let b = p.create_event(t, 960, 960).expect("b");
+        p.tracks[t].color = [1, 2, 3];
+        p.event_mut(b).expect("b").color = Some([9, 9, 9]);
+        let track = p.tracks[t].clone();
+        assert_eq!(p.event(a).expect("a").color_on(&track), [1, 2, 3]);
+        assert_eq!(p.event(b).expect("b").color_on(&track), [9, 9, 9]);
+        let json = serde_json::to_string(&p).expect("save");
+        assert_eq!(
+            json.matches("\"color\":[9,9,9]").count(),
+            1,
+            "only the own colour is saved"
+        );
+        let back: Project = serde_json::from_str(&json).expect("load");
+        assert_eq!(back.tracks[t].events, p.tracks[t].events);
+    }
 
     #[test]
     fn comping_a_section_makes_it_audible_and_keeps_lanes() {

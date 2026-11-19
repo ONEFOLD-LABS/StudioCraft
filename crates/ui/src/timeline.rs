@@ -736,6 +736,13 @@ fn click(w: &mut ProjectWindow, g: &Geo, p: Pos2, mods: egui::Modifiers) {
         if automation::header_click(w, g, p) {
             return;
         }
+        // Farbleiste ganz links: Palette der Spurfarbe.
+        if let Some(row) = g.row_at(p.y)
+            && p.x < g.header.left() + 7.0
+        {
+            w.open_color_popup(crate::colors::Target::Track(row), p);
+            return;
+        }
         if let Some(row) = g.row_at(p.y)
             && automation::arrow_rect(g, row).expand(3.0).contains(p)
         {
@@ -1068,7 +1075,7 @@ fn paint_event(
     let color = if ev.muted {
         crate::theme::tokens(painter.ctx()).event_muted
     } else {
-        track_color(track.color)
+        track_color(ev.color_on(track))
     };
     let body_fill = if ev.muted {
         crate::theme::tokens(painter.ctx())

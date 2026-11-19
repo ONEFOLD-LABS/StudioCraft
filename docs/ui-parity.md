@@ -55,7 +55,7 @@ Bei Mehrfachauswahl gelb hervorgehobene Felder, Änderungen relativ (später).
 - Kopfzeile über den Spuren: Anzahl Spuren, Knopf „Spur hinzufügen“ (+), globale
   Mute-/Solo-Anzeige (zeigt, ob irgendwo Mute oder Solo aktiv ist; Klick hebt auf).
 - **Spurkopf** (Spec „Spurtypen und Inspector“): links eine Farbleiste in Spurfarbe über die
-  ganze Höhe, davor der Pfeil, der die Automationsspuren auf- und zuklappt, daneben Name; die
+  ganze Höhe (Klick öffnet die Farbpalette), davor der Pfeil, der die Automationsspuren auf- und zuklappt, daneben Name; die
   Schalter sitzen in einer Reihe: Mute (M), Solo (S), Aufnahme bereit (●), Monitor
   (Lautsprecher), Automation lesen (R), Automation schreiben (W), Zeitbasis (Note
   musikalisch, Uhr linear), Lanes ein/aus.
@@ -133,7 +133,9 @@ Die Positionsanzeige hat einen dunklen Hintergrund (`counter_bg`) mit heller Sch
 16. ✅ Titelleiste wie in den Craft-Apps: Symbol, Menü, Titel und Fensterknöpfe in einer Zeile,
     `craft-window` entscheidet pro Desktop (#80)
 17. ✅ Comping: Comp-Werkzeug, Abschnitte eines Takes per Klick oder Ziehen hörbar machen (#82)
+18. ✅ Farben: Klick auf die Farbleiste im Spurkopf öffnet die Palette; Events folgen der Spurfarbe,
+    über Bearbeiten → Event-Farbe bekommen sie eine eigene (Issue #19)
 
 **Als Nächstes:** rechte Zone mit Dateibrowser und Vorhören (Issue #27), Mehrfachauswahl in der
 Info-Zeile (Änderungen relativ), eigene Statuszeile, Automation-Modi Overwrite und Trim (Spec:
-später), Spurfarbe für neue Events (Issue #19).
+später).
