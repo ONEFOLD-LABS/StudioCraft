@@ -69,6 +69,11 @@ pub(crate) enum Drag {
         id: EventId,
         start: u64,
     },
+    /// Marker `index` (in `Project::markers`) ziehen; `grab` = Abstand Maus zu Marker in Ticks.
+    Marker {
+        index: usize,
+        grab: f64,
+    },
     /// Automation frei zeichnen; `last` = zuletzt gezeichneter Tick.
     AutoDraw {
         row: usize,
@@ -226,6 +231,68 @@ fn paint_folder_summary(w: &ProjectWindow, painter: &Painter, g: &Geo, row: usiz
             );
             painter.rect_filled(r, 2.0, color);
         }
+    }
+}
+
+/// Marker unter `p` in der Marker-Spur: Positionsmarker bis 6 px neben der Linie oder auf
+/// ihrem Fähnchen, Cycle-Marker in ihrem Bereich. Positionsmarker haben Vorrang.
+fn marker_at(w: &ProjectWindow, g: &Geo, p: Pos2) -> Option<usize> {
+    let ms = &w.project.markers;
+    ms.iter()
+        .position(|m| {
+            let x = g.x(m.start as f64);
+            !m.is_cycle() && (p.x - x).abs() <= 6.0
+                || (!m.is_cycle() && p.x >= x && p.x <= x + 16.0)
+        })
+        .or_else(|| {
+            ms.iter().position(|m| {
+                m.end
+                    .is_some_and(|e| p.x >= g.x(m.start as f64) && p.x <= g.x(e as f64))
+            })
+        })
+}
+
+/// Marker-Spur: Cycle-Marker als Balken, Positionsmarker als Linie mit Fähnchen und Name.
+fn paint_markers(w: &ProjectWindow, painter: &Painter, g: &Geo, row: usize) {
+    let t = crate::theme::tokens(painter.ctx());
+    let top = g.row_top(row);
+    let h = g.row_height(row);
+    let color = track_color(w.project.tracks[row].color);
+    for m in w.project.markers.iter().filter(|m| m.is_cycle()) {
+        let Some(end) = m.end else { continue };
+        let r = Rect::from_x_y_ranges(
+            g.x(m.start as f64)..=g.x(end as f64),
+            top + h * 0.55..=top + h - 4.0,
+        );
+        painter.rect_filled(r, 2.0, color.gamma_multiply(0.45));
+        painter.rect_stroke(r, 2.0, Stroke::new(1.0, color), StrokeKind::Inside);
+        painter.with_clip_rect(r).text(
+            r.left_center() + vec2(4.0, 0.0),
+            Align2::LEFT_CENTER,
+            format!("C{} {}", m.id, m.name),
+            FontId::proportional(11.0),
+            t.text,
+        );
+    }
+    for m in w.project.markers.iter().filter(|m| !m.is_cycle()) {
+        let x = g.x(m.start as f64);
+        painter.vline(x, top..=top + h, Stroke::new(1.5, color));
+        let flag = Rect::from_min_size(pos2(x, top + 3.0), vec2(16.0, 14.0));
+        painter.rect_filled(flag, 2.0, color);
+        painter.text(
+            flag.center(),
+            Align2::CENTER_CENTER,
+            m.id.to_string(),
+            FontId::proportional(10.0),
+            Color32::BLACK,
+        );
+        painter.text(
+            pos2(flag.right() + 3.0, flag.center().y),
+            Align2::LEFT_CENTER,
+            &m.name,
+            FontId::proportional(11.0),
+            t.text,
+        );
     }
 }
 
@@ -714,6 +781,17 @@ fn live_drag(w: &mut ProjectWindow, g: &Geo, d: Drag, p: Pos2, mods: egui::Modif
             ));
             return;
         }
+        Drag::Marker { index, grab } => {
+            let t = if mods.alt {
+                (raw - grab).max(0.0).round() as u64
+            } else {
+                w.snap_ticks(raw - grab)
+            };
+            if let Some(i) = w.project.move_marker(index, t) {
+                w.drag = Some(Drag::Marker { index: i, grab });
+            }
+            return;
+        }
         Drag::AutoPoint { .. } | Drag::AutoDraw { .. } => {
             w.drag = Some(automation::live_drag(w, g, d, p, mods.alt));
             return;
@@ -737,6 +815,16 @@ fn start_drag(w: &mut ProjectWindow, g: &Geo, p: Pos2, alt: bool) -> Option<Drag
     }
     if !g.lanes.contains(p) {
         return None;
+    }
+    if let Some(row) = g.row_at(p.y)
+        && w.project.tracks[row].kind == TrackKind::Marker
+    {
+        if w.tool != Tool::Select {
+            return None;
+        }
+        let i = marker_at(w, g, p)?;
+        let grab = g.ticks(p.x) - w.project.markers[i].start as f64;
+        return Some(Drag::Marker { index: i, grab });
     }
     if let Some(d) = automation::start_drag(w, g, p, alt) {
         return d;
@@ -852,7 +940,8 @@ fn finish_drag(w: &mut ProjectWindow, g: &Geo, d: Drag, p: Pos2, mods: egui::Mod
         | Drag::FadeIn { .. }
         | Drag::FadeOut { .. }
         | Drag::AutoPoint { .. }
-        | Drag::AutoDraw { .. } => {}
+        | Drag::AutoDraw { .. }
+        | Drag::Marker { .. } => {}
         Drag::Comp { id, start, .. } => {
             let end = w.snap_ticks(g.ticks(p.x));
             comp(w, id, start, end);
@@ -986,6 +1075,24 @@ fn click(w: &mut ProjectWindow, g: &Geo, p: Pos2, mods: egui::Modifiers) {
         return;
     }
     if !g.lanes.contains(p) {
+        return;
+    }
+    if let Some(row) = g.row_at(p.y)
+        && w.project.tracks[row].kind == TrackKind::Marker
+    {
+        w.selected_track = Some(row);
+        let hit = marker_at(w, g, p);
+        match (w.tool, hit) {
+            (Tool::Erase, Some(i)) => {
+                w.project.remove_marker(i);
+            }
+            (Tool::Draw, None) => {
+                let t = w.snap_ticks(g.ticks(p.x));
+                w.project.add_marker(t);
+            }
+            (_, Some(i)) => w.select_marker(i),
+            _ => {}
+        }
         return;
     }
     if automation::click(w, g, p, mods.alt) {
@@ -1212,6 +1319,9 @@ fn paint_lanes(w: &ProjectWindow, painter: &Painter, g: &Geo) {
     for row in g.visible_rows() {
         if w.project.tracks[row].kind == TrackKind::Folder {
             paint_folder_summary(w, painter, g, row);
+        }
+        if w.project.tracks[row].kind == TrackKind::Marker {
+            paint_markers(w, painter, g, row);
         }
     }
     automation::paint(w, painter, g);

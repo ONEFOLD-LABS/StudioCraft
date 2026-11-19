@@ -15,6 +15,7 @@ mod infoline;
 mod inserts;
 mod keyeditor;
 mod keymap;
+mod markers_ui;
 mod menu;
 mod mixer;
 mod quantize;
@@ -964,6 +965,9 @@ impl ProjectWindow {
                     self.output_ui(ui, idx);
                 }
             });
+        }
+        if kind == TrackKind::Marker {
+            inspector_section(ui, "Marker", true, |ui| self.markers_ui(ui));
         }
         if kind == TrackKind::Instrument {
             inspector_section(ui, "Instrument", true, |ui| self.instrument_ui(ui, idx));
@@ -2408,6 +2412,102 @@ mod tests {
             let g = w.project.add_track(TrackKind::Folder, "Leer");
             w.project.tracks[g].folded = true;
             w.project.set_parent(5, Some(g));
+        });
+    }
+
+    #[test]
+    fn marker_track_shows_markers_and_cycle_markers_set_the_locators() {
+        let (mut w, _) = one_event_window();
+        let bar = w.bar_ticks();
+        w.cursor = 2 * bar;
+        w.insert_marker();
+        let m = w.marker_track().expect("created on demand");
+        w.left_locator = 4 * bar;
+        w.right_locator = 6 * bar;
+        w.cycle_marker_from_locators();
+        assert_eq!(w.project.markers.len(), 2);
+        w.left_locator = 0;
+        w.right_locator = bar;
+        w.view.scroll_ticks = 0.0;
+        // Herausgezoomt, damit alle Klickziele (bis Takt 7) sicher sichtbar sind.
+        w.view.px_per_quarter = 12.0;
+        let mut h = window_harness(w);
+        let row_y = |h: &Harness<'_, ProjectWindow>| {
+            let w = h.state();
+            w.lanes_rect.top() + (m as f32 + 0.8) * w.view.row_h
+        };
+        let x_of = |h: &Harness<'_, ProjectWindow>, t: u64| {
+            let w = h.state();
+            w.lanes_rect.left()
+                + ((t as f64 - w.view.scroll_ticks) / TPQ) as f32 * w.view.px_per_quarter
+        };
+        let click = |h: &mut Harness<'_, ProjectWindow>, pos: egui::Pos2| {
+            h.event(egui::Event::PointerMoved(pos));
+            h.run_steps(1);
+            for pressed in [true, false] {
+                h.event(egui::Event::PointerButton {
+                    pos,
+                    button: egui::PointerButton::Primary,
+                    pressed,
+                    modifiers: egui::Modifiers::NONE,
+                });
+            }
+            h.run_steps(2);
+        };
+        // A click into the cycle marker sets the locators to its range.
+        let y = row_y(&h);
+        let pos = egui::pos2(x_of(&h, 5 * bar), y);
+        click(&mut h, pos);
+        assert_eq!(
+            (h.state().left_locator, h.state().right_locator),
+            (4 * bar, 6 * bar)
+        );
+        // The erase tool removes the position marker at bar 3.
+        h.state_mut().tool = Tool::Erase;
+        let pos = egui::pos2(x_of(&h, 2 * bar) + 2.0, y);
+        click(&mut h, pos);
+        assert!(h.state().project.marker(3).is_none());
+        assert_eq!(h.state().project.markers.len(), 1);
+        // The draw tool adds one where there is none.
+        h.state_mut().tool = Tool::Draw;
+        let pos = egui::pos2(x_of(&h, 7 * bar), y);
+        click(&mut h, pos);
+        assert_eq!(h.state().project.marker(3).map(|m| m.start), Some(7 * bar));
+    }
+
+    #[test]
+    fn insert_key_adds_a_marker_and_goto_commands_can_be_bound() {
+        use keymap::Cmd;
+        let (mut w, _) = one_event_window();
+        w.cursor = 1920;
+        let mut h = window_harness(w);
+        h.key_press(Key::Insert);
+        h.run_steps(1);
+        assert_eq!(h.state().project.marker(3).map(|m| m.start), Some(1920));
+        assert!(h.state().marker_track().is_some());
+        // "Zu Marker 3" has no default key; bound to Shift+3 it jumps there.
+        let key = egui::KeyboardShortcut::new(egui::Modifiers::SHIFT, Key::Num3);
+        h.state_mut().keymap.assign(Cmd::GotoMarker(3), key);
+        h.state_mut().cursor = 0;
+        h.key_press_modifiers(egui::Modifiers::SHIFT, Key::Num3);
+        h.run_steps(1);
+        assert_eq!(h.state().cursor, 1920);
+    }
+
+    #[test]
+    fn renders_marker_track() {
+        shot("marker", |w| {
+            w.project = Project::demo(6);
+            let bar = w.bar_ticks();
+            w.add_marker_track();
+            for (i, at) in [1, 5, 9].into_iter().enumerate() {
+                w.project.add_marker(at * bar);
+                if let Some(m) = w.project.markers.last_mut() {
+                    m.name = ["Intro", "Strophe", "Refrain"][i].into();
+                }
+            }
+            w.project.add_cycle_marker(5 * bar, 9 * bar);
+            w.selected_track = w.marker_track();
         });
     }
 

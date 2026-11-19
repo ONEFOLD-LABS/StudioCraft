@@ -119,6 +119,21 @@ impl ProjectWindow {
                 {
                     self.add_folder_track();
                 }
+                if ui.button("Marker-Spur hinzufügen").clicked() {
+                    let before = self.project.clone();
+                    self.add_marker_track();
+                    self.checkpoint(before);
+                }
+                let insert = egui::Button::new("Marker einfügen")
+                    .shortcut_text(self.key_label(ui.ctx(), Cmd::InsertMarker));
+                if ui.add(insert).clicked() {
+                    self.insert_marker();
+                }
+                let cycle = egui::Button::new("Cycle-Marker aus Locatoren")
+                    .shortcut_text(self.key_label(ui.ctx(), Cmd::CycleMarkerFromLocators));
+                if ui.add(cycle).clicked() {
+                    self.cycle_marker_from_locators();
+                }
                 ui.menu_button("Instrument-Spur hinzufügen", |ui| {
                     if let Some(info) = self.instrument_menu(ui) {
                         self.add_instrument_track(info);

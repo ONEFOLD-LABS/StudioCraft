@@ -36,6 +36,10 @@ pub(crate) enum Cmd {
     ToggleMixer,
     ToggleInspector,
     ToggleRightZone,
+    InsertMarker,
+    CycleMarkerFromLocators,
+    /// Zu Positionsmarker mit dieser Nummer (3–9).
+    GotoMarker(u32),
 }
 
 /// Beschreibung eines Befehls.
@@ -437,6 +441,71 @@ pub(crate) const COMMANDS: &[CommandInfo] = &[
         "Werkzeuge",
         []
     ),
+    cmd!(
+        Cmd::InsertMarker,
+        "marker.insert",
+        "Marker einfügen",
+        "Marker",
+        [k(N, Key::Insert)]
+    ),
+    cmd!(
+        Cmd::CycleMarkerFromLocators,
+        "marker.cycle_from_locators",
+        "Cycle-Marker aus Locatoren",
+        "Marker",
+        []
+    ),
+    // Standard wäre der Nummernblock 3–9; egui unterscheidet ihn nicht von der Zahlenreihe
+    // (Issue #3), deshalb ohne Taste, frei belegbar.
+    cmd!(
+        Cmd::GotoMarker(3),
+        "marker.goto_3",
+        "Zu Marker 3",
+        "Marker",
+        []
+    ),
+    cmd!(
+        Cmd::GotoMarker(4),
+        "marker.goto_4",
+        "Zu Marker 4",
+        "Marker",
+        []
+    ),
+    cmd!(
+        Cmd::GotoMarker(5),
+        "marker.goto_5",
+        "Zu Marker 5",
+        "Marker",
+        []
+    ),
+    cmd!(
+        Cmd::GotoMarker(6),
+        "marker.goto_6",
+        "Zu Marker 6",
+        "Marker",
+        []
+    ),
+    cmd!(
+        Cmd::GotoMarker(7),
+        "marker.goto_7",
+        "Zu Marker 7",
+        "Marker",
+        []
+    ),
+    cmd!(
+        Cmd::GotoMarker(8),
+        "marker.goto_8",
+        "Zu Marker 8",
+        "Marker",
+        []
+    ),
+    cmd!(
+        Cmd::GotoMarker(9),
+        "marker.goto_9",
+        "Zu Marker 9",
+        "Marker",
+        []
+    ),
 ];
 
 pub(crate) fn info(cmd: Cmd) -> Option<&'static CommandInfo> {
@@ -730,6 +799,9 @@ impl crate::ProjectWindow {
             }
             Cmd::ToggleInspector => self.show_inspector = !self.show_inspector,
             Cmd::ToggleRightZone => self.show_right = !self.show_right,
+            Cmd::InsertMarker => self.insert_marker(),
+            Cmd::CycleMarkerFromLocators => self.cycle_marker_from_locators(),
+            Cmd::GotoMarker(id) => self.locate_marker(id),
         }
     }
 
