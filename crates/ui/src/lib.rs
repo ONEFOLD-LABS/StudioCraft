@@ -1130,17 +1130,27 @@ impl ProjectWindow {
             ui.spacing_mut().item_spacing.x = 6.0;
             self.tempo_controls(ui);
 
+            // Status rechts: nimmt nur den freien Platz und wird sonst gekürzt (voller Text
+            // als Tooltip), damit er nie über Tempo und Takt läuft.
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 ui.weak(format!("{:.1} ms/Frame", self.frame_ms));
                 ui.separator();
+                let mut status = self.audio_status.clone();
                 if !self.midi_status.is_empty() {
-                    ui.weak(&self.midi_status);
-                    ui.separator();
+                    status.push_str("  ·  ");
+                    status.push_str(&self.midi_status);
                 }
-                ui.weak(&self.audio_status);
-                if let Some(m) = &self.message {
-                    ui.separator();
-                    ui.colored_label(ui.visuals().warn_fg_color, m);
+                let text = match &self.message {
+                    Some(m) => RichText::new(m.as_str()).color(ui.visuals().warn_fg_color),
+                    None => RichText::new(status.as_str()).weak(),
+                };
+                if ui.available_width() > 24.0 {
+                    let full = match &self.message {
+                        Some(m) => format!("{m}\n{status}"),
+                        None => status.clone(),
+                    };
+                    ui.add(egui::Label::new(text).truncate())
+                        .on_hover_text(full);
                 }
             });
         });
@@ -1170,10 +1180,14 @@ mod tests {
     /// Rendert das Projektfenster headless. Mit `STUDIOCRAFT_SHOTS=<ordner>`
     /// werden die Bilder gespeichert, sonst wird nur geprüft, dass es rendert.
     fn shot(name: &str, setup: impl FnOnce(&mut ProjectWindow)) {
+        shot_sized(name, egui::vec2(1400.0, 860.0), setup);
+    }
+
+    fn shot_sized(name: &str, size: egui::Vec2, setup: impl FnOnce(&mut ProjectWindow)) {
         let mut w = ProjectWindow::new(Project::demo(100), None, "kein Audio (Test)".into());
         setup(&mut w);
         let mut harness = Harness::builder()
-            .with_size(egui::vec2(1400.0, 860.0))
+            .with_size(size)
             .with_step_dt(1.0 / 60.0)
             .wgpu()
             .build_ui(move |ui| w.ui(ui));
@@ -1576,6 +1590,14 @@ mod tests {
         shot("raster-frames", |w| {
             w.grid = Grid::Frames;
             w.view.zoom(6.0, None);
+        });
+    }
+
+    #[test]
+    fn renders_narrow_window_with_long_status() {
+        shot_sized("schmal", egui::vec2(1150.0, 760.0), |w| {
+            w.audio_status = "pipewire · default_output · 48000 Hz · Block 256".into();
+            w.midi_status = "MIDI: USB Audio Interface:USB Audio Interface MIDI 1 16:0".into();
         });
     }
 
