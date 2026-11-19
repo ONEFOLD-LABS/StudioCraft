@@ -507,6 +507,17 @@ impl ProjectWindow {
                 h.close_gui();
             } else if let Err(e) = h.open_gui(&title) {
                 self.message = Some(format!("{name}: {e}"));
+            } else {
+                // Aktuelle Werte an das neue Fenster (sonst zeigt es Vorgaben).
+                let values = self
+                    .slot(track, k)
+                    .map(|s| s.params.clone())
+                    .unwrap_or_default();
+                if let Some(h) = self.handle_mut(track, k) {
+                    for (id, v) in values {
+                        h.set_ui_value(id, v);
+                    }
+                }
             }
         }
     }
@@ -516,16 +527,25 @@ impl ProjectWindow {
     pub(crate) fn idle_plugins(&mut self) -> bool {
         let mut open = false;
         let mut dirty = false;
-        for sent in &mut self.plugins.sent {
-            for h in sent
-                .handles
-                .iter_mut()
-                .flatten()
-                .chain(sent.instrument_handle.iter_mut())
+        let mut changes = Vec::new();
+        for (track, sent) in self.plugins.sent.iter_mut().enumerate() {
+            let slots = sent.handles.iter_mut().enumerate();
+            let instrument = sent.instrument_handle.iter_mut().map(|h| (INSTRUMENT, h));
+            for (k, h) in slots
+                .filter_map(|(k, h)| h.as_mut().map(|h| (k, h)))
+                .chain(instrument)
             {
                 open |= h.idle();
                 dirty |= h.take_dirty();
+                for (id, v) in h.take_param_changes() {
+                    changes.push((track, k, id, v));
+                }
             }
+        }
+        // Reglerbewegungen im Plugin-Fenster wie eigene Parameteränderungen setzen.
+        for (track, k, id, v) in changes {
+            self.set_param_value(track, k, id, v, false);
+            dirty = true;
         }
         if dirty {
             self.plugins.changed = true;
@@ -669,8 +689,20 @@ impl ProjectWindow {
 
     /// Einen Parameter setzen: im Projekt, in der Engine und in der gemerkten Kette.
     fn apply_param(&mut self, track: usize, k: usize, id: u32, v: f64) {
+        self.set_param_value(track, k, id, v, true);
+    }
+
+    /// Wie [`Self::apply_param`]; `to_window`: auch an ein offenes Plugin-Fenster geben (nicht,
+    /// wenn der Wert gerade von dort kommt).
+    fn set_param_value(&mut self, track: usize, k: usize, id: u32, v: f64, to_window: bool) {
         if let Some(s) = self.slot_mut(track, k) {
             s.set_param(id, v);
+        }
+        if to_window
+            && let Some(h) = self.handle_mut(track, k)
+            && h.gui_open()
+        {
+            h.set_ui_value(id, v);
         }
         if let Some(idx) = self.engine_index(track, k) {
             self.send(Command::SetParam(track, idx, id, v));

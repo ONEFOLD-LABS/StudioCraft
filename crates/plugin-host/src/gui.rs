@@ -267,7 +267,7 @@ impl ClapHandle {
 }
 
 #[cfg(all(unix, not(target_os = "macos")))]
-mod x11win {
+pub(crate) mod x11win {
     //! Ein schlichtes X11-Fenster als Elternfenster für eingebettete Plugin-Editoren.
 
     use std::sync::OnceLock;
@@ -322,7 +322,7 @@ mod x11win {
         })
     }
 
-    pub(super) struct HostWindow {
+    pub(crate) struct HostWindow {
         id: Window,
     }
 

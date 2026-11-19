@@ -16,16 +16,19 @@ fn main() {
     }
     let names: Vec<String> = std::env::var("STUDIOCRAFT_GUI_PLUGINS")
         .map(|v| v.split(',').map(str::to_owned).collect())
-        .unwrap_or_else(|_| vec!["ZamComp".into(), "Surge XT".into()]);
-    // Nur CLAP (gleichnamige LV2-Plugins haben noch kein Fenster).
-    let plugins: Vec<_> = scan(&default_paths())
-        .0
-        .into_iter()
-        .filter(|p| p.format == studiocraft_plugin_host::PluginFormat::Clap)
-        .collect();
+        .unwrap_or_else(|_| {
+            vec![
+                "ZamComp".into(),
+                "Surge XT".into(),
+                "ZamComp (LV2)".into(),
+                "LSP Compressor Stereo (LV2)".into(),
+            ]
+        });
+    // Namen wie in den Listen: LV2-Plugins mit „(LV2)“.
+    let plugins = scan(&default_paths()).0;
     let mut tested = 0;
     for name in &names {
-        let Some(info) = plugins.iter().find(|p| &p.name == name) else {
+        let Some(info) = plugins.iter().find(|p| &p.display_name() == name) else {
             println!("{name}: nicht installiert");
             continue;
         };
@@ -34,6 +37,10 @@ fn main() {
         assert!(h.has_gui(), "{name} hat ein Fenster");
         match h.open_gui(&format!("StudioCraft-Test – {name}")) {
             Ok(()) => {
+                // Ein Wert vom Host an das Fenster (LV2: port_event; CLAP: ohne Wirkung).
+                if let Some(p) = inst.params().first() {
+                    h.set_ui_value(p.id, p.max);
+                }
                 let t = Instant::now();
                 while t.elapsed() < Duration::from_secs(3) && h.gui_open() {
                     h.idle();

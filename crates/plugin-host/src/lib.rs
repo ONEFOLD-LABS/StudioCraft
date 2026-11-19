@@ -31,6 +31,8 @@ mod isolated;
 #[cfg(not(target_arch = "wasm32"))]
 mod lv2;
 #[cfg(not(target_arch = "wasm32"))]
+mod lv2_gui;
+#[cfg(not(target_arch = "wasm32"))]
 mod scan;
 
 #[cfg(not(target_arch = "wasm32"))]
