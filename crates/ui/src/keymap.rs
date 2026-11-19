@@ -29,6 +29,8 @@ pub(crate) enum Cmd {
     ZoomOut,
     PlayStop,
     ToggleCycle,
+    /// Gespielte, nicht aufgenommene Noten als Part übernehmen.
+    RetrospectiveRecord,
     ToStart,
     Metronome,
     PunchIn,
@@ -418,6 +420,14 @@ pub(crate) const COMMANDS: &[CommandInfo] = &[
         "Cycle",
         "Transport",
         [k(N, Key::Slash)]
+    ),
+    // Standard ist Umschalt + Nummernblock-Mal (keypad.rs); hier frei belegbar.
+    cmd!(
+        Cmd::RetrospectiveRecord,
+        "transport.retro_record",
+        "Nachträgliche Aufnahme",
+        "Transport",
+        []
     ),
     cmd!(
         Cmd::ToStart,
@@ -1022,6 +1032,7 @@ impl crate::ProjectWindow {
             Cmd::ZoomOut => self.view.zoom(0.8, None),
             Cmd::PlayStop => self.toggle_play(),
             Cmd::ToggleCycle => self.toggle_cycle(),
+            Cmd::RetrospectiveRecord => self.retrospective_record(),
             Cmd::ToStart => self.locate(0),
             Cmd::Metronome => self.toggle_metronome(),
             Cmd::PunchIn => self.punch_in = !self.punch_in,

@@ -20,13 +20,20 @@ pub enum MidiMsg {
 /// Controller-Nummer des Haltepedals.
 pub const SUSTAIN: u8 = 64;
 
-/// Eine während der Aufnahme gespielte Note mit Projektposition (Frames).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Eine gespielte Note mit Projektposition (Frames). Gemeldet wird jede Note auf dem
+/// Keyboard-Ziel, auch ohne Aufnahme (für die nachträgliche Aufnahme).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct RecordedMidi {
     pub pos: u64,
     pub key: u8,
     pub velocity: u8,
     pub on: bool,
+    /// Während einer Aufnahme gespielt.
+    pub recording: bool,
+    /// Während der Transport lief (sonst steht `pos` still).
+    pub running: bool,
+    /// Frei laufender Frame-Zähler der Engine (für Noten im Stillstand).
+    pub clock: u64,
     /// Aufgenommener Controller (Pitchbend, CC außer Haltepedal, Aftertouch) als rohe
     /// MIDI-Nachricht; dann gelten `key`, `velocity` und `on` nicht.
     pub ctrl: Option<[u8; 3]>,

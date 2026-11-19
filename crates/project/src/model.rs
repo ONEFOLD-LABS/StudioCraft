@@ -494,6 +494,9 @@ pub struct Project {
     /// Marker und Cycle-Marker, nach Position sortiert (siehe `markers.rs`).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub markers: Vec<crate::Marker>,
+    /// MIDI-Aufnahmemodi (Projekteinstellung).
+    #[serde(default, skip_serializing_if = "crate::RecordSettings::is_default")]
+    pub record: crate::RecordSettings,
     /// Metronom und Vorzähler (Projekteinstellung).
     #[serde(default, skip_serializing_if = "crate::ClickSettings::is_default")]
     pub click: crate::ClickSettings,
@@ -527,6 +530,7 @@ impl Default for Project {
             next_id: 1,
             next_track_id: 1,
             markers: Vec::new(),
+            record: crate::RecordSettings::default(),
             click: crate::ClickSettings::default(),
             layout: crate::WindowLayout::default(),
             layouts: Vec::new(),
