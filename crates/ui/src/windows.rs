@@ -113,6 +113,7 @@ impl ProjectWindow {
 
     /// Zeichnet die offenen eigenen Fenster; einmal je Bild nach dem Hauptfenster.
     pub(crate) fn show_windows(&mut self, ctx: &Context) {
+        self.window_pointer_down = false;
         if self.windows.mixer {
             let b = builder("Mixer", self.windows.open_mixer, MIXER_SIZE);
             let (open, rect) = ctx.show_viewport_immediate(
@@ -180,6 +181,18 @@ impl ProjectWindow {
         }
         // Tasten, die in diesem Fenster gedrückt werden, kommen nur in seiner Eingabe an.
         self.handle_window_keys(ui);
+        // Drücken hier beginnt eine Geste für den Rückgängig-Verlauf (panel_undo.rs).
+        let (press, down) = ui.input(|i| {
+            (
+                i.pointer
+                    .any_pressed()
+                    .then(|| i.pointer.press_origin())
+                    .flatten(),
+                i.pointer.any_down(),
+            )
+        });
+        self.panel_edit_press(press);
+        self.window_pointer_down |= down;
         egui::CentralPanel::default().show(ui, |ui| body(self, ui, &mut open));
         let (close, outer, inner) = ui.input(|i| {
             let v = i.viewport();

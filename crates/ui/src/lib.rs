@@ -39,6 +39,7 @@ mod menu;
 mod midiout_ui;
 mod mixer;
 mod noteinfo;
+mod panel_undo;
 mod quantize;
 mod recording;
 mod rightzone;
@@ -185,6 +186,12 @@ pub struct ProjectWindow {
     /// Undo- und Redo-Verlauf (ganze Projektstände; Spec „Undo“).
     undo: Vec<Project>,
     redo: Vec<Project>,
+    /// Schnappschuss zu Beginn einer Geste in Mixer, Inspector usw. (panel_undo.rs).
+    panel_edit_before: Option<Project>,
+    /// Lage der Zonen im letzten Bild (für den Schnappschuss beim Drücken).
+    last_zones: focus::ZoneRects,
+    /// In einem eigenen (nativen) Fenster ist gerade die Maus gedrückt.
+    window_pointer_down: bool,
     /// Projektstand zu Beginn eines Ziehvorgangs.
     drag_before: Option<Project>,
     /// Lage der Event-Anzeige im letzten Frame (für Tests mit Mauseingaben).
@@ -332,6 +339,9 @@ impl ProjectWindow {
             master_meter: [0.0; 2],
             undo: Vec::new(),
             redo: Vec::new(),
+            panel_edit_before: None,
+            last_zones: focus::ZoneRects::default(),
+            window_pointer_down: false,
             drag_before: None,
             lanes_rect: egui::Rect::NOTHING,
             project_path: None,
@@ -867,6 +877,7 @@ impl ProjectWindow {
             theme::install(ui.ctx(), self.theme);
             self.theme_installed = true;
         }
+        self.panel_edit_start(ui.ctx());
         self.sync_from_engine();
         if let Some(t) = &mut self.transport {
             t.collect_garbage();
@@ -999,6 +1010,7 @@ impl ProjectWindow {
         let dragging = ui.input(|i| i.pointer.primary_down());
         self.capture_layout(&zones, dragging);
         self.update_focus(ui.ctx(), zones);
+        self.last_zones = zones;
         quantize::panel(self, ui.ctx());
         self.color_popup(ui.ctx());
         self.tool_palette(ui.ctx());
@@ -1009,6 +1021,7 @@ impl ProjectWindow {
         self.crossfade_editor_dialog(ui.ctx());
         self.device_dialog(ui.ctx());
         self.show_windows(ui.ctx());
+        self.panel_edit_end(ui.ctx());
 
         self.sync_tempo();
         let playing = self.is_playing();
@@ -4734,6 +4747,50 @@ mod tests {
             .automation_lane(AutoParam::Volume)
             .unwrap();
         assert_eq!(lane.points.len(), 2, "one gesture, one undo step");
+    }
+
+    #[test]
+    fn mixer_and_inspector_edits_are_undoable_one_gesture_per_step() {
+        let (mut w, _) = one_event_window();
+        let name = w.project.tracks[0].name.clone();
+        w.show_lower = true;
+        w.lower = LowerZone::Mixer;
+        w.show_inspector = false;
+        let mut h = window_harness(w);
+        h.run_steps(3);
+        // A whole fader drag is one step.
+        let fader = h.get_by_label(&format!("Lautstärke {name}")).rect();
+        let (a, b) = (fader.center(), fader.center() + egui::vec2(0.0, 60.0));
+        drag_with(&mut h, a, b, egui::Modifiers::NONE, egui::Modifiers::NONE);
+        h.run_steps(2);
+        let db = h.state().project.tracks[0].volume_db;
+        assert!(db < -1.0, "fader moved: {db}");
+        assert_eq!(h.state().undo.len(), 1, "one drag, one step");
+        h.state_mut().undo();
+        assert_eq!(h.state().project.tracks[0].volume_db, 0.0);
+        // Mute in the mixer.
+        h.get_by_label("M").click();
+        h.run_steps(3);
+        assert!(h.state().project.tracks[0].mute);
+        assert_eq!(h.state().undo.len(), 1);
+        h.state_mut().undo();
+        assert!(!h.state().project.tracks[0].mute);
+        // Typing a name in the inspector: one step after the field loses focus.
+        h.state_mut().show_inspector = true;
+        h.state_mut().selected_track = Some(0);
+        h.run_steps(3);
+        h.get_by_label("Name").focus();
+        h.run_steps(1);
+        h.key_press_modifiers(egui::Modifiers::COMMAND, Key::A);
+        h.get_by_label("Name").type_text("Gesang");
+        h.run_steps(1);
+        h.key_press(Key::Enter);
+        h.run_steps(3);
+        assert_eq!(h.state().project.tracks[0].name, "Gesang");
+        let steps = h.state().undo.len();
+        h.state_mut().undo();
+        assert_eq!(h.state().project.tracks[0].name, name);
+        assert_eq!(h.state().undo.len(), steps - 1);
     }
 
     #[test]

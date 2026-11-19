@@ -294,6 +294,14 @@ impl Strip<'_> {
     /// Zeichnet den Kanalzug. Rückgabe: (Wert geändert, Kanal angeklickt).
     fn show(self, ui: &mut Ui, height: f32) -> (bool, bool) {
         let mut changed = false;
+        // Klickfläche des ganzen Kanalzugs (Kanal wählen) zuerst anlegen: Was danach kommt,
+        // liegt obenauf, so erreichen Klicks M, S, Pan und Fader und nur der Rest wählt.
+        let area = egui::Rect::from_min_size(ui.cursor().min, vec2(STRIP_W, height));
+        let select = ui.interact(
+            area,
+            ui.make_persistent_id(("kanalzug", self.id)),
+            Sense::click(),
+        );
         let fill = if self.selected {
             crate::theme::tokens(ui.ctx()).row_selected
         } else {
@@ -354,8 +362,8 @@ impl Strip<'_> {
                 );
             });
         });
-        let clicked = resp.response.interact(Sense::click()).clicked();
-        (changed, clicked)
+        let _ = resp;
+        (changed, select.clicked())
     }
 }
 
