@@ -106,10 +106,12 @@ pub(crate) enum Drag {
     Volume {
         row: usize,
     },
-    /// Cycle-Bereich im Lineal aufziehen.
+    /// Cycle-Bereich im Lineal aufziehen (obere Hälfte).
     Ruler {
         start: u64,
     },
+    /// Cursor im Lineal ziehen (untere Hälfte).
+    Scrub,
     /// Bereichsauswahl aufziehen (Werkzeug 2).
     Range {
         row: usize,
@@ -838,6 +840,10 @@ fn live_drag(w: &mut ProjectWindow, g: &Geo, d: Drag, p: Pos2, mods: egui::Modif
             w.right_locator = start.max(t);
             return;
         }
+        Drag::Scrub => {
+            w.locate(snapped);
+            return;
+        }
         Drag::TrimStart { id } => {
             w.project.trim_start(id, snapped);
         }
@@ -906,8 +912,13 @@ fn live_drag(w: &mut ProjectWindow, g: &Geo, d: Drag, p: Pos2, mods: egui::Modif
 fn start_drag(w: &mut ProjectWindow, g: &Geo, p: Pos2, mods: egui::Modifiers) -> Option<Drag> {
     let alt = mods.alt;
     if g.ruler.contains(p) {
-        return Some(Drag::Ruler {
-            start: w.snap_ticks(g.ticks(p.x)),
+        // Obere Hälfte: neuer Cycle-Bereich; untere Hälfte: Cursor ziehen (Spec).
+        return Some(if p.y < g.ruler.center().y {
+            Drag::Ruler {
+                start: w.snap_ticks(g.ticks(p.x)),
+            }
+        } else {
+            Drag::Scrub
         });
     }
     if g.header.contains(p) {
@@ -1042,6 +1053,7 @@ fn set_header_volume(w: &mut ProjectWindow, g: &Geo, row: usize, x: f32) {
 fn finish_drag(w: &mut ProjectWindow, g: &Geo, d: Drag, p: Pos2, mods: egui::Modifiers) {
     match d {
         Drag::Ruler { .. } => w.send_locators(),
+        Drag::Scrub => {}
         Drag::Volume { .. } => {}
         // Schon während des Ziehens angewendet.
         Drag::Range { .. } => {

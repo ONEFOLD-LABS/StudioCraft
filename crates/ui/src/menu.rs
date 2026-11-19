@@ -142,6 +142,7 @@ impl ProjectWindow {
                     }
                 });
             });
+            ui.menu_button("Transport", |ui| self.transport_menu(ui));
             ui.menu_button("Ansicht", |ui| {
                 ui.checkbox(&mut self.show_inspector, "Inspector (Alt+I, Alt+L)");
                 ui.checkbox(&mut self.show_info, "Info-Zeile");
@@ -364,6 +365,56 @@ pub(crate) fn project_folder_path(chosen: PathBuf) -> PathBuf {
         parent.join(file)
     } else {
         parent.join(&stem).join(file)
+    }
+}
+
+impl ProjectWindow {
+    /// Menü „Transport“: die wichtigsten Befehle und das Stopp-Verhalten (Spec).
+    fn transport_menu(&mut self, ui: &mut Ui) {
+        let item = |w: &Self, ui: &mut Ui, label: &str, cmd: Cmd| {
+            ui.add(egui::Button::new(label).shortcut_text(w.key_label(ui.ctx(), cmd)))
+                .clicked()
+        };
+        if item(self, ui, "Start/Stopp", Cmd::PlayStop) {
+            self.toggle_play();
+            ui.close();
+        }
+        if ui.button("Stopp").clicked() {
+            self.stop();
+            ui.close();
+        }
+        if item(self, ui, "Zum Anfang", Cmd::ToStart) {
+            self.locate(0);
+            ui.close();
+        }
+        if item(self, ui, "Cycle an/aus", Cmd::ToggleCycle) {
+            self.toggle_cycle();
+            ui.close();
+        }
+        if item(self, ui, "Metronom an/aus", Cmd::Metronome) {
+            self.toggle_metronome();
+            ui.close();
+        }
+        ui.separator();
+        let mut changed = ui
+            .checkbox(&mut self.return_on_stop, "Beim Stoppen zur Startposition")
+            .changed();
+        ui.menu_button("Zweimal Stopp springt zu", |ui| {
+            use crate::settings::StopTarget;
+            changed |= ui
+                .radio_value(&mut self.stop_twice, StopTarget::Start, "Anfang")
+                .changed();
+            changed |= ui
+                .radio_value(
+                    &mut self.stop_twice,
+                    StopTarget::LeftLocator,
+                    "Linker Locator",
+                )
+                .changed();
+        });
+        if changed {
+            self.save_settings();
+        }
     }
 }
 

@@ -169,10 +169,10 @@ Die Transportleiste unten im Projektfenster bedient Wiedergabe, Aufnahme und Loc
 
 - Linker (L) und rechter (R) Locator begrenzen den Cycle-Bereich; Cycle an/aus mit Nummernblock-Geteilt (/)
 - Strg/Alt + Klick ins Lineal setzt den linken bzw. rechten Locator
-- Ziehen in der oberen Hälfte des Lineals zieht einen neuen Cycle-Bereich auf
+- Ziehen in der oberen Hälfte des Lineals zieht einen neuen Cycle-Bereich auf; Klicken oder Ziehen in der unteren Hälfte setzt den Cursor
 - P setzt die Locatoren auf die aktuelle Auswahl
 
-**Stopp-Verhalten:** Optional springt der Cursor beim Stoppen zur Startposition zurück. Zweimal Stopp springt immer zum Anfang (Position 1.1.1.0 bzw. linker Locator, einstellbar).
+**Stopp-Verhalten:** Optional springt der Cursor beim Stoppen zur Startposition zurück. Zweimal Stopp springt immer zum Anfang (Position 1.1.1.0 bzw. linker Locator, einstellbar). Beides steht im Menü Transport und gilt für alle Projekte.
 
 **Punch:** Punch-In und Punch-Out an den Locatoren (Tasten I und O). Aufnahme startet bzw. endet dort automatisch, auch während laufender Wiedergabe.
 
