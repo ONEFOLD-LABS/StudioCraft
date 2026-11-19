@@ -1113,7 +1113,8 @@ fn paint_headers(w: &ProjectWindow, painter: &Painter, g: &Geo) {
             vec2(g.header.width(), g.view.row_h),
         );
         if w.selected_track == Some(row) {
-            painter.rect_filled(rect, 0.0, visuals.selection.bg_fill.gamma_multiply(0.5));
+            // Gewählte Spur: heller hinterlegt, nicht vollflächig in Akzentfarbe (ui-parity.md).
+            painter.rect_filled(rect, 0.0, crate::theme::tokens(painter.ctx()).row_selected);
         }
         painter.rect_filled(
             Rect::from_min_size(rect.min, vec2(5.0, rect.height())),
@@ -1174,13 +1175,19 @@ fn paint_headers(w: &ProjectWindow, painter: &Painter, g: &Geo) {
             } else {
                 visuals.text_color()
             };
-            painter.text(
-                b.center(),
-                Align2::CENTER_CENTER,
-                label,
-                FontId::proportional(11.0),
-                text,
-            );
+            if label == "R" {
+                // Aufnahme bereit: roter Punkt statt Buchstabe, wie überall in der Transportsteuerung.
+                let dot = if on { Color32::WHITE } else { color };
+                crate::icons::paint(painter, b.shrink(4.0), crate::icons::Icon::Record, dot);
+            } else {
+                painter.text(
+                    b.center(),
+                    Align2::CENTER_CENTER,
+                    label,
+                    FontId::proportional(11.0),
+                    text,
+                );
+            }
         }
         painter.hline(
             rect.x_range(),

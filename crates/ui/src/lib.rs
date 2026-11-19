@@ -420,10 +420,15 @@ impl ProjectWindow {
         if !editing && let Some(before) = self.tempo_before.take() {
             self.checkpoint(before);
         }
-        if ui
-            .selectable_label(self.metronome, "Klick")
-            .on_hover_text("Metronom (C)")
-            .clicked()
+        let accent = theme::tokens(ui.ctx()).accent;
+        if icons::icon_button(
+            ui,
+            icons::Icon::Metronome,
+            self.metronome,
+            Some(accent),
+            "Metronom (C)",
+        )
+        .clicked()
         {
             self.toggle_metronome();
         }
@@ -853,75 +858,116 @@ impl ProjectWindow {
         }
     }
 
+    /// Transportleiste (docs/ui-parity.md, „Transportleiste“): Locatoren mit Punch und Cycle,
+    /// Positionsanzeige, Transportknöpfe, Tempo/Takt/Metronom, rechts der Status.
     fn transport_bar(&mut self, ui: &mut Ui) {
+        use icons::{Icon, icon_button};
+        let t = theme::tokens(ui.ctx());
         ui.horizontal(|ui| {
-            if ui.button("⏮").on_hover_text("Zum Anfang (Pos1)").clicked() {
+            ui.spacing_mut().item_spacing.x = 2.0;
+            let tempo = self.project.tempo.clone();
+            let fmt = |ticks: u64| {
+                let (b, be, s, _) = tempo.bars_beats(Position(ticks));
+                format!("{b}.{be}.{s}")
+            };
+            // Locatoren, dazwischen Punch-In, Cycle, Punch-Out
+            ui.label(RichText::new(format!("L {}", fmt(self.left_locator))).monospace())
+                .on_hover_text("Linker Locator (Strg+Klick ins Lineal)");
+            ui.add_space(4.0);
+            if icon_button(
+                ui,
+                Icon::PunchIn,
+                self.punch_in,
+                Some(t.rec),
+                "Punch-In (I)",
+            )
+            .clicked()
+            {
+                self.punch_in = !self.punch_in;
+            }
+            if icon_button(ui, Icon::Cycle, self.cycle, Some(t.accent), "Cycle (/)").clicked() {
+                self.toggle_cycle();
+            }
+            if icon_button(
+                ui,
+                Icon::PunchOut,
+                self.punch_out,
+                Some(t.rec),
+                "Punch-Out (O)",
+            )
+            .clicked()
+            {
+                self.punch_out = !self.punch_out;
+            }
+            ui.add_space(4.0);
+            ui.label(RichText::new(format!("R {}", fmt(self.right_locator))).monospace())
+                .on_hover_text("Rechter Locator (Alt+Klick ins Lineal)");
+            icons::group_gap(ui);
+
+            // Positionsanzeige
+            let (bar, beat, six, tick) = tempo.bars_beats(Position(self.cursor));
+            let secs = tempo.seconds(Position(self.cursor));
+            egui::Frame::new()
+                .fill(t.counter_bg)
+                .corner_radius(3)
+                .inner_margin(egui::Margin::symmetric(8, 1))
+                .show(ui, |ui| {
+                    ui.spacing_mut().item_spacing.x = 10.0;
+                    ui.label(
+                        RichText::new(format!("{bar}.{beat}.{six}.{tick:03}"))
+                            .monospace()
+                            .size(18.0)
+                            .color(t.counter_text),
+                    );
+                    ui.label(
+                        RichText::new(format!("{:02}:{:06.3}", (secs / 60.0) as u32, secs % 60.0))
+                            .monospace()
+                            .color(t.text_dim),
+                    );
+                });
+            icons::group_gap(ui);
+
+            // Transportknöpfe
+            let bar_len = self.bar_ticks();
+            if icon_button(ui, Icon::ToStart, false, None, "Zum Anfang (Pos1, Komma)").clicked() {
                 self.locate(0);
             }
-            if ui.button("⏹").on_hover_text("Stopp").clicked() {
+            if icon_button(ui, Icon::Rewind, false, None, "Zurückspulen um einen Takt").clicked() {
+                self.locate(self.cursor.saturating_sub(bar_len));
+            }
+            if icon_button(ui, Icon::Forward, false, None, "Vorspulen um einen Takt").clicked() {
+                self.locate(self.cursor.saturating_add(bar_len));
+            }
+            if icon_button(ui, Icon::Stop, false, None, "Stopp").clicked() {
                 self.stop_transport();
             }
             let playing = self.is_playing();
-            if ui
-                .selectable_label(playing, "▶")
-                .on_hover_text("Start/Stopp (Leertaste)")
-                .clicked()
+            if icon_button(
+                ui,
+                Icon::Start,
+                playing,
+                Some(t.monitor),
+                "Start (Leertaste)",
+            )
+            .clicked()
             {
                 self.toggle_play();
             }
-            let rec = egui::RichText::new("⏺").color(if self.recording {
-                crate::theme::tokens(ui.ctx()).rec
-            } else {
-                ui.visuals().text_color()
-            });
-            if ui
-                .selectable_label(self.recording, rec)
-                .on_hover_text("Aufnahme (*)")
-                .clicked()
+            if icon_button(
+                ui,
+                Icon::Record,
+                self.recording,
+                Some(t.rec),
+                "Aufnahme (*)",
+            )
+            .clicked()
             {
                 self.toggle_record();
             }
-            if ui
-                .selectable_label(self.cycle, "🔁")
-                .on_hover_text("Cycle (/)")
-                .clicked()
-            {
-                self.toggle_cycle();
-            }
-            ui.selectable_value_toggle_punch(
-                &mut self.punch_in,
-                "Punch-In",
-                "Aufnahme erst ab dem linken Locator (I)",
-            );
-            ui.selectable_value_toggle_punch(
-                &mut self.punch_out,
-                "Punch-Out",
-                "Aufnahme nur bis zum rechten Locator (O)",
-            );
-            ui.separator();
-            let tempo = &self.project.tempo;
-            let (bar, beat, six, tick) = tempo.bars_beats(Position(self.cursor));
-            let secs = tempo.seconds(Position(self.cursor));
-            ui.label(
-                RichText::new(format!("{bar}.{beat}.{six}.{tick:03}"))
-                    .monospace()
-                    .size(18.0),
-            );
-            ui.label(
-                RichText::new(format!("{:02}:{:06.3}", (secs / 60.0) as u32, secs % 60.0))
-                    .monospace(),
-            );
-            ui.separator();
-            let fmt = |t: u64| {
-                let (b, be, s, _) = tempo.bars_beats(Position(t));
-                format!("{b}.{be}.{s}")
-            };
-            ui.label(format!(
-                "L {}  R {}",
-                fmt(self.left_locator),
-                fmt(self.right_locator)
-            ));
+            icons::group_gap(ui);
+            ui.spacing_mut().item_spacing.x = 6.0;
             self.tempo_controls(ui);
+
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 ui.weak(format!("{:.1} ms/Frame", self.frame_ms));
                 ui.separator();
@@ -944,23 +990,6 @@ impl ProjectWindow {
 
     pub(crate) fn beat_ticks(&self) -> u64 {
         self.project.tempo.signature.beat_ticks()
-    }
-}
-
-/// Kleiner Umschalter für die Transportleiste.
-trait PunchToggle {
-    fn selectable_value_toggle_punch(&mut self, value: &mut bool, label: &str, hint: &str);
-}
-
-impl PunchToggle for Ui {
-    fn selectable_value_toggle_punch(&mut self, value: &mut bool, label: &str, hint: &str) {
-        if self
-            .selectable_label(*value, label)
-            .on_hover_text(hint)
-            .clicked()
-        {
-            *value = !*value;
-        }
     }
 }
 
@@ -1244,6 +1273,26 @@ mod tests {
         );
         // Ziffern im Textfeld wählen kein Werkzeug.
         assert_eq!(h.state().tool, Tool::Select);
+    }
+
+    #[test]
+    fn transport_symbols_wind_and_toggle_punch_and_click() {
+        let (w, _) = one_event_window();
+        let bar = w.bar_ticks();
+        let mut h = window_harness(w);
+        h.get_by_label("Vorspulen um einen Takt").click();
+        h.run_steps(1);
+        h.get_by_label("Vorspulen um einen Takt").click();
+        h.run_steps(1);
+        h.get_by_label("Zurückspulen um einen Takt").click();
+        h.run_steps(1);
+        assert_eq!(h.state().cursor, bar);
+        h.get_by_label("Punch-In (I)").click();
+        h.get_by_label("Punch-Out (O)").click();
+        h.get_by_label("Metronom (C)").click();
+        h.run_steps(1);
+        let w = h.state();
+        assert!(w.punch_in && w.punch_out && w.metronome);
     }
 
     #[test]
