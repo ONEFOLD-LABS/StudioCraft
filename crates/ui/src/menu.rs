@@ -417,6 +417,11 @@ impl ProjectWindow {
             self.toggle_cycle();
             ui.close();
         }
+        if item(self, ui, "Nachträgliche Aufnahme", Cmd::RetrospectiveRecord) {
+            self.retrospective_record();
+            ui.close();
+        }
+        self.record_mode_menu(ui);
         if item(self, ui, "Metronom an/aus", Cmd::Metronome) {
             self.toggle_metronome();
             ui.close();

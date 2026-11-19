@@ -27,6 +27,7 @@ pub mod layout;
 pub mod markers;
 pub mod model;
 pub mod quantize;
+pub mod recording;
 pub mod sanitize;
 pub mod time;
 
@@ -41,6 +42,7 @@ pub use model::{
     Project, SendSlot, TRACK_COLORS, TimeBase, Track, TrackId, TrackInput, TrackKind, db_to_gain,
 };
 pub use quantize::{Feel, NoteValue, Quantize, QuantizeValue};
+pub use recording::{CycleRecordMode, MidiRecordMode, RecordSettings, TakeNote};
 pub use time::{
     BPM_RANGE, Position, SignatureEvent, TICKS_PER_QUARTER, TempoEvent, TempoMap, TimeSignature,
 };
