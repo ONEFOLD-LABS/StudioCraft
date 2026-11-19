@@ -113,10 +113,17 @@ pub enum FadeCurve {
     Exponential,
     /// Weicher Anfang und Schluss.
     SCurve,
+    /// Gleiche Leistung (Sinus/Kosinus): im Crossfade bleibt die Lautheit gleich.
+    EqualPower,
 }
 
 impl FadeCurve {
-    pub const ALL: [FadeCurve; 3] = [Self::Linear, Self::Exponential, Self::SCurve];
+    pub const ALL: [FadeCurve; 4] = [
+        Self::Linear,
+        Self::Exponential,
+        Self::SCurve,
+        Self::EqualPower,
+    ];
 
     pub fn is_linear(&self) -> bool {
         *self == Self::Linear
@@ -127,6 +134,7 @@ impl FadeCurve {
             Self::Linear => "Linear",
             Self::Exponential => "Exponentiell",
             Self::SCurve => "S-Kurve",
+            Self::EqualPower => "Gleiche Leistung",
         }
     }
 
@@ -141,6 +149,7 @@ impl FadeCurve {
             Self::Linear => x,
             Self::Exponential => x * x,
             Self::SCurve => x * x * (3.0 - 2.0 * x),
+            Self::EqualPower => (x * std::f32::consts::FRAC_PI_2).sin(),
         }
     }
 }
@@ -917,6 +926,37 @@ impl Project {
         (f.0, f.1, g.0, g.1) != before
     }
 
+    /// Crossfade-Partner des Fade-Ins (`fade_in`) bzw. Fade-Outs von `id`: das Event auf derselben
+    /// Spur, dessen Fade-Out bzw. Fade-In dieselbe Überlappung abdeckt. Liefert (früheres,
+    /// späteres) Event.
+    pub fn crossfade_pair(&self, id: EventId, fade_in: bool) -> Option<(EventId, EventId)> {
+        let (t, _) = self.find(id)?;
+        let e = self.event(id)?;
+        let partner = self.tracks[t].events.iter().find(|o| {
+            if o.id == id {
+                return false;
+            }
+            if fade_in {
+                e.fade_in > 0
+                    && o.fade_out > 0
+                    && o.start.0 < e.start.0
+                    && o.end() > e.start.0
+                    && o.end() < e.end()
+            } else {
+                e.fade_out > 0
+                    && o.fade_in > 0
+                    && o.start.0 > e.start.0
+                    && o.start.0 < e.end()
+                    && o.end() > e.end()
+            }
+        })?;
+        Some(if fade_in {
+            (partner.id, id)
+        } else {
+            (id, partner.id)
+        })
+    }
+
     /// Crossfades für jedes überlappende Paar unter `ids` und ihren Nachbarn auf der Spur.
     /// Gibt zurück, ob sich etwas geändert hat.
     pub fn crossfade_selection(&mut self, ids: &[EventId]) -> bool {
@@ -1478,6 +1518,27 @@ mod tests {
         let far = p.create_event(t, 9000, 100).expect("far");
         assert!(!p.crossfade(a, far));
         assert!(!p.crossfade_selection(&[a]), "already crossfaded");
+    }
+
+    #[test]
+    fn crossfade_pairs_are_found_from_both_sides_and_equal_power_keeps_power() {
+        let mut p = Project::default();
+        let t = p.add_track(TrackKind::Audio, "A");
+        let a = p.create_event(t, 0, 2000).expect("a");
+        let b = p.create_event(t, 1500, 2000).expect("b");
+        assert_eq!(p.crossfade_pair(b, true), None, "no fades yet");
+        assert!(p.crossfade(a, b));
+        assert_eq!(p.crossfade_pair(b, true), Some((a, b)));
+        assert_eq!(p.crossfade_pair(a, false), Some((a, b)));
+        assert_eq!(p.crossfade_pair(a, true), None);
+        for i in 0..=10 {
+            let x = i as f32 / 10.0;
+            let (o, n) = (
+                FadeCurve::EqualPower.shape(1.0 - x),
+                FadeCurve::EqualPower.shape(x),
+            );
+            assert!((o * o + n * n - 1.0).abs() < 1e-5);
+        }
     }
 
     #[test]
