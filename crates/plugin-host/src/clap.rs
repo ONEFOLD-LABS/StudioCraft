@@ -176,6 +176,9 @@ impl Library {
     }
 
     pub(crate) fn descriptors(&self) -> Vec<PluginInfo> {
+        // Hauptthread-Aufruf: Manche Plugins bauen ihre Beschreibungen erst hier und nicht
+        // thread-sicher, während andere Threads Instanzen erzeugen.
+        let _main = main_thread_lock();
         let Some(f) = self.factory() else {
             return Vec::new();
         };
