@@ -80,23 +80,27 @@ pub struct PreparedInput {
 impl PreparedInput {
     /// Standard-Eingangsgerät des Hosts mit genau `rate` (muss zur Ausgabe passen).
     pub fn open(host_name: Option<&str>, rate: u32) -> Result<Self, String> {
-        let host = match host_name {
-            None => cpal::default_host(),
-            Some(name) => {
-                let id = cpal::available_hosts()
-                    .into_iter()
-                    .find(|h| h.name().eq_ignore_ascii_case(name))
-                    .ok_or_else(|| format!("Audio-Host „{name}“ gibt es in diesem Build nicht"))?;
-                cpal::host_from_id(id).map_err(|e| format!("Audio-Host „{name}“: {e}"))?
-            }
+        Self::open_device(host_name, None, rate)
+    }
+
+    /// Wie [`Self::open`], mit einem Eingabegerät nach Namen (`None`: Standard).
+    pub fn open_device(
+        host_name: Option<&str>,
+        device: Option<&str>,
+        rate: u32,
+    ) -> Result<Self, String> {
+        let host = crate::output::host_by_name(host_name)?;
+        let device = match device {
+            None => host
+                .default_input_device()
+                .ok_or("Kein Audio-Eingang gefunden")?,
+            Some(wanted) => host
+                .input_devices()
+                .map_err(|e| format!("Eingabegeräte: {e}"))?
+                .find(|d| crate::output::device_name(d) == wanted)
+                .ok_or_else(|| format!("Eingabegerät „{wanted}“ nicht gefunden"))?,
         };
-        let device = host
-            .default_input_device()
-            .ok_or("Kein Audio-Eingang gefunden")?;
-        let name = device
-            .description()
-            .map(|d| d.name().to_owned())
-            .unwrap_or_else(|_| "unbekannt".into());
+        let name = crate::output::device_name(&device);
         let default = device
             .default_input_config()
             .map_err(|e| format!("Eingang „{name}“: {e}"))?;

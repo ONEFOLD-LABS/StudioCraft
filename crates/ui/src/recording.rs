@@ -89,7 +89,11 @@ impl ProjectWindow {
         if self.recorder.is_some() {
             return Ok(());
         }
-        let prepared = PreparedInput::open(self.audio_host.as_deref(), self.sample_rate)?;
+        let prepared = PreparedInput::open_device(
+            self.audio_host.as_deref(),
+            self.audio_choice.input.as_deref(),
+            self.sample_rate,
+        )?;
         let (input, recorder, monitor) = prepared.start()?;
         if let Some(t) = &mut self.transport {
             // Nur einmal pro Sitzung; ist die Queue gerade voll, bleibt Monitor stumm.
@@ -164,6 +168,10 @@ impl ProjectWindow {
 
     /// Öffnet alle MIDI-Eingänge (Keyboard). Ohne Engine nichts zu tun.
     pub fn open_midi_inputs(&mut self) {
+        if !self.midi_inputs_on {
+            self.midi_status = "MIDI: aus".into();
+            return;
+        }
         let Some(t) = &self.transport else { return };
         match studiocraft_engine::midi::MidiInputs::open_all(&t.midi) {
             Ok(m) if m.ports.is_empty() => self.midi_status = "MIDI: kein Eingang".into(),

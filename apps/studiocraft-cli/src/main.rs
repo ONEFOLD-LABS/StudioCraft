@@ -178,8 +178,8 @@ fn main() -> ExitCode {
     ctl.send(Command::SetSong(Arc::new(Song::single(clip.samples))));
     let output = match prepared.start(core) {
         Ok(o) => o,
-        Err(e) => {
-            eprintln!("Fehler: {e}");
+        Err(b) => {
+            eprintln!("Fehler: {}", b.1);
             return ExitCode::FAILURE;
         }
     };

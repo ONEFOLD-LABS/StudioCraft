@@ -415,6 +415,11 @@ impl ProjectWindow {
         if changed {
             self.save_settings();
         }
+        ui.separator();
+        if ui.button("Audio- und MIDI-Geräte …").clicked() {
+            self.open_device_dialog();
+            ui.close();
+        }
     }
 }
 
