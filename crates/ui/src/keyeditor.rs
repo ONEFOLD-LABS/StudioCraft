@@ -66,6 +66,8 @@ pub(crate) struct KeyEditor {
     pub preview: Option<u8>,
     /// Der Editor hatte den letzten Klick: Entf usw. wirken auf Noten.
     pub focused: bool,
+    /// Akustisches Feedback: angeklickte und verschobene Noten erklingen.
+    pub feedback: bool,
     /// Lage des Notenrasters und der Velocity-Spur im letzten Frame (für Tests).
     pub grid_rect: Rect,
     pub vel_rect: Rect,
@@ -80,6 +82,7 @@ impl Default for KeyEditor {
             drag: None,
             preview: None,
             focused: false,
+            feedback: true,
             grid_rect: Rect::NOTHING,
             vel_rect: Rect::NOTHING,
         }
@@ -161,6 +164,13 @@ impl ProjectWindow {
         self.show_lower = true;
     }
 
+    /// Akustisches Feedback für eine Note (nur wenn eingeschaltet).
+    pub(crate) fn note_feedback(&mut self, pitch: u8) {
+        if self.key_editor.feedback {
+            self.preview(Some(pitch));
+        }
+    }
+
     fn part_track(&self) -> Option<usize> {
         self.key_editor
             .part
@@ -222,6 +232,12 @@ pub(crate) fn show(w: &mut ProjectWindow, ui: &mut Ui) {
         .map(|(t, _)| w.project.tracks[t].color)
         .map_or(Color32::LIGHT_BLUE, |c| Color32::from_rgb(c[0], c[1], c[2]));
 
+    ui.horizontal(|ui| {
+        ui.toggle_value(&mut w.key_editor.feedback, "Akustisches Feedback")
+            .on_hover_text("Angeklickte und verschobene Noten erklingen");
+        ui.toggle_value(&mut w.follow_playback, "Folgen (F)")
+            .on_hover_text("Die Ansicht folgt dem Cursor während der Wiedergabe");
+    });
     let (resp, painter) = ui.allocate_painter(ui.available_size(), Sense::click_and_drag());
     let r = resp.rect;
     let keys = Rect::from_min_max(
@@ -237,6 +253,15 @@ pub(crate) fn show(w: &mut ProjectWindow, ui: &mut Ui) {
         pos2(r.right(), r.bottom() - VEL_H),
     );
     let vel = Rect::from_min_max(pos2(r.left() + KEYS_W, r.bottom() - VEL_H + 4.0), r.max);
+    // Taste F: während der Wiedergabe mitblättern, wenn der Cursor hinausläuft.
+    if w.follow_playback && w.is_playing() {
+        let v = &mut w.key_editor.view;
+        let visible = f64::from(grid.width() / v.px_per_quarter) * TPQ;
+        let c = w.cursor as f64;
+        if c > v.scroll_ticks + visible * 0.95 || c < v.scroll_ticks {
+            v.scroll_ticks = (c - visible * 0.05).max(0.0);
+        }
+    }
 
     // Scrollen und Zoomen wie im Projektfenster.
     if resp.hovered() {
@@ -424,7 +449,7 @@ fn interact(
                             note: i,
                         }
                     } else {
-                        w.preview(Some(n.pitch));
+                        w.note_feedback(n.pitch);
                         NoteDrag::Move {
                             original: notes.to_vec(),
                             anchor_tick: tick,
@@ -452,7 +477,7 @@ fn interact(
                         note: i,
                     });
                 }
-                w.preview(Some(pitch));
+                w.note_feedback(pitch);
             }
             _ => {}
         }
@@ -474,6 +499,11 @@ fn interact(
                 let anchor_start = anchor_tick - grab_offset;
                 let dt = snap(w, raw, mods.alt) - snap(w, anchor_start, mods.alt);
                 let dp = g.pitch(p.y) - anchor_pitch;
+                // Neue Tonhöhe der gegriffenen Note anspielen.
+                let heard = (anchor_pitch + dp).clamp(0, 127) as u8;
+                if w.key_editor.preview.is_some_and(|k| k != heard) {
+                    w.note_feedback(heard);
+                }
                 let copy = mods.command;
                 if let Some(ev) = w.project.event_mut(part) {
                     ev.notes = original.clone();

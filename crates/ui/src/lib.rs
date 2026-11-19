@@ -100,6 +100,8 @@ pub struct ProjectWindow {
     /// Offene Farbpalette (Klick auf die Farbleiste im Spurkopf) und ihr Alter in Bildern.
     color_popup: Option<(colors::Target, egui::Pos2)>,
     color_popup_age: u8,
+    /// Taste F: Projektfenster und Editoren folgen der Wiedergabe.
+    follow_playback: bool,
     /// Eigene Fenster für Mixer und Editoren.
     windows: windows::Windows,
     /// Inspector-Spalte in der linken Zone (Alt+I); die Zone selbst ist `show_inspector`
@@ -263,6 +265,7 @@ impl ProjectWindow {
             grid_zoom: false,
             color_popup: None,
             color_popup_age: 0,
+            follow_playback: true,
             windows: windows::Windows::new(prefs.windows),
             show_inspector_column: true,
             layout_gen: 0,
@@ -3455,6 +3458,74 @@ mod tests {
             h.state().project.event(id).map(|e| (e.start.0, e.length)),
             Some((ev.start.0, ev.length))
         );
+    }
+
+    /// Instrument-Part mit zwei Noten, im Key-Editor geöffnet und fokussiert.
+    fn key_editor_window() -> (ProjectWindow, EventId) {
+        let mut p = Project::default();
+        let t = p.add_track(TrackKind::Instrument, "Synth");
+        let part = p.create_event(t, 0, 4 * 3840).unwrap();
+        p.event_mut(part).unwrap().notes = vec![
+            studiocraft_project::Note {
+                pitch: 60,
+                velocity: 100,
+                start: 0,
+                length: 480,
+            },
+            studiocraft_project::Note {
+                pitch: 64,
+                velocity: 100,
+                start: 480,
+                length: 480,
+            },
+        ];
+        let mut w = ProjectWindow::new(p, None, String::new());
+        w.open_key_editor(part);
+        w.key_editor.focused = true;
+        w.key_editor.selection = vec![0];
+        (w, part)
+    }
+
+    #[test]
+    fn shift_arrows_transpose_by_an_octave_also_in_the_editor_window() {
+        let (w, part) = key_editor_window();
+        let mut h = window_harness(w);
+        let pitch =
+            |h: &Harness<'_, ProjectWindow>| h.state().project.event(part).unwrap().notes[0].pitch;
+        h.key_press_modifiers(egui::Modifiers::SHIFT, Key::ArrowUp);
+        h.run_steps(1);
+        assert_eq!(pitch(&h), 72);
+        h.key_press_modifiers(egui::Modifiers::SHIFT, Key::ArrowDown);
+        h.key_press_modifiers(egui::Modifiers::SHIFT, Key::ArrowDown);
+        h.run_steps(1);
+        assert_eq!(pitch(&h), 48);
+        // With the editor in its own window the arrows still reach the notes.
+        h.state_mut().show_lower = false;
+        h.state_mut().windows.editor = Some(windows::EditorWindow::Key);
+        h.state_mut().key_editor.focused = true;
+        h.key_press(Key::ArrowUp);
+        h.run_steps(1);
+        assert_eq!(pitch(&h), 49);
+    }
+
+    #[test]
+    fn f_toggles_follow_and_feedback_can_be_switched_off() {
+        let (mut w, _) = key_editor_window();
+        assert!(w.follow_playback && w.key_editor.feedback);
+        w.key_editor.feedback = false;
+        w.note_feedback(60);
+        assert_eq!(w.key_editor.preview, None, "no sound with feedback off");
+        w.key_editor.feedback = true;
+        w.note_feedback(60);
+        assert_eq!(w.key_editor.preview, Some(60));
+        w.key_editor.focused = false;
+        let mut h = window_harness(w);
+        h.key_press(Key::F);
+        h.run_steps(1);
+        assert!(!h.state().follow_playback);
+        h.get_by_label("Folgen (F)").click();
+        h.run_steps(1);
+        assert!(h.state().follow_playback);
     }
 
     #[test]
