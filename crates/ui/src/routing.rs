@@ -50,34 +50,93 @@ impl ProjectWindow {
     }
 
     /// Ausgang der Spur: Summe oder eine Gruppe.
+    /// Eingang einer Audio-Spur: ein Eingangsbus der Audio-Anschlüsse.
+    pub(crate) fn input_ui(&mut self, ui: &mut Ui, track: usize) {
+        let current = self.project.tracks[track].input_bus;
+        let label = current
+            .and_then(|id| self.project.io.input(id))
+            .map_or_else(
+                || self.project.tracks[track].input.label(),
+                |b| b.name.clone(),
+            );
+        let mut choice = None;
+        ui.horizontal(|ui| {
+            let l = ui.label("Eingang");
+            egui::ComboBox::from_id_salt(("eingang", track))
+                .selected_text(label)
+                .show_ui(ui, |ui| {
+                    for b in &self.project.io.inputs {
+                        let text = format!("{} ({})", b.name, b.ports_label());
+                        if ui.selectable_label(current == Some(b.id), text).clicked() {
+                            choice = Some(b.id);
+                        }
+                    }
+                    ui.separator();
+                    if ui.button("Audio-Anschlüsse …").clicked() {
+                        self.io_dialog = true;
+                    }
+                })
+                .response
+                .labelled_by(l.id);
+        });
+        if let Some(id) = choice.filter(|&id| Some(id) != current) {
+            let before = self.project.clone();
+            self.project.tracks[track].input_bus = Some(id);
+            self.checkpoint(before);
+        }
+    }
+
     pub(crate) fn output_ui(&mut self, ui: &mut Ui, track: usize) {
         let me = self.project.tracks[track].id;
         let current = self.project.tracks[track].output;
-        let label = current.map_or("Summe".into(), |id| self.track_name(id));
-        let mut choice = None;
+        let current_bus = self.project.tracks[track].out_bus;
+        let main_name = self
+            .project
+            .io
+            .outputs
+            .first()
+            .map_or("Summe".to_owned(), |b| b.name.clone());
+        let label = match (
+            current,
+            current_bus.and_then(|id| self.project.io.output(id)),
+        ) {
+            (Some(id), _) => self.track_name(id),
+            (None, Some(b)) => b.name.clone(),
+            (None, None) => main_name.clone(),
+        };
+        // Wahl: Gruppe, Hauptmix (None, None) oder weiterer Ausgangsbus (None, Some).
+        let mut choice: Option<(Option<TrackId>, Option<u32>)> = None;
         ui.horizontal(|ui| {
             let l = ui.label("Ausgang");
             egui::ComboBox::from_id_salt(("ausgang", track))
                 .selected_text(label)
                 .show_ui(ui, |ui| {
-                    if ui.selectable_label(current.is_none(), "Summe").clicked() {
-                        choice = Some(None);
+                    let main = current.is_none() && current_bus.is_none();
+                    if ui.selectable_label(main, main_name.as_str()).clicked() {
+                        choice = Some((None, None));
+                    }
+                    for b in self.project.io.outputs.iter().skip(1) {
+                        let on = current.is_none() && current_bus == Some(b.id);
+                        if ui.selectable_label(on, b.name.as_str()).clicked() {
+                            choice = Some((None, Some(b.id)));
+                        }
                     }
                     for id in self.route_targets(me, true) {
                         if ui
                             .selectable_label(current == Some(id), self.track_name(id))
                             .clicked()
                         {
-                            choice = Some(Some(id));
+                            choice = Some((Some(id), None));
                         }
                     }
                 })
                 .response
                 .labelled_by(l.id);
         });
-        if let Some(c) = choice.filter(|c| *c != current) {
+        if let Some(c) = choice.filter(|c| *c != (current, current_bus)) {
             let before = self.project.clone();
-            self.project.tracks[track].output = c;
+            self.project.tracks[track].output = c.0;
+            self.project.tracks[track].out_bus = c.1;
             self.checkpoint(before);
         }
     }

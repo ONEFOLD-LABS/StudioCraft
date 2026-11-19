@@ -466,6 +466,12 @@ impl ProjectWindow {
             );
         }
         ui.separator();
+        let io = egui::Button::new("Audio-Anschlüsse …")
+            .shortcut_text(self.key_label(ui.ctx(), Cmd::AudioConnections));
+        if ui.add(io).clicked() {
+            self.io_dialog = true;
+            ui.close();
+        }
         if ui.button("Audio- und MIDI-Geräte …").clicked() {
             self.open_device_dialog();
             ui.close();

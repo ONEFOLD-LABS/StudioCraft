@@ -93,7 +93,7 @@ impl Compensation {
             }
         }
         let total = (0..n)
-            .filter(|&i| song.tracks[i].output == Output::Master)
+            .filter(|&i| matches!(song.tracks[i].output, Output::Master | Output::Hw(_)))
             .map(|i| o[i])
             .max()
             .unwrap_or(0);
@@ -101,7 +101,7 @@ impl Compensation {
         for (i, t) in song.tracks.iter().enumerate() {
             let arrive = |bus: usize| reader(bus).map_or(o[i], |r| e[r]);
             let direct = match t.output {
-                Output::Master => total,
+                Output::Master | Output::Hw(_) => total,
                 Output::Bus(b) => arrive(b),
                 Output::Nowhere => o[i],
             }

@@ -257,9 +257,12 @@ pub struct Track {
     pub volume_db: f32,
     /// Panorama: −1 links, 0 Mitte, +1 rechts (Stereo-Balance).
     pub pan: f32,
-    /// Aufnahme-Eingang (Audio-Spuren).
+    /// Aufnahme-Eingang (Audio-Spuren); gilt, wenn kein Eingangsbus gewählt ist.
     #[serde(default)]
     pub input: TrackInput,
+    /// Eingangsbus (Audio-Anschlüsse); `None`: `input`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub input_bus: Option<u32>,
     /// Insert-Effekte in Signalfluss-Reihenfolge.
     #[serde(default)]
     pub inserts: Vec<InsertSlot>,
@@ -269,6 +272,10 @@ pub struct Track {
     /// Ausgang: `None` = Summe (Ausgangsbus), sonst eine Gruppen-Spur.
     #[serde(default)]
     pub output: Option<TrackId>,
+    /// Ausgangsbus, wenn `output` die Summe ist: `None` = Hauptmix, sonst ein weiterer
+    /// Ausgangsbus der Audio-Anschlüsse.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub out_bus: Option<u32>,
     /// Sends an FX-Kanäle oder Gruppen (Spec: Sends 1–8).
     #[serde(default)]
     pub sends: Vec<SendSlot>,
@@ -560,6 +567,9 @@ pub struct Project {
     /// MIDI-Aufnahmemodi (Projekteinstellung).
     #[serde(default, skip_serializing_if = "crate::RecordSettings::is_default")]
     pub record: crate::RecordSettings,
+    /// Audio-Anschlüsse: Ein- und Ausgangsbusse.
+    #[serde(default, skip_serializing_if = "crate::AudioIo::is_default")]
+    pub io: crate::AudioIo,
     /// Metronom und Vorzähler (Projekteinstellung).
     #[serde(default, skip_serializing_if = "crate::ClickSettings::is_default")]
     pub click: crate::ClickSettings,
@@ -595,6 +605,7 @@ impl Default for Project {
             markers: Vec::new(),
             record: crate::RecordSettings::default(),
             click: crate::ClickSettings::default(),
+            io: crate::AudioIo::default(),
             layout: crate::WindowLayout::default(),
             layouts: Vec::new(),
         }
@@ -738,6 +749,8 @@ impl Project {
                 volume_db: 0.0,
                 pan: 0.0,
                 input: TrackInput::default(),
+                input_bus: None,
+                out_bus: None,
                 inserts: Vec::new(),
                 instrument: None,
                 output: None,
@@ -1334,6 +1347,8 @@ impl Project {
             volume_db: 0.0,
             pan: 0.0,
             input: TrackInput::default(),
+            input_bus: None,
+            out_bus: None,
             inserts: Vec::new(),
             instrument: None,
             output: None,

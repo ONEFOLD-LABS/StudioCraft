@@ -135,6 +135,7 @@ impl App {
                 if choice.sample_rate.is_some_and(|r| r != rate) {
                     status.push_str(" (neue Abtastrate nach Neustart)");
                 }
+                self.window.set_output_channels(info.channels);
                 self.window.audio_switched(Ok(status));
             }
             Err(b) => {
@@ -211,12 +212,16 @@ fn main() -> ExitCode {
             ..wanted.clone()
         })
     });
+    let mut out_channels = 2u16;
     let (transport, audio, status) = match prepared {
         Ok(prepared) => {
             let info = prepared.info.clone();
             let (core, ctl) = engine(info.sample_rate, project.tempo.clone());
             match prepared.start(core) {
-                Ok(out) => (Some(ctl), Some(out), status_line(&info)),
+                Ok(out) => {
+                    out_channels = info.channels;
+                    (Some(ctl), Some(out), status_line(&info))
+                }
                 // Beim Start gibt es noch keine Plugins: der Kern darf hier gehen.
                 Err(b) => (None, None, format!("Kein Audio: {}", b.1)),
             }
@@ -226,6 +231,7 @@ fn main() -> ExitCode {
 
     let mut window = ProjectWindow::new(project, transport, status);
     window.set_audio_choice(choice);
+    window.set_output_channels(out_channels);
     if let Some(n) = note {
         window.audio_switched(Err(format!("{n}; Standardgerät verwendet")));
     }

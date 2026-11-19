@@ -279,6 +279,36 @@ impl PreparedOutput {
     }
 }
 
+/// So viele Gerätekanäle werden beschrieben; weitere bleiben still.
+const MAX_DEVICE_CHANNELS: usize = 64;
+
+/// Addiert einen Stereo-Bus auf seine Gerätekanäle: (erster Kanal, Stereo). Mono-Busse und
+/// Mono-Geräte bekommen die Mitte. Liegt der Hauptmix außerhalb des Geräts, geht er auf die
+/// ersten Kanäle (nie still, nur weil ein Gerät weniger Kanäle hat).
+fn mix_bus(
+    acc: &mut [f32],
+    channels: usize,
+    (first, stereo): (u16, bool),
+    lr: [f32; 2],
+    main: bool,
+) {
+    let n = channels.min(acc.len());
+    let mut first = usize::from(first);
+    let width = if stereo && n > 1 { 2 } else { 1 };
+    if first + width > n {
+        if !main {
+            return;
+        }
+        first = 0;
+    }
+    if width == 2 {
+        acc[first] += lr[0];
+        acc[first + 1] += lr[1];
+    } else {
+        acc[first] += (lr[0] + lr[1]) * 0.5;
+    }
+}
+
 type StreamParts = (
     rtrb::Consumer<EngineCore>,
     Arc<StreamShared>,
@@ -328,14 +358,24 @@ where
                     let frames = out.len() / channels;
                     let block = &mut scratch[..frames * 2];
                     core.process(block);
-                    for (frame, lr) in out.chunks_exact_mut(channels).zip(block.chunks_exact(2)) {
-                        if channels == 1 {
-                            frame[0] = T::from_sample((lr[0] + lr[1]) * 0.5);
-                            continue;
+                    // Hauptmix und weitere Ausgangsbusse auf ihre Gerätekanäle (Audio-
+                    // Anschlüsse); überlappende Busse addieren sich.
+                    let layout = core.output_layout();
+                    let main = layout.first().copied().unwrap_or((0, true));
+                    for (i, frame) in out.chunks_exact_mut(channels).enumerate() {
+                        let mut acc = [0.0f32; MAX_DEVICE_CHANNELS];
+                        let lr = [block[i * 2], block[i * 2 + 1]];
+                        mix_bus(&mut acc, channels, main, lr, true);
+                        for (k, &bus) in layout.iter().enumerate().skip(1) {
+                            let b = core.hw_block(k);
+                            if let Some(lr) = b.get(i * 2..i * 2 + 2) {
+                                mix_bus(&mut acc, channels, bus, [lr[0], lr[1]], false);
+                            }
                         }
-                        frame[0] = T::from_sample(lr[0]);
-                        frame[1] = T::from_sample(lr[1]);
-                        for s in &mut frame[2..] {
+                        for (s, a) in frame.iter_mut().zip(acc.iter()) {
+                            *s = T::from_sample(*a);
+                        }
+                        for s in frame.iter_mut().skip(MAX_DEVICE_CHANNELS) {
                             *s = T::EQUILIBRIUM;
                         }
                     }
@@ -353,6 +393,23 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn busses_land_on_their_device_channels() {
+        let mut acc = [0.0f32; MAX_DEVICE_CHANNELS];
+        // Main on 3/4 of a 4-channel device, a mono bus on 1, a bus beyond the device.
+        mix_bus(&mut acc, 4, (2, true), [0.5, -0.5], true);
+        mix_bus(&mut acc, 4, (0, false), [1.0, 0.0], false);
+        mix_bus(&mut acc, 4, (4, true), [1.0, 1.0], false);
+        assert_eq!(&acc[..4], &[0.5, 0.0, 0.5, -0.5]);
+        // Main beyond a stereo device falls back to 1/2; mono device gets the middle.
+        let mut acc = [0.0f32; MAX_DEVICE_CHANNELS];
+        mix_bus(&mut acc, 2, (6, true), [0.2, 0.4], true);
+        assert_eq!(&acc[..2], &[0.2, 0.4]);
+        let mut acc = [0.0f32; MAX_DEVICE_CHANNELS];
+        mix_bus(&mut acc, 1, (0, true), [0.2, 0.4], true);
+        assert!((acc[0] - 0.3).abs() < 1e-6);
+    }
 
     /// Gerätewechsel ohne Neustart: der Kern kommt aus dem Stream zurück und läuft auf einem
     /// neuen Stream weiter. Braucht ein Audiogerät: `cargo test -p studiocraft-engine -- --ignored`.
