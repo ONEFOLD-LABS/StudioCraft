@@ -27,7 +27,7 @@ use std::{
     sync::Arc,
 };
 
-use egui::{Color32, Key, RichText, Ui};
+use egui::{Color32, Key, Rect, RichText, Ui};
 use studiocraft_engine::{AudioClip, Command, EngineControl, Song, TransportState};
 use studiocraft_project::{
     ClipId, EventId, PoolClip, Position, Project, TICKS_PER_QUARTER, TrackKind,
@@ -691,7 +691,9 @@ impl ProjectWindow {
             egui::Panel::left("inspector")
                 .resizable(true)
                 .default_size(200.0)
-                .show(ui, |ui| self.inspector(ui));
+                .show(ui, |ui| {
+                    egui::ScrollArea::vertical().show(ui, |ui| self.inspector(ui));
+                });
         }
         egui::CentralPanel::default().show(ui, |ui| timeline::show(self, ui));
 
@@ -821,31 +823,62 @@ impl ProjectWindow {
     }
 
     fn inspector(&mut self, ui: &mut Ui) {
-        ui.heading("Inspector");
         let Some(idx) = self
             .selected_track
             .filter(|&i| i < self.project.tracks.len())
         else {
-            ui.label("Keine Spur ausgewählt");
+            ui.weak("Keine Spur ausgewählt");
             return;
         };
         let channels = self.input_channels();
         let track = &mut self.project.tracks[idx];
+        // Kopf in Spurfarbe mit Name und Typ (docs/ui-parity.md, „Linke Zone“).
+        let color = Color32::from_rgb(track.color[0], track.color[1], track.color[2]);
+        let (head, _) =
+            ui.allocate_exact_size(egui::vec2(ui.available_width(), 26.0), egui::Sense::hover());
+        let luma = 0.299 * f32::from(color.r())
+            + 0.587 * f32::from(color.g())
+            + 0.114 * f32::from(color.b());
+        let on_color = if luma > 140.0 {
+            Color32::BLACK
+        } else {
+            Color32::WHITE
+        };
+        let painter = ui.painter();
+        painter.rect_filled(head, 3.0, color);
+        let kind_rect = painter.text(
+            head.right_center() - egui::vec2(8.0, 0.0),
+            egui::Align2::RIGHT_CENTER,
+            track.kind.label(),
+            egui::FontId::proportional(11.0),
+            on_color,
+        );
+        // Langer Name endet vor dem Spurtyp.
+        let name_clip =
+            Rect::from_min_max(head.min, egui::pos2(kind_rect.left() - 6.0, head.max.y));
+        painter.with_clip_rect(name_clip).text(
+            head.left_center() + egui::vec2(8.0, 0.0),
+            egui::Align2::LEFT_CENTER,
+            &track.name,
+            egui::FontId::proportional(14.0),
+            on_color,
+        );
+        ui.add_space(4.0);
         ui.horizontal(|ui| {
             let label = ui.label("Name");
-            ui.add(egui::TextEdit::singleline(&mut track.name))
+            let mut c = color;
+            // Platz für Farbknopf und Abstände lassen, sonst wächst die Zone jedes Frame.
+            let w = (ui.available_width() - 48.0).max(40.0);
+            ui.add(egui::TextEdit::singleline(&mut track.name).desired_width(w))
                 .labelled_by(label.id);
+            if ui
+                .color_edit_button_srgba(&mut c)
+                .on_hover_text("Spurfarbe")
+                .changed()
+            {
+                track.color = [c.r(), c.g(), c.b()];
+            }
         });
-        ui.label(format!("Typ: {}", track.kind.label()));
-        if track.kind == TrackKind::Audio {
-            egui::ComboBox::from_label("Eingang")
-                .selected_text(track.input.label())
-                .show_ui(ui, |ui| {
-                    for opt in studiocraft_project::TrackInput::options(channels) {
-                        ui.selectable_value(&mut track.input, opt, opt.label());
-                    }
-                });
-        }
         ui.horizontal(|ui| {
             let m = icons::state_toggle(ui, &mut track.mute, "M", theme::tokens(ui.ctx()).mute)
                 .changed();
@@ -871,9 +904,14 @@ impl ProjectWindow {
             let r = ui.add(egui::Slider::new(&mut track.pan, -1.0..=1.0).text("Pan"));
             self.dirty |= r.changed();
         });
-        let mut c = Color32::from_rgb(track.color[0], track.color[1], track.color[2]);
-        if ui.color_edit_button_srgba(&mut c).changed() {
-            track.color = [c.r(), c.g(), c.b()];
+        if track.kind == TrackKind::Audio {
+            egui::ComboBox::from_label("Eingang")
+                .selected_text(track.input.label())
+                .show_ui(ui, |ui| {
+                    for opt in studiocraft_project::TrackInput::options(channels) {
+                        ui.selectable_value(&mut track.input, opt, opt.label());
+                    }
+                });
         }
         ui.label(format!("{} Events", track.events.len()));
         ui.separator();
