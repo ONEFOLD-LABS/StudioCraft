@@ -78,45 +78,34 @@ jobs:
           name: windows-${{ matrix.arch }}
           path: dist/release/*
 
-  desktop:
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - runner: macos-latest
-            target: aarch64-apple-darwin
-            os: macos-aarch64
-          # Intel build cross-compiled on Apple silicon; the macOS 13 runners are gone.
-          - runner: macos-latest
-            target: x86_64-apple-darwin
-            os: macos-x86_64
-    runs-on: ${{ matrix.runner }}
+  macos:
+    # Universal app (aarch64 + x86_64, the Intel half cross-compiled) on Apple silicon.
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: ${{ matrix.target }}
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
       - uses: Swatinem/rust-cache@v2
-      - name: Build
-        run: cargo build --release --locked --target ${{ matrix.target }} -p studiocraft -p studiocraft-cli
-      - name: Archive
-        shell: bash
-        run: |
-          version=$(cargo xtask version)
-          name="studiocraft-$version-${{ matrix.os }}"
-          mkdir -p "dist/$name" dist/release
-          cp target/${{ matrix.target }}/release/studiocraft* "dist/$name/" 2>/dev/null || true
-          rm -f dist/$name/*.d dist/$name/*.pdb
-          cp README.md NOTICE LICENSE-MIT LICENSE-APACHE "dist/$name/"
-          tar -C dist -czf "dist/release/$name.tar.gz" "$name"
+      - name: Signing certificate
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+        run: packaging/macos/import-cert.sh
+      - name: Package
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: packaging/macos/package.sh --arch universal
       - uses: actions/upload-artifact@v7
         with:
-          name: ${{ matrix.os }}
+          name: macos-universal
           path: dist/release/*
 
   publish:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [linux, windows, desktop]
+    needs: [linux, windows, macos]
     runs-on: ubuntu-latest
     permissions:
       contents: write
