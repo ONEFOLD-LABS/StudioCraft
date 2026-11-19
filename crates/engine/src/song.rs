@@ -131,6 +131,8 @@ pub struct Song {
     /// Tempo-Map für das Metronom im Audio-Thread (eine Kopie: sie wird mit dem Song
     /// ausgetauscht und im Hauptthread freigegeben).
     pub tempo: TempoMap,
+    /// Metronom- und Vorzähler-Einstellungen des Projekts.
+    pub click: studiocraft_project::ClickSettings,
 }
 
 impl Default for Song {
@@ -140,6 +142,7 @@ impl Default for Song {
             master: 1.0,
             buses: 0,
             tempo: TempoMap::default(),
+            click: Default::default(),
         }
     }
 }
@@ -160,6 +163,7 @@ impl Song {
             master: 1.0,
             buses: 0,
             tempo: TempoMap::default(),
+            click: Default::default(),
         }
     }
 
@@ -264,6 +268,7 @@ impl Song {
             master: db_to_gain(project.master_db),
             buses: 0,
             tempo: project.tempo.clone(),
+            click: project.click,
         };
         song.route(project);
         song
@@ -467,6 +472,7 @@ mod tests {
             master: 1.0,
             buses: 0,
             tempo: TempoMap::default(),
+            click: Default::default(),
         };
         let mut out = vec![0.0; 16];
         song.mix(&mut out, 0, 8);
@@ -485,6 +491,7 @@ mod tests {
             master: 1.0,
             buses: 0,
             tempo: TempoMap::default(),
+            click: Default::default(),
         };
         let mut out = vec![0.0; 8];
         song.mix(&mut out, 12, 4);
@@ -505,6 +512,7 @@ mod tests {
             master: 1.0,
             buses: 0,
             tempo: TempoMap::default(),
+            click: Default::default(),
         };
         let mut out = vec![0.0; 16];
         song.mix(&mut out, 0, 8);
@@ -527,6 +535,7 @@ mod tests {
             master: 1.0,
             buses: 0,
             tempo: TempoMap::default(),
+            click: Default::default(),
         };
         let mut out = vec![0.0; 16];
         song.mix(&mut out, 0, 8);
@@ -556,6 +565,7 @@ mod tests {
             master: 1.0,
             buses: 0,
             tempo: TempoMap::default(),
+            click: Default::default(),
         };
         let mut out = vec![0.0; 8];
         song.mix(&mut out, 0, 4);
@@ -580,6 +590,7 @@ mod tests {
             master: 1.0,
             buses: 0,
             tempo: TempoMap::default(),
+            click: Default::default(),
         };
         let mut out = vec![0.0; 24];
         song.mix(&mut out, 0, 12);

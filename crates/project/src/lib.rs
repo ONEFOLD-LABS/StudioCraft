@@ -17,6 +17,7 @@
 )]
 
 pub mod automation;
+pub mod click;
 pub mod copies;
 pub mod eq;
 pub mod file;
@@ -29,6 +30,7 @@ pub mod sanitize;
 pub mod time;
 
 pub use automation::{AutoParam, AutoPoint, AutomationLane};
+pub use click::{CLICK_DB, ClickSettings, ClickSound, MAX_PRECOUNT_BARS};
 pub use eq::{BandKind, ChannelEq, EQ_FREQ, EQ_GAIN, EQ_Q, EqBand};
 pub use layout::{NamedLayout, WindowLayout};
 pub use markers::{FIRST_MARKER_ID, Marker};

@@ -41,6 +41,14 @@ pub enum Command {
     Play,
     /// Aufnahme starten (aus dem Stopp oder während der Wiedergabe).
     Record,
+    /// Aufnahme nach einem Vorzähler: `frames` lang klickt es (Zählzeit alle `beat` Frames,
+    /// Takt-Eins alle `beats_per_bar`), der Cursor steht; danach beginnt die Aufnahme
+    /// sample-genau. Stopp bricht den Vorzähler ab.
+    RecordAfterCount {
+        frames: u64,
+        beat: u64,
+        beats_per_bar: u32,
+    },
     Stop,
     ToggleCycle,
     /// Linker und rechter Locator in Frames.
@@ -72,6 +80,10 @@ pub struct EngineStatus {
     rec_played_at: AtomicU64,
     /// Gerenderte Blöcke, nützlich für Diagnose.
     blocks: AtomicU64,
+    /// Restliche Frames des Vorzählers (0 = keiner).
+    count_in: AtomicU64,
+    /// Die letzte Aufnahme hat wirklich begonnen (nach einem Vorzähler erst an seinem Ende).
+    rec_started: AtomicBool,
 }
 
 impl EngineStatus {
@@ -102,6 +114,14 @@ impl EngineStatus {
     }
     pub fn blocks(&self) -> u64 {
         self.blocks.load(Ordering::Relaxed)
+    }
+    /// Restliche Frames des Vorzählers.
+    pub fn count_in(&self) -> u64 {
+        self.count_in.load(Ordering::Relaxed)
+    }
+    /// Ob die letzte Aufnahme begonnen hat (ein abgebrochener Vorzähler: nein).
+    pub fn rec_started(&self) -> bool {
+        self.rec_started.load(Ordering::Relaxed)
     }
 }
 
@@ -185,8 +205,14 @@ pub struct EngineCore {
     /// Metronom: Frames pro Zählzeit, Zählzeiten pro Takt, ein/aus, Klänge
     /// (0 = Takt-Eins, 1 = übrige Zählzeiten) und der gerade klingende Klick.
     metronome: bool,
-    clicks: [Box<[f32]>; 2],
+    /// Klicks: hell (Eins, Zählzeit), dunkel (Eins, Zählzeit).
+    clicks: [Box<[f32]>; 4],
     click: Option<(usize, usize)>,
+    /// Vorzähler: restliche Frames, Zählzeit in Frames, Zählzeiten je Takt, gezählte Frames.
+    count_left: u64,
+    count_beat: u64,
+    count_bpb: u32,
+    count_pos: u64,
     /// Haltepedal gedrückt; während der Aufnahme zurückgehaltene Note-Offs.
     sustain: bool,
     sustained: u128,
@@ -254,11 +280,21 @@ pub fn engine(sample_rate: u32, tempo: TempoMap) -> (EngineCore, EngineControl) 
             .map(|_| vec![0.0; SCRATCH_FRAMES * 2].into_boxed_slice())
             .collect(),
         metronome: false,
-        clicks: [
-            click_sound(sample_rate, 1500.0),
-            click_sound(sample_rate, 1000.0),
-        ],
+        clicks: {
+            let (b1, b2) = studiocraft_project::ClickSound::Bright.pitches();
+            let (d1, d2) = studiocraft_project::ClickSound::Dark.pitches();
+            [
+                click_sound(sample_rate, b1),
+                click_sound(sample_rate, b2),
+                click_sound(sample_rate, d1),
+                click_sound(sample_rate, d2),
+            ]
+        },
         click: None,
+        count_left: 0,
+        count_beat: 0,
+        count_bpb: 4,
+        count_pos: 0,
         sustain: false,
         sustained: 0,
         inserts: (0..MAX_METERED_TRACKS).map(|_| None).collect(),
@@ -321,9 +357,34 @@ impl EngineCore {
                 self.status
                     .rec_played_at
                     .store(self.block_played_at, Ordering::Relaxed);
+                self.status.rec_started.store(true, Ordering::Relaxed);
                 t.record();
             }
+            Command::RecordAfterCount {
+                frames,
+                beat,
+                beats_per_bar,
+            } => {
+                if frames == 0 || t.is_running() {
+                    // Kein Vorzähler oder schon in Wiedergabe: sofort.
+                    self.status.rec_start.store(t.cursor, Ordering::Relaxed);
+                    self.status
+                        .rec_played_at
+                        .store(self.block_played_at, Ordering::Relaxed);
+                    self.status.rec_started.store(true, Ordering::Relaxed);
+                    t.record();
+                } else {
+                    self.status.rec_started.store(false, Ordering::Relaxed);
+                    self.status.rec_played_at.store(0, Ordering::Relaxed);
+                    self.count_left = frames;
+                    self.count_beat = beat.max(1);
+                    self.count_bpb = beats_per_bar.max(1);
+                    self.count_pos = 0;
+                    self.click = None;
+                }
+            }
             Command::Stop => {
+                self.count_left = 0;
                 t.stop(false);
                 self.panic = true;
             }
@@ -400,6 +461,47 @@ impl EngineCore {
         }
     }
 
+    /// Vorzähler-Klicks für die nächsten `frames` Frames (addiert); unabhängig vom Metronom.
+    fn render_count_in(&mut self, dst: &mut [f32], frames: usize) {
+        let settings = self.song.click;
+        let level = studiocraft_project::db_to_gain(settings.level_db);
+        let base = match settings.sound {
+            studiocraft_project::ClickSound::Bright => 0,
+            studiocraft_project::ClickSound::Dark => 2,
+        };
+        let beat = self.count_beat.max(1);
+        let pos = self.count_pos;
+        let end = pos + frames as u64;
+        let mut k = pos.div_ceil(beat);
+        let mut i = 0usize;
+        loop {
+            let beat_at = k.saturating_mul(beat);
+            let until = if beat_at >= end {
+                frames
+            } else {
+                (beat_at - pos) as usize
+            };
+            if let Some((which, mut cp)) = self.click {
+                let sound = &self.clicks[which];
+                for j in i..until {
+                    let Some(&v) = sound.get(cp) else { break };
+                    dst[j * 2] += v * level;
+                    dst[j * 2 + 1] += v * level;
+                    cp += 1;
+                }
+                self.click = (cp < sound.len()).then_some((which, cp));
+            }
+            if until >= frames {
+                break;
+            }
+            let downbeat = k % u64::from(self.count_bpb) == 0;
+            self.click = Some((base + usize::from(!(downbeat && settings.accent)), 0));
+            k += 1;
+            i = until;
+        }
+        self.count_pos = end;
+    }
+
     /// Metronom-Klicks auf die Zählzeiten in `pos..pos + frames` legen (addiert). Die
     /// Zählzeiten folgen der Tempo-Map des Songs (auch Tempowechsel); keine Allokation.
     fn render_click(&mut self, dst: &mut [f32], pos: u64, frames: usize) {
@@ -407,7 +509,12 @@ impl EngineCore {
             self.click = None;
             return;
         }
-        const LEVEL: f32 = 0.5;
+        let settings = self.song.click;
+        let level = studiocraft_project::db_to_gain(settings.level_db);
+        let base = match settings.sound {
+            studiocraft_project::ClickSound::Bright => 0,
+            studiocraft_project::ClickSound::Dark => 2,
+        };
         let rate = self.sample_rate.max(1);
         let tempo = &self.song.tempo;
         // Erste Zählzeit ab `pos` (in Ticks), dann jede weitere bis zum Blockende; Taktart
@@ -435,8 +542,8 @@ impl EngineCore {
                 let sound = &self.clicks[which];
                 for j in i..until {
                     let Some(&v) = sound.get(cp) else { break };
-                    dst[j * 2] += v * LEVEL;
-                    dst[j * 2 + 1] += v * LEVEL;
+                    dst[j * 2] += v * level;
+                    dst[j * 2 + 1] += v * level;
                     cp += 1;
                 }
                 self.click = (cp < sound.len()).then_some((which, cp));
@@ -444,7 +551,7 @@ impl EngineCore {
             if until >= frames {
                 break;
             }
-            let which = usize::from(!downbeat);
+            let which = base + usize::from(!(downbeat && settings.accent));
             self.click = Some((which, 0));
             (next, downbeat) = tempo.next_beat(next + 1);
             i = until;
@@ -551,6 +658,12 @@ impl EngineCore {
                 frames_left
             }
             .min(SCRATCH_FRAMES as u64);
+            // Vorzähler: Abschnitt endet genau, wo die Aufnahme beginnt.
+            let run = if self.count_left > 0 {
+                run.min(self.count_left)
+            } else {
+                run
+            };
             let frames = run as usize;
             let n = frames * 2;
             let pos = self.transport.cursor;
@@ -722,6 +835,26 @@ impl EngineCore {
                     }
                 }
             }
+            if self.count_left > 0 {
+                self.render_count_in(dst, frames);
+                self.count_left -= run;
+                if self.count_left == 0 {
+                    // Ende des Vorzählers: Aufnahme beginnt hier, sample-genau.
+                    let at = (offset / 2) as u64 + run;
+                    let played = if self.block_played_at > 0 {
+                        self.block_played_at.saturating_add(
+                            at.saturating_mul(1_000_000_000) / u64::from(self.sample_rate.max(1)),
+                        )
+                    } else {
+                        0
+                    };
+                    let t = &mut self.transport;
+                    self.status.rec_start.store(t.cursor, Ordering::Relaxed);
+                    self.status.rec_played_at.store(played, Ordering::Relaxed);
+                    self.status.rec_started.store(true, Ordering::Relaxed);
+                    t.record();
+                }
+            }
             if running {
                 self.render_click(dst, pos, frames);
                 self.transport.advance(run);
@@ -765,6 +898,7 @@ impl EngineCore {
         s.cursor.store(self.transport.cursor, Ordering::Relaxed);
         s.state.store(self.transport.state as u8, Ordering::Relaxed);
         s.cycle.store(self.transport.cycle, Ordering::Relaxed);
+        s.count_in.store(self.count_left, Ordering::Relaxed);
         s.blocks.fetch_add(1, Ordering::Relaxed);
     }
 }
@@ -873,6 +1007,7 @@ mod tests {
             master: 1.0,
             buses: 0,
             tempo: TempoMap::default(),
+            click: Default::default(),
         };
         ctl.send(Command::SetSong(Arc::new(song)));
         crate::monitor::push_frames(&mut tx, 2, [0.1, 0.8, 0.2, 0.6].into_iter());
@@ -885,6 +1020,7 @@ mod tests {
             master: 1.0,
             buses: 0,
             tempo: TempoMap::default(),
+            click: Default::default(),
         };
         ctl.send(Command::SetSong(Arc::new(song)));
         crate::monitor::push_frames(&mut tx, 2, [0.1, 0.8].into_iter());
@@ -1214,6 +1350,113 @@ mod tests {
         }
         // No click where the old tempo would have put one.
         assert!(energy(120_000) < 1e-6, "no click at 120 000 after the jump");
+    }
+
+    #[test]
+    fn precount_clicks_then_records_exactly_at_its_end() {
+        use std::sync::Arc;
+        // Two bars of 4/4 at 120 BPM: 8 beats of 24 000 frames, then recording starts.
+        let (mut core, mut ctl) = engine(48_000, TempoMap::default());
+        let click = studiocraft_project::ClickSettings {
+            precount_bars: 2,
+            ..Default::default()
+        };
+        ctl.send(Command::SetSong(Arc::new(Song {
+            click,
+            ..Song::default()
+        })));
+        ctl.send(Command::RecordAfterCount {
+            frames: 192_000,
+            beat: 24_000,
+            beats_per_bar: 4,
+        });
+        let mut out = vec![0.0f32; 2 * 191_000];
+        for block in out.chunks_mut(2 * 1000) {
+            core.process(block);
+        }
+        assert!(!ctl.status.rec_started(), "still counting");
+        assert_eq!(ctl.status.state(), TransportState::Stopped);
+        assert_eq!(ctl.status.cursor(), 0, "the cursor waits");
+        assert_eq!(ctl.status.count_in(), 1_000);
+        let left: Vec<f32> = out.chunks(2).map(|f| f[0]).collect();
+        for beat in 0..8 {
+            let at = beat * 24_000;
+            let e: f32 = left[at..at + 100].iter().map(|v| v.abs()).sum();
+            assert!(e > 1.0, "click on beat {beat}");
+        }
+        // The block that ends the count-in starts recording 1 000 frames into itself.
+        let mut tail = vec![0.0f32; 2 * 1_500];
+        core.process(&mut tail);
+        assert!(ctl.status.rec_started());
+        assert_eq!(ctl.status.state(), TransportState::Recording);
+        assert_eq!(ctl.status.rec_start(), 0);
+        assert_eq!(
+            ctl.status.cursor(),
+            500,
+            "500 frames recorded after the count-in"
+        );
+        // Stop during a count-in cancels it.
+        ctl.send(Command::Stop);
+        ctl.send(Command::Stop);
+        core.process(&mut [0.0; 2]);
+        ctl.send(Command::RecordAfterCount {
+            frames: 96_000,
+            beat: 24_000,
+            beats_per_bar: 4,
+        });
+        core.process(&mut [0.0; 2000]);
+        ctl.send(Command::Stop);
+        core.process(&mut [0.0; 2000]);
+        assert!(!ctl.status.rec_started());
+        assert_eq!(ctl.status.count_in(), 0);
+        assert_eq!(ctl.status.state(), TransportState::Stopped);
+    }
+
+    #[test]
+    fn click_level_sound_and_accent_follow_the_project_settings() {
+        use std::sync::Arc;
+        let render = |click: studiocraft_project::ClickSettings| {
+            let (mut core, mut ctl) = engine(48_000, TempoMap::default());
+            ctl.send(Command::SetSong(Arc::new(Song {
+                click,
+                ..Song::default()
+            })));
+            ctl.send(Command::SetMetronome(true));
+            ctl.send(Command::Play);
+            let mut out = vec![0.0f32; 2 * 30_000];
+            core.process(&mut out);
+            out.chunks(2).map(|f| f[0]).collect::<Vec<f32>>()
+        };
+        let peak = |s: &[f32]| s.iter().fold(0.0f32, |m, v| m.max(v.abs()));
+        let crossings = |s: &[f32]| {
+            s.windows(2)
+                .filter(|w| w[0].signum() != w[1].signum())
+                .count()
+        };
+        let base = render(Default::default());
+        let quiet = render(studiocraft_project::ClickSettings {
+            level_db: -26.0,
+            ..Default::default()
+        });
+        assert!(
+            peak(&quiet[..1000]) < peak(&base[..1000]) * 0.2,
+            "20 dB quieter"
+        );
+        let dark = render(studiocraft_project::ClickSettings {
+            sound: studiocraft_project::ClickSound::Dark,
+            ..Default::default()
+        });
+        assert!(
+            crossings(&dark[..480]) < crossings(&base[..480]),
+            "lower pitch"
+        );
+        let flat = render(studiocraft_project::ClickSettings {
+            accent: false,
+            ..Default::default()
+        });
+        // Without accent the downbeat sounds like the other beats.
+        assert_eq!(crossings(&flat[..480]), crossings(&flat[24_000..24_480]));
+        assert!(crossings(&base[..480]) > crossings(&base[24_000..24_480]));
     }
 
     /// Projekt mit einer Audio-Spur, deren Clip konstant 1,0 liefert, plus Bussen.

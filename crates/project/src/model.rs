@@ -474,6 +474,9 @@ pub struct Project {
     /// Marker und Cycle-Marker, nach Position sortiert (siehe `markers.rs`).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub markers: Vec<crate::Marker>,
+    /// Metronom und Vorzähler (Projekteinstellung).
+    #[serde(default, skip_serializing_if = "crate::ClickSettings::is_default")]
+    pub click: crate::ClickSettings,
     /// Sichtbarkeit und Größe der Zonen (Spec „Fenster-Architektur“).
     #[serde(default)]
     pub layout: crate::WindowLayout,
@@ -504,6 +507,7 @@ impl Default for Project {
             next_id: 1,
             next_track_id: 1,
             markers: Vec::new(),
+            click: crate::ClickSettings::default(),
             layout: crate::WindowLayout::default(),
             layouts: Vec::new(),
         }

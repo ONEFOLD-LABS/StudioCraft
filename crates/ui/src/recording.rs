@@ -233,7 +233,29 @@ impl ProjectWindow {
             while t.recorded_midi.pop().is_ok() {}
         }
         self.midi_take.clear();
-        self.send(Command::Record);
+        // Vorzähler nur aus dem Stopp (Projekteinstellung, Takte in Taktart und Tempo am Cursor).
+        let bars = u64::from(self.project.click.precount_bars);
+        self.count_in_frames = 0;
+        if bars > 0 && !self.is_playing() {
+            let tempo = &self.project.tempo;
+            let sig = tempo.signature_at(self.cursor);
+            let bpm = tempo.bpm_at(self.cursor).max(1.0);
+            let rate = f64::from(self.sample_rate);
+            let frames_of = |ticks: u64| {
+                (ticks as f64 / studiocraft_project::TICKS_PER_QUARTER as f64 * 60.0 / bpm * rate)
+                    .round() as u64
+            };
+            let beat = frames_of(sig.beat_ticks()).max(1);
+            let frames = beat * u64::from(sig.numerator) * bars;
+            self.count_in_frames = frames;
+            self.send(Command::RecordAfterCount {
+                frames,
+                beat,
+                beats_per_bar: sig.numerator,
+            });
+        } else {
+            self.send(Command::Record);
+        }
         self.recording = true;
         self.message = None;
     }
@@ -251,6 +273,27 @@ impl ProjectWindow {
             .as_ref()
             .map(|t| (t.status.rec_start(), t.status.rec_played_at()));
         let (cursor, played_at) = status.unwrap_or((0, None));
+        // Im Vorzähler abgebrochen: nichts aufgenommen.
+        if self
+            .transport
+            .as_ref()
+            .is_some_and(|t| !t.status.rec_started())
+        {
+            if let Some(t) = &mut self.transport {
+                while t.recorded_midi.pop().is_ok() {}
+            }
+            self.midi_take.clear();
+            if self.audio_recording {
+                self.audio_recording = false;
+                if let Some(rec) = self.recorder.as_ref()
+                    && let Ok(r) = rec.stop()
+                {
+                    let _ = std::fs::remove_file(&r.path);
+                }
+            }
+            self.message = Some("Aufnahme im Vorzähler abgebrochen".into());
+            return;
+        }
 
         // MIDI: noch Unterwegs-Befindliches abholen, dann Part anlegen.
         if let Some(t) = &mut self.transport {
@@ -284,6 +327,8 @@ impl ProjectWindow {
                 }
                 _ => (cursor, 0),
             };
+            // Was während des Vorzählers hereinkam, gehört nicht zum Take.
+            let (start, skip) = drop_count_in(start, skip, self.count_in_frames);
             self.place_recording(&r, start, skip)
         }) {
             Ok(n) if overruns > 0 => {
@@ -508,9 +553,136 @@ impl ProjectWindow {
     }
 }
 
+impl ProjectWindow {
+    /// Verbleibende Zählzeiten des laufenden Vorzählers.
+    pub(crate) fn count_in_beats(&self) -> Option<u64> {
+        let left = self.transport.as_ref()?.status.count_in();
+        if left == 0 || self.count_in_frames == 0 {
+            return None;
+        }
+        let tempo = &self.project.tempo;
+        let beats = u64::from(tempo.signature_at(self.cursor).numerator.max(1))
+            * u64::from(self.project.click.precount_bars.max(1));
+        let beat = (self.count_in_frames / beats).max(1);
+        Some(left.div_ceil(beat))
+    }
+
+    /// Untermenü „Metronom“: Vorzähler, Lautstärke, Betonung und Klang (Projekteinstellung,
+    /// rückgängig machbar).
+    pub(crate) fn click_menu(&mut self, ui: &mut egui::Ui) {
+        ui.menu_button("Metronom", |ui| {
+            let mut c = self.project.click;
+            ui.menu_button("Vorzähler", |ui| {
+                for (bars, label) in [(0u32, "Aus"), (1, "1 Takt"), (2, "2 Takte"), (4, "4 Takte")]
+                {
+                    ui.radio_value(&mut c.precount_bars, bars, label);
+                }
+            });
+            ui.horizontal(|ui| {
+                let l = ui.label("Lautstärke");
+                ui.add(
+                    egui::Slider::new(
+                        &mut c.level_db,
+                        studiocraft_project::CLICK_DB.0..=studiocraft_project::CLICK_DB.1,
+                    )
+                    .suffix(" dB"),
+                )
+                .labelled_by(l.id);
+            });
+            ui.checkbox(&mut c.accent, "Takt-Eins betonen");
+            ui.menu_button("Klang", |ui| {
+                for s in studiocraft_project::ClickSound::ALL {
+                    ui.radio_value(&mut c.sound, s, s.label());
+                }
+            });
+            if c != self.project.click {
+                self.click_before
+                    .get_or_insert_with(|| self.project.clone());
+                self.project.click = c;
+            }
+            // Ein Undo-Schritt je Geste (Schieberegler: beim Loslassen).
+            if ui.ctx().dragged_id().is_none()
+                && let Some(before) = self.click_before.take()
+            {
+                self.checkpoint(before);
+            }
+        });
+    }
+}
+
+/// Verwirft die ersten `count_in` Frames einer Aufnahme: (Startposition, übersprungene Frames)
+/// vorher und nachher. Der erste Frame der Datei liegt bei `start - skip` (auch negativ).
+pub(crate) fn drop_count_in(start: u64, skip: u64, count_in: u64) -> (u64, u64) {
+    if count_in == 0 {
+        return (start, skip);
+    }
+    let raw = i128::from(start) - i128::from(skip);
+    // Erster behaltener Frame: nach dem Vorzähler und nicht vor Projektbeginn.
+    let first = i128::from(count_in).max(-raw);
+    let pos = raw + first;
+    (
+        u64::try_from(pos).unwrap_or(0),
+        u64::try_from(first).unwrap_or(0),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_count_in_is_cut_off_the_take() {
+        // No count-in: unchanged.
+        assert_eq!(drop_count_in(1000, 0, 0), (1000, 0));
+        // File starts 2 bars (192 000 frames) plus 480 frames latency before the cursor at
+        // 200 000: the take keeps the latency compensation and loses the count-in.
+        assert_eq!(
+            drop_count_in(200_000 - 192_480, 0, 192_000),
+            (199_520, 192_000)
+        );
+        // Near the project start the file begins before 0: start at 0, skip enough.
+        assert_eq!(drop_count_in(0, 150_000, 96_000), (0, 150_000));
+        assert_eq!(drop_count_in(0, 50_000, 96_000), (46_000, 96_000));
+    }
+
+    #[test]
+    fn precount_shows_its_beats_and_stop_during_it_records_nothing() {
+        let (mut core, ctl) =
+            studiocraft_engine::engine(48_000, studiocraft_project::TempoMap::default());
+        let mut w = ProjectWindow::new(
+            studiocraft_project::Project::default(),
+            Some(ctl),
+            String::new(),
+        );
+        let t = w.project.add_track(TrackKind::Instrument, "Synth");
+        w.project.tracks[t].record = true;
+        w.project.click.precount_bars = 1;
+        w.start_recording();
+        let mut buf = vec![0.0f32; 2 * 1000];
+        for _ in 0..10 {
+            core.process(&mut buf);
+        }
+        // One bar of 4/4 at 120 BPM: 96 000 frames, beats of 24 000; 10 000 done.
+        assert_eq!(w.count_in_beats(), Some(4));
+        assert!(!w.is_playing());
+        w.stop_transport();
+        core.process(&mut buf);
+        assert_eq!(
+            w.message.as_deref(),
+            Some("Aufnahme im Vorzähler abgebrochen")
+        );
+        assert!(w.project.tracks[t].events.is_empty());
+        // Again, past the count-in: the transport records from the cursor.
+        w.start_recording();
+        for _ in 0..100 {
+            core.process(&mut buf);
+        }
+        assert_eq!(w.count_in_beats(), None);
+        assert!(w.transport.as_ref().unwrap().status.rec_started());
+        assert!(w.is_playing(), "recording runs after the count-in");
+        w.stop_transport();
+        core.process(&mut buf);
+    }
 
     #[test]
     fn passes_without_and_with_cycle() {
