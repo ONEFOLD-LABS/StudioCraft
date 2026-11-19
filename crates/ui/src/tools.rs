@@ -77,6 +77,23 @@ impl Tool {
         })
     }
 
+    /// Symbol in der Werkzeugzeile.
+    pub fn icon(self) -> crate::icons::Icon {
+        use crate::icons::Icon;
+        match self {
+            Tool::Select => Icon::Select,
+            Tool::Range => Icon::Range,
+            Tool::Split => Icon::Split,
+            Tool::Glue => Icon::Glue,
+            Tool::Erase => Icon::Erase,
+            Tool::Zoom => Icon::Zoom,
+            Tool::Mute => Icon::Mute,
+            Tool::Draw => Icon::Draw,
+            Tool::Play => Icon::Play,
+            Tool::TimeWarp => Icon::TimeWarp,
+        }
+    }
+
     /// Ob das Werkzeug im Prototyp schon etwas tut.
     pub fn implemented(self) -> bool {
         !matches!(self, Tool::TimeWarp)

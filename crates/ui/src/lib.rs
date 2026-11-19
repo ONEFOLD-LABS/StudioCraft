@@ -4,6 +4,7 @@
 //! Prototyp-Stand: Projektfenster mit Werkzeugzeile, Inspector, Spurliste,
 //! Lineal, Event-Anzeige und Transportleiste.
 
+mod icons;
 mod inserts;
 mod keyeditor;
 mod menu;
@@ -676,26 +677,92 @@ impl ProjectWindow {
     }
 
     fn toolbar(&mut self, ui: &mut Ui) {
-        ui.horizontal_wrapped(|ui| {
+        use icons::{Icon, icon_button};
+        let t = theme::tokens(ui.ctx());
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 2.0;
+            // Zonen-Schalter (docs/ui-parity.md, „Werkzeugzeile“)
+            if icon_button(
+                ui,
+                Icon::ZoneLeft,
+                self.show_inspector,
+                Some(t.accent),
+                "Linke Zone (Alt+I)",
+            )
+            .clicked()
+            {
+                self.show_inspector = !self.show_inspector;
+            }
+            if icon_button(
+                ui,
+                Icon::ZoneLower,
+                self.show_lower,
+                Some(t.accent),
+                "Untere Zone",
+            )
+            .clicked()
+            {
+                self.show_lower = !self.show_lower;
+            }
+            icons::group_gap(ui);
+            // Transport-Kurzform
+            if icon_button(ui, Icon::ToStart, false, None, "Zum Anfang (Pos1)").clicked() {
+                self.locate(0);
+            }
+            if icon_button(ui, Icon::Stop, false, None, "Stopp").clicked() {
+                self.stop_transport();
+            }
+            let playing = self.is_playing();
+            let t = theme::tokens(ui.ctx());
+            if icon_button(
+                ui,
+                Icon::Start,
+                playing,
+                Some(t.monitor),
+                "Start (Leertaste)",
+            )
+            .clicked()
+            {
+                self.toggle_play();
+            }
+            if icon_button(
+                ui,
+                Icon::Record,
+                self.recording,
+                Some(t.rec),
+                "Aufnahme (*)",
+            )
+            .clicked()
+            {
+                self.toggle_record();
+            }
+            if icon_button(ui, Icon::Cycle, self.cycle, Some(t.accent), "Cycle (/)").clicked() {
+                self.toggle_cycle();
+            }
+            icons::group_gap(ui);
             for tool in Tool::ALL {
-                let text = format!("{} {}", tool.key_label(), tool.label());
-                let r = ui.selectable_label(self.tool == tool, text);
-                if r.clicked() {
+                let mut hint = format!("{} ({})", tool.label(), tool.key_label());
+                if !tool.implemented() {
+                    hint.push_str(" – im Prototyp noch ohne Funktion");
+                }
+                if icon_button(ui, tool.icon(), self.tool == tool, None, &hint).clicked() {
                     self.tool = tool;
                 }
-                if !tool.implemented() {
-                    r.on_hover_text("Im Prototyp noch ohne Funktion");
-                }
             }
-            ui.separator();
-            ui.toggle_value(&mut self.snap, "Snap (J)");
-            egui::ComboBox::from_label("Raster")
+            icons::group_gap(ui);
+            if icon_button(ui, Icon::Snap, self.snap, Some(t.accent), "Snap an/aus (J)").clicked() {
+                self.snap = !self.snap;
+            }
+            egui::ComboBox::from_id_salt("raster")
                 .selected_text(self.grid.label())
+                .width(90.0)
                 .show_ui(ui, |ui| {
                     for g in Grid::ALL {
                         ui.selectable_value(&mut self.grid, g, g.label());
                     }
-                });
+                })
+                .response
+                .on_hover_text("Raster");
         });
     }
 
@@ -1130,6 +1197,24 @@ mod tests {
             .build_ui_state(|ui, w: &mut ProjectWindow| w.ui(ui), w);
         h.run_steps(2);
         h
+    }
+
+    #[test]
+    fn toolbar_symbols_pick_tools_and_toggle_zones() {
+        let (w, _) = one_event_window();
+        let mut h = window_harness(w);
+        h.get_by_label("Trennen (3)").click();
+        h.run_steps(2);
+        assert_eq!(h.state().tool, Tool::Split);
+        h.get_by_label("Snap an/aus (J)").click();
+        h.run_steps(2);
+        assert!(!h.state().snap);
+        h.get_by_label("Linke Zone (Alt+I)").click();
+        h.run_steps(2);
+        assert!(!h.state().show_inspector);
+        h.get_by_label("Untere Zone").click();
+        h.run_steps(2);
+        assert!(!h.state().show_lower);
     }
 
     #[test]
