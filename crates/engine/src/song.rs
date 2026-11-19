@@ -547,6 +547,37 @@ mod tests {
     }
 
     #[test]
+    fn an_equal_power_crossfade_plays_both_events_through_the_overlap() {
+        // Frames 0..8 and 4..12, overlap 4..8 with equal-power fades on both sides.
+        let a = PlayEvent {
+            fade_out: 4,
+            fade_out_curve: FadeCurve::EqualPower,
+            ..PlayEvent::new(0, 8, 0, ones(8, 1.0))
+        };
+        let b = PlayEvent {
+            fade_in: 4,
+            fade_in_curve: FadeCurve::EqualPower,
+            ..PlayEvent::new(4, 8, 0, ones(8, 1.0))
+        };
+        let song = Song {
+            tracks: vec![track(1.0, 0, vec![a, b])],
+            master: 1.0,
+            buses: 0,
+        };
+        let mut out = vec![0.0; 24];
+        song.mix(&mut out, 0, 12);
+        let left: Vec<f32> = out.chunks(2).map(|c| c[0]).collect();
+        let half_pi = std::f32::consts::FRAC_PI_2;
+        for k in 0..4 {
+            let x = k as f32 / 4.0;
+            let want = (x * half_pi).sin() + ((1.0 - x) * half_pi).sin();
+            assert!((left[4 + k] - want).abs() < 1e-5, "{left:?}");
+        }
+        assert_eq!(left[2], 1.0);
+        assert_eq!(left[10], 1.0);
+    }
+
+    #[test]
     fn topmost_event_wins_on_overlap() {
         use studiocraft_project::Position;
         let mut p = Project::default();

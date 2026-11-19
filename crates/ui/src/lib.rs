@@ -129,6 +129,8 @@ pub struct ProjectWindow {
     keypad: Option<keypad::KeypadTap>,
     /// Kurveneditor eines Fades (Doppelklick auf den Fade-Griff).
     fade_editor: Option<fades_ui::FadeEditor>,
+    /// Crossfade-Editor (Doppelklick auf einen Fade, der zu einem Crossfade gehört).
+    crossfade_editor: Option<fades_ui::CrossfadeEditor>,
     /// Dialog „Wiederholen“ (Strg+K).
     repeat_dialog: shortcuts::RepeatDialog,
     /// Sample-Editor in der unteren Zone.
@@ -277,6 +279,7 @@ impl ProjectWindow {
             key_dialog: keymap::KeyDialog::default(),
             keypad: None,
             fade_editor: None,
+            crossfade_editor: None,
             repeat_dialog: shortcuts::RepeatDialog::default(),
             sample_editor: sampleeditor::SampleEditor::default(),
             quantize: studiocraft_project::Quantize::default(),
@@ -928,6 +931,7 @@ impl ProjectWindow {
         self.key_commands_dialog(ui.ctx());
         self.repeat_dialog(ui.ctx());
         self.fade_editor_dialog(ui.ctx());
+        self.crossfade_editor_dialog(ui.ctx());
         self.device_dialog(ui.ctx());
         self.show_windows(ui.ctx());
 
@@ -2907,6 +2911,66 @@ mod tests {
         h.run_steps(2);
         assert!(!h.state().midi_inputs_on);
         assert_eq!(h.state().midi_status, "MIDI: aus");
+    }
+
+    #[test]
+    fn render_crossfade_editor() {
+        shot("crossfade", |w| {
+            let bar = w.bar_ticks();
+            let a = w
+                .import_clip("Take 1", None, tone_clip(8.0, 220.0), Some((0, bar)))
+                .unwrap();
+            let clip = w.project.event(a).unwrap().clip.unwrap();
+            let b = w.project.add_audio_event(0, 4 * bar, clip).unwrap();
+            w.project.crossfade(a, b);
+            w.project.event_mut(a).unwrap().fade_out_curve =
+                studiocraft_project::FadeCurve::EqualPower;
+            w.project.event_mut(b).unwrap().fade_in_curve =
+                studiocraft_project::FadeCurve::EqualPower;
+            w.view.scroll_ticks = 0.0;
+            w.view.px_per_quarter = 40.0;
+            w.view.row_h = 90.0;
+            w.open_fade_editor(b, fades_ui::Side::In);
+        });
+    }
+
+    #[test]
+    fn double_click_on_a_crossfade_opens_the_crossfade_editor() {
+        let (mut w, a) = one_event_window();
+        w.view.scroll_ticks = 0.0;
+        let (start, len) = {
+            let e = w.project.event(a).unwrap();
+            (e.start.0, e.length)
+        };
+        // A second take overlapping the last bar of the first, then X.
+        let clip = w.project.event(a).unwrap().clip.unwrap();
+        let b = w
+            .project
+            .add_audio_event(0, start + len - 3840, clip)
+            .unwrap();
+        assert!(w.project.crossfade(a, b));
+        w.clear_history();
+        let mut h = window_harness(w);
+        // The fade-in handle of the later event sits at the end of the overlap.
+        let handle = screen(&h, start + len, 0.2);
+        double_click_at(&mut h, handle);
+        assert!(
+            h.state().crossfade_editor.is_some(),
+            "crossfade editor is open"
+        );
+        assert!(h.state().fade_editor.is_none());
+        h.get_by_label("Gleiche Leistung").click();
+        h.run_steps(3);
+        let p = &h.state().project;
+        let eq = studiocraft_project::FadeCurve::EqualPower;
+        assert_eq!(p.event(a).unwrap().fade_out_curve, eq);
+        assert_eq!(p.event(b).unwrap().fade_in_curve, eq);
+        h.state_mut().undo();
+        let p = &h.state().project;
+        assert_eq!(
+            p.event(b).unwrap().fade_in_curve,
+            studiocraft_project::FadeCurve::Linear
+        );
     }
 
     #[test]
