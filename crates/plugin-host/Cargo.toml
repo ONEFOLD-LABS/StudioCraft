@@ -23,3 +23,7 @@ harness = false
 [[test]]
 name = "latency_main_thread"
 harness = false
+
+[[test]]
+name = "scan_child"
+harness = false

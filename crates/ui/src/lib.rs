@@ -81,6 +81,8 @@ pub struct LoadedClip {
     pub peaks: Peaks,
 }
 
+pub use inserts::enable_isolated_plugin_scan;
+pub use studiocraft_plugin_host::run_scan_child as run_plugin_scan_child;
 pub use tools::{Grid, Tool};
 
 /// Standardgrößen der Zonen in Punkten (gilt, solange im Projekt 0 steht).
@@ -3373,6 +3375,19 @@ mod tests {
         assert!((half - want).abs() < 1e-3, "{half} vs {want}");
         set(&mut w, 0.0, true);
         assert_eq!(peak(&mut w), 0.0, "muted bus is silent");
+    }
+
+    #[test]
+    fn project_menu_rescans_plugins() {
+        let (w, _) = one_event_window();
+        let mut h = window_harness(w);
+        h.run_steps(2);
+        h.get_by_label("Projekt").click();
+        h.run_steps(2);
+        h.get_by_label("Plugins neu prüfen").click();
+        h.run_steps(2);
+        assert!(h.state().plugins.list.is_some(), "list rebuilt");
+        assert!(h.state().message.is_some(), "result is reported");
     }
 
     #[test]

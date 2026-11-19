@@ -151,6 +151,14 @@ impl App {
 use eframe::egui;
 
 fn main() -> ExitCode {
+    // Kindprozess des Plugin-Scans: nur diese eine Datei prüfen, dann beenden.
+    let raw: Vec<String> = std::env::args().collect();
+    if let Some(code) = studiocraft_ui::run_plugin_scan_child(&raw) {
+        return ExitCode::from(u8::try_from(code).unwrap_or(1));
+    }
+    if let Ok(exe) = std::env::current_exe() {
+        studiocraft_ui::enable_isolated_plugin_scan(exe);
+    }
     let mut files = Vec::new();
     let mut tracks = 100usize;
     let mut host = None;

@@ -77,36 +77,56 @@ fn find_bundles(dir: &Path, out: &mut Vec<PathBuf>, depth: u32) {
     }
 }
 
-/// Durchsucht `paths` und liest die Beschreibungen aller Plugins.
-/// Rückgabe: gefundene Plugins (nach Name sortiert) und Fehlermeldungen je Datei.
-///
-/// Hinweis: Die Bibliotheken werden dafür im eigenen Prozess geladen. Ein
-/// fehlerhaftes Plugin kann so das Programm beenden; ein Scan in einem
-/// eigenen Prozess folgt später.
-pub fn scan(paths: &[PathBuf]) -> (Vec<PluginInfo>, Vec<String>) {
+/// Alle Plugin-Dateien bzw. Bundles unter `paths`, sortiert und ohne Doppelte.
+pub fn find_all(paths: &[PathBuf]) -> Vec<PathBuf> {
     let mut bundles = Vec::new();
     for p in paths {
         find_bundles(p, &mut bundles, 0);
     }
     bundles.sort();
     bundles.dedup();
-    let mut found = Vec::new();
-    let mut errors = Vec::new();
-    for b in bundles {
-        match Library::load(&b) {
-            Ok(lib) => found.extend(lib.descriptors().into_iter().map(|d| PluginInfo {
-                path: b.clone(),
-                ..d
-            })),
-            Err(e) => errors.push(format!("{}: {e}", b.display())),
-        }
-    }
-    found.sort_by(|a, b| {
+    bundles
+}
+
+/// Liest die Beschreibungen aller Plugins einer Datei, im eigenen Prozess.
+pub fn scan_bundle(bundle: &Path) -> Result<Vec<PluginInfo>, String> {
+    let lib = Library::load(bundle)?;
+    Ok(lib
+        .descriptors()
+        .into_iter()
+        .map(|d| PluginInfo {
+            path: bundle.to_path_buf(),
+            ..d
+        })
+        .collect())
+}
+
+/// Nach Name sortieren (ohne Groß-/Kleinschreibung), bei Gleichstand nach Id.
+pub(crate) fn sort_plugins(list: &mut [PluginInfo]) {
+    list.sort_by(|a, b| {
         a.name
             .to_lowercase()
             .cmp(&b.name.to_lowercase())
             .then(a.id.cmp(&b.id))
     });
+}
+
+/// Durchsucht `paths` und liest die Beschreibungen aller Plugins.
+/// Rückgabe: gefundene Plugins (nach Name sortiert) und Fehlermeldungen je Datei.
+///
+/// Die Bibliotheken werden dafür im eigenen Prozess geladen; ein fehlerhaftes Plugin kann
+/// so das Programm beenden. Das Programm nutzt deshalb [`crate::scan_isolated`]; diese
+/// Variante bleibt für Tests und Werkzeuge.
+pub fn scan(paths: &[PathBuf]) -> (Vec<PluginInfo>, Vec<String>) {
+    let mut found = Vec::new();
+    let mut errors = Vec::new();
+    for b in find_all(paths) {
+        match scan_bundle(&b) {
+            Ok(list) => found.extend(list),
+            Err(e) => errors.push(format!("{}: {e}", b.display())),
+        }
+    }
+    sort_plugins(&mut found);
     (found, errors)
 }
 
