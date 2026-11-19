@@ -182,7 +182,7 @@ Die Transportleiste unten im Projektfenster bedient Wiedergabe, Aufnahme und Loc
 
 **Tempospur:** Projekt → „Tempospur hinzufügen“ legt die Spur an und schaltet sie ein; „Spur“ in der Transportleiste schaltet zwischen Tempospur und festem Tempo um (die Punkte bleiben). In der Spur setzt der Stift einen Tempowechsel, die Objektauswahl zieht ihn (Takt mit Snap, Tempo nach Höhe), der Radiergummi löscht ihn. Im Inspector stehen alle Punkte mit Tempo und „Rampe“ (das Tempo gleitet vom vorigen Punkt). Mit Tempospur zeigt die Transportleiste das Tempo am Cursor. Taktwechsel stehen im selben Inspector („Taktwechsel am Cursor“, Zähler/Nenner je Takt) und als Beschriftung in der Tempospur; Lineal, Raster, Snap auf Takt/Zählzeit, Positionsanzeige, Nummernblock −/+ und Metronom folgen ihnen. Events behalten ihre Ticks; Dauern zählen in der Taktart von Takt 1. Audio auf Spuren mit linearer Zeitbasis behält bei jeder Tempoänderung seine Zeit, MIDI seine Takte; Metronom und Export folgen der Kurve.
 
-**Vorzähler und Metronom:** Metronom an/aus mit C; Vorzähler in Takten einstellbar. Klick-Sound, Lautstärke und Ausgang sind Projekteinstellungen.
+**Vorzähler und Metronom:** Metronom an/aus mit C; Vorzähler in Takten einstellbar. Klick-Sound, Lautstärke und Ausgang sind Projekteinstellungen. Transport → Metronom: Vorzähler (aus, 1, 2, 4 Takte), Lautstärke, „Takt-Eins betonen“ und Klang (hell, dunkel). Der Vorzähler klickt auch bei ausgeschaltetem Metronom, der Cursor wartet, Mithören und Instrumente laufen; die Aufnahme beginnt sample-genau an seinem Ende, Stopp im Vorzähler verwirft sie. Was der Eingang während des Vorzählers liefert, gehört nicht zum Take. Ein eigener Ausgang für den Klick kommt mit dem Routing der Ausgänge.
 
 **Aufnahmemodi**
 

@@ -208,6 +208,10 @@ pub struct ProjectWindow {
     punch_in: bool,
     punch_out: bool,
     overruns_at_start: u64,
+    /// Frames des Vorzählers der laufenden Aufnahme (0 = keiner).
+    count_in_frames: u64,
+    /// Stand vor einer Änderung im Menü „Metronom“ (ein Undo-Schritt je Geste).
+    click_before: Option<Project>,
     plugins: inserts::PluginState,
     /// Was die untere Zone zeigt.
     lower: LowerZone,
@@ -335,6 +339,8 @@ impl ProjectWindow {
             punch_in: false,
             punch_out: false,
             overruns_at_start: 0,
+            count_in_frames: 0,
+            click_before: None,
             plugins: inserts::PluginState::default(),
             lower: LowerZone::Mixer,
             key_editor: keyeditor::KeyEditor::default(),
@@ -1471,6 +1477,10 @@ impl ProjectWindow {
             .clicked()
             {
                 self.toggle_record();
+            }
+            // Vorzähler: verbleibende Zählzeiten.
+            if let Some(beats) = self.count_in_beats() {
+                ui.colored_label(t.rec, format!("Vorzähler {beats}"));
             }
             icons::group_gap(ui);
             ui.spacing_mut().item_spacing.x = 6.0;
@@ -3174,6 +3184,23 @@ mod tests {
                 .format_position(studiocraft_project::Position(14 * q)),
             "5.1.1.000"
         );
+    }
+
+    #[test]
+    fn the_metronome_menu_sets_the_precount_in_one_undo_step() {
+        let (w, _) = one_event_window();
+        let mut h = window_harness(w);
+        h.get_by_label("Transport").click();
+        h.run_steps(2);
+        h.get_by_label("Metronom").click();
+        h.run_steps(2);
+        h.get_by_label("Vorzähler").click();
+        h.run_steps(2);
+        h.get_by_label("2 Takte").click();
+        h.run_steps(3);
+        assert_eq!(h.state().project.click.precount_bars, 2);
+        h.state_mut().undo();
+        assert_eq!(h.state().project.click.precount_bars, 0);
     }
 
     #[test]

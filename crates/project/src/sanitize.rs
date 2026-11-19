@@ -98,6 +98,11 @@ impl Project {
         sigs.sort_by_key(|e| e.bar);
         sigs.dedup_by_key(|e| e.bar);
         fix(*sigs != before);
+        let click = self.click.sanitized();
+
+        fix(click != self.click);
+
+        self.click = click;
 
         for c in &mut self.pool {
             clamp!(
