@@ -25,6 +25,8 @@ pub enum Icon {
     TimeWarp,
     // snap
     Snap,
+    /// Quantisierungs-Panel: Schieberegler.
+    QuantizePanel,
     // zones
     ZoneLeft,
     ZoneLower,
@@ -43,7 +45,7 @@ pub enum Icon {
 }
 
 impl Icon {
-    pub const ALL: [Icon; 24] = [
+    pub const ALL: [Icon; 25] = [
         Icon::Select,
         Icon::Range,
         Icon::Split,
@@ -55,6 +57,7 @@ impl Icon {
         Icon::Play,
         Icon::TimeWarp,
         Icon::Snap,
+        Icon::QuantizePanel,
         Icon::ZoneLeft,
         Icon::ZoneLower,
         Icon::ZoneRight,
@@ -297,6 +300,13 @@ pub fn shapes(rect: Rect, icon: Icon, color: Color32) -> Vec<Shape> {
             ));
             out.push(line(vec![g.p(8.0, 12.0), g.p(12.0, 4.0)]));
             out.push(Shape::rect_filled(g.r(3.0, 11.5, 13.0, 14.0), 0.0, color));
+        }
+        Icon::QuantizePanel => {
+            // three sliders with their knobs at different positions
+            for (y, x) in [(4.0, 10.0), (8.0, 5.0), (12.0, 8.5)] {
+                out.push(line(vec![g.p(2.0, y), g.p(14.0, y)]));
+                out.push(Shape::circle_filled(g.p(x, y), g.len(2.0), color));
+            }
         }
         Icon::PunchIn | Icon::PunchOut => {
             let x = if icon == Icon::PunchIn { 5.0 } else { 11.0 };

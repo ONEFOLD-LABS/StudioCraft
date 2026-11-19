@@ -437,7 +437,7 @@ fn interact(
             Tool::Draw => {
                 let pitch = g.pitch(p.y).clamp(0, 127) as u8;
                 let start = snap(w, tick, mods.alt) as i64 - g.part_start as i64;
-                let len = w.grid.ticks(&w.project);
+                let len = w.grid_ticks();
                 if let Some(ev) = w.project.event_mut(part) {
                     ev.notes.push(Note {
                         pitch,
@@ -503,11 +503,7 @@ fn interact(
             }
             NoteDrag::Resize { original, note } => {
                 let end = snap(w, g.tick(p.x), mods.alt);
-                let min = if mods.alt {
-                    1.0
-                } else {
-                    w.grid.ticks(&w.project) as f64
-                };
+                let min = if mods.alt { 1.0 } else { w.grid_ticks() as f64 };
                 if let (Some(ev), Some(anchor)) = (w.project.event_mut(part), original.get(note)) {
                     let anchor_end = g.part_start as f64 + anchor.end() as f64;
                     let delta = end - anchor_end;
@@ -566,7 +562,7 @@ fn interact(
             (Tool::Draw, None) => {
                 let pitch = g.pitch(p.y).clamp(0, 127) as u8;
                 let start = snap(w, g.tick(p.x), mods.alt) as i64 - g.part_start as i64;
-                let len = w.grid.ticks(&w.project);
+                let len = w.grid_ticks();
                 w.edit_notes(part, |n| {
                     n.push(Note {
                         pitch,
@@ -631,7 +627,7 @@ fn paint_grid(w: &ProjectWindow, p: &Painter, g: &KGeo, part_start: u64, part_en
     // Takt- und Zählzeitlinien.
     let bar = w.bar_ticks();
     let beat = w.beat_ticks();
-    let step = w.grid.ticks(&w.project).max(1);
+    let step = w.grid_ticks().max(1);
     let t0 = (g.tick(g.grid.left()).max(0.0) as u64 / step) * step;
     let mut t = t0;
     let end = g.tick(g.grid.right()).max(0.0) as u64;

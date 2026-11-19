@@ -112,6 +112,7 @@ impl ProjectWindow {
                     ("Duplizieren", "Strg+D", E::Duplicate, has_sel),
                     ("Am Cursor teilen", "Alt+X", E::SplitAtCursor, true),
                     ("Alles auswählen", "Strg+A", E::SelectAll, true),
+                    ("Quantisieren", "Q", E::Quantize, true),
                 ];
                 for (label, keys, cmd, enabled) in items {
                     let b = egui::Button::new(label).shortcut_text(keys);
@@ -119,6 +120,10 @@ impl ProjectWindow {
                         self.run_edit_command(cmd);
                         ui.close();
                     }
+                }
+                if ui.button("Quantisierungs-Panel …").clicked() {
+                    self.show_quantize = true;
+                    ui.close();
                 }
                 let del = egui::Button::new("Löschen").shortcut_text("Entf");
                 if ui.add_enabled(has_sel, del).clicked() {

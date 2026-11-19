@@ -10,6 +10,7 @@ mod inserts;
 mod keyeditor;
 mod menu;
 mod mixer;
+mod quantize;
 mod recording;
 mod rightzone;
 mod routing;
@@ -51,6 +52,10 @@ pub struct ProjectWindow {
     tool: Tool,
     snap: bool,
     grid: Grid,
+    /// Globaler Quantisierungswert mit Swing und Stärke (Taste Q).
+    quantize: studiocraft_project::Quantize,
+    /// Quantisierungs-Panel offen.
+    show_quantize: bool,
     show_inspector: bool,
     /// Info-Zeile unter der Werkzeugzeile sichtbar.
     show_info: bool,
@@ -150,6 +155,8 @@ impl ProjectWindow {
             tool: Tool::Select,
             snap: true,
             grid: Grid::Beat,
+            quantize: studiocraft_project::Quantize::default(),
+            show_quantize: false,
             show_inspector: true,
             show_info: true,
             show_transport: true,
@@ -250,12 +257,17 @@ impl ProjectWindow {
         self.send(Command::ToggleCycle);
     }
 
+    /// Rasterabstand des Snap-Rasters in Ticks.
+    pub(crate) fn grid_ticks(&self) -> u64 {
+        self.grid.ticks(&self.project, self.quantize.value)
+    }
+
     pub(crate) fn snap_ticks(&self, ticks: f64) -> u64 {
         let t = ticks.max(0.0);
         if !self.snap {
             return t.round() as u64;
         }
-        let g = self.grid.ticks(&self.project) as f64;
+        let g = self.grid_ticks() as f64;
         ((t / g).round() * g) as u64
     }
 
@@ -696,6 +708,7 @@ impl ProjectWindow {
                 });
         }
         egui::CentralPanel::default().show(ui, |ui| timeline::show(self, ui));
+        quantize::panel(self, ui.ctx());
 
         self.sync_tempo();
         if self.dirty {
@@ -806,6 +819,7 @@ impl ProjectWindow {
                 })
                 .response
                 .on_hover_text("Raster");
+            quantize::toolbar(self, ui);
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if icon_button(
                     ui,
@@ -2448,6 +2462,33 @@ mod tests {
         h.key_press(Key::F2);
         h.run_steps(1);
         assert!(!h.state().show_transport);
+    }
+
+    #[test]
+    fn q_quantizes_and_the_panel_opens_from_the_toolbar() {
+        let (mut w, id) = one_event_window();
+        let start = w.project.event(id).map_or(0, |e| e.start.0);
+        w.project.move_event(id, 0, start + 100, false);
+        w.selection = vec![id];
+        let mut h = window_harness(w);
+        h.key_press(Key::Q);
+        h.run_steps(1);
+        assert_eq!(h.state().project.event(id).map(|e| e.start.0), Some(start));
+        h.get_by_label("Quantisierungs-Panel").click();
+        h.run_steps(2);
+        assert!(h.state().show_quantize);
+        // Beschriftung und Regler tragen beide den Namen.
+        assert!(h.query_all_by_label("Swing").count() >= 2);
+        assert!(h.query_all_by_label("Stärke").count() >= 2);
+    }
+
+    #[test]
+    fn renders_quantize_panel() {
+        shot("quantisierung", |w| {
+            w.show_quantize = true;
+            w.grid = Grid::UseQuantize;
+            w.quantize.swing = 30;
+        });
     }
 
     #[test]

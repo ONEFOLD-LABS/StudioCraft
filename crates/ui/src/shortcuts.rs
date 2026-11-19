@@ -1,6 +1,7 @@
 //! Bearbeitungs- und Navigationskürzel aus der Standardbelegung (Spec „Tastaturkonzept“,
 //! Issue #7): Ausschneiden/Kopieren/Einfügen, Duplizieren, am Cursor teilen, alles auswählen,
-//! auf das Projekt zoomen, Spur und Event wechseln, M/S/R der gewählten Spur, F2 und Alt+L.
+//! auf das Projekt zoomen, Spur und Event wechseln, M/S/R der gewählten Spur, F2, Alt+L und
+//! Q (Quantisieren).
 //!
 //! Die Kürzel werden vor [`ProjectWindow::handle_keys`] verbraucht, damit dort keine
 //! Doppelbelegung greift (z. B. Alt+X gegen X).
@@ -35,9 +36,10 @@ pub(crate) enum EditCommand {
     RecordArm,
     ToggleTransport,
     ToggleLeftZone,
+    Quantize,
 }
 
-const BINDINGS: [(Modifiers, Key, EditCommand); 16] = [
+const BINDINGS: [(Modifiers, Key, EditCommand); 17] = [
     (Modifiers::COMMAND, Key::X, EditCommand::Cut),
     (Modifiers::COMMAND, Key::C, EditCommand::Copy),
     (Modifiers::COMMAND, Key::V, EditCommand::Paste),
@@ -54,6 +56,7 @@ const BINDINGS: [(Modifiers, Key, EditCommand); 16] = [
     (Modifiers::NONE, Key::S, EditCommand::Solo),
     (Modifiers::NONE, Key::R, EditCommand::RecordArm),
     (Modifiers::NONE, Key::F2, EditCommand::ToggleTransport),
+    (Modifiers::NONE, Key::Q, EditCommand::Quantize),
 ];
 
 /// Wie `InputState::consume_key`, aber die Modifier müssen genau passen: `R` soll nicht auch
@@ -127,6 +130,7 @@ impl ProjectWindow {
             }
             EditCommand::ToggleTransport => self.show_transport = !self.show_transport,
             EditCommand::ToggleLeftZone => self.show_inspector = !self.show_inspector,
+            EditCommand::Quantize => self.quantize_selection(),
         }
     }
 

@@ -536,7 +536,7 @@ fn finish_drag(w: &mut ProjectWindow, g: &Geo, d: Drag, p: Pos2, mods: egui::Mod
         | Drag::FadeOut { .. } => {}
         Drag::Draw { row, start } => {
             let end = w.snap_ticks(g.ticks(p.x));
-            let min = w.grid.ticks(&w.project);
+            let min = w.grid_ticks();
             let (a, b) = (start.min(end), start.max(end));
             let len = (b - a).max(min);
             if let Some(id) = w.project.create_event(row, a, len) {

@@ -1,7 +1,7 @@
 //! Werkzeuge und Raster (Spec-Abschnitte „Werkzeuge“ und „Raster, Snap und Bearbeitung“).
 
 use egui::Key;
-use studiocraft_project::Project;
+use studiocraft_project::{Project, QuantizeValue};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Tool {
@@ -100,32 +100,34 @@ impl Tool {
     }
 }
 
-/// Raster-Typ für Snap.
+/// Raster-Typ für Snap. „Quantisierung verwenden“ folgt dem globalen Quantisierungswert.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Grid {
     Bar,
     Beat,
-    Sixteenth,
+    UseQuantize,
 }
 
 impl Grid {
-    pub const ALL: [Grid; 3] = [Grid::Bar, Grid::Beat, Grid::Sixteenth];
+    pub const ALL: [Grid; 3] = [Grid::Bar, Grid::Beat, Grid::UseQuantize];
 
     pub fn label(self) -> &'static str {
         match self {
             Grid::Bar => "Takt",
             Grid::Beat => "Zählzeit",
-            Grid::Sixteenth => "1/16",
+            Grid::UseQuantize => "Quantisierung verwenden",
         }
     }
 
-    pub fn ticks(self, project: &Project) -> u64 {
+    /// Rasterabstand in Ticks, nie 0.
+    pub fn ticks(self, project: &Project, quantize: QuantizeValue) -> u64 {
         let sig = project.tempo.signature;
-        match self {
+        let t = match self {
             Grid::Bar => sig.bar_ticks(),
             Grid::Beat => sig.beat_ticks(),
-            Grid::Sixteenth => studiocraft_project::TICKS_PER_QUARTER / 4,
-        }
+            Grid::UseQuantize => quantize.ticks(),
+        };
+        t.max(1)
     }
 }
 
