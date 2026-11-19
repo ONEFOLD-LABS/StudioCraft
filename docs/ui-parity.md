@@ -55,11 +55,14 @@ Bei Mehrfachauswahl: Werte des frühesten Events, Beschriftungen gelb, davor die
 
 - Kopfzeile über den Spuren: Anzahl Spuren, Knopf „Spur hinzufügen“ (+), globale
   Mute-/Solo-Anzeige (zeigt, ob irgendwo Mute oder Solo aktiv ist; Klick hebt auf).
-- **Spurkopf** (Spec „Spurtypen und Inspector“): links eine Farbleiste in Spurfarbe über die
-  ganze Höhe (Klick öffnet die Farbpalette), davor der Pfeil, der die Automationsspuren auf- und zuklappt, daneben Name; die
-  Schalter sitzen in einer Reihe: Mute (M), Solo (S), Aufnahme bereit (●), Monitor
-  (Lautsprecher), Automation lesen (R), Automation schreiben (W), Zeitbasis (Note
-  musikalisch, Uhr linear), Lanes ein/aus.
+- **Spurkopf** (Spec „Spurtypen und Inspector“): links eine breite Farbleiste in Spurfarbe über
+  die ganze Höhe mit der Spurnummer (Klick öffnet die Farbpalette). Daneben zwei Zeilen:
+  oben der Pfeil, der die Automationsspuren auf- und zuklappt, Mute (M), Solo (S), Name und
+  rechts ein schmaler Lautstärkeregler in Spurfarbe (Klick oder Ziehen setzt den Wert,
+  Strg+Klick 0 dB); unten Aufnahme bereit (●), Monitor (Lautsprecher), Automation lesen (R),
+  Automation schreiben (W), Zeitbasis (Note musikalisch, Uhr linear), Lanes ein/aus, rechts
+  klein der Spurtyp. Schalter, die ein Spurtyp nicht hat, lassen ihre Lücke, damit die
+  Spalten über alle Spuren gleich bleiben.
   Aktive Farben: Mute orange, Solo gelb, Aufnahme rot, Monitor grün, R grün, W rot.
 - **Lanes:** aufgeklappt liegen überlappende Takes untereinander; verdeckte Abschnitte sind
   abgedunkelt, das Comp-Werkzeug macht einen Abschnitt hörbar.
@@ -149,6 +152,7 @@ Die Positionsanzeige hat einen dunklen Hintergrund (`counter_bg`) mit heller Sch
 18. ✅ Farben: Klick auf die Farbleiste im Spurkopf öffnet die Palette; Events folgen der Spurfarbe,
     über Bearbeiten → Event-Farbe bekommen sie eine eigene (Issue #19)
 19. ✅ Linke Zone mit Kanalzug-Spalte neben dem Inspector
+20. ✅ Spurkopf zweizeilig mit Farbleiste, Spurnummer und Lautstärkeregler
 
 **Als Nächstes:** Aus dieser Liste ist nichts mehr offen; die Automationsmodi Overwrite und Trim
 kommen mit #91. Weitere Angleichungen ergeben sich aus `docs/spec.md`.

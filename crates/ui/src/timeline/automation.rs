@@ -292,8 +292,8 @@ fn header_buttons(rect: Rect) -> [Rect; 2] {
 
 /// Pfeil im Spurkopf, der die Automation auf- und zuklappt.
 pub(super) fn arrow_rect(g: &Geo, row: usize) -> Rect {
-    let top = g.row_top(row) + (g.view.row_h - 14.0) / 2.0;
-    let left = g.header.left() + 8.0 + super::indent(g, row);
+    let top = g.header_line(row, 0) + 2.0;
+    let left = g.header.left() + super::STRIP_W + 3.0 + super::indent(g, row);
     Rect::from_min_size(pos2(left, top), vec2(12.0, 14.0))
 }
 
@@ -379,7 +379,7 @@ pub(super) fn paint_headers(w: &ProjectWindow, painter: &Painter, g: &Geo, row: 
         let l = &track.automation[lane];
         painter.rect_filled(rect, 0.0, t.lane_alt);
         painter.rect_filled(
-            Rect::from_min_size(rect.min, vec2(5.0, rect.height())),
+            Rect::from_min_size(rect.min, vec2(super::STRIP_W, rect.height())),
             0.0,
             track_color(track.color).gamma_multiply(0.6),
         );
@@ -390,7 +390,7 @@ pub(super) fn paint_headers(w: &ProjectWindow, painter: &Painter, g: &Geo, row: 
                 pos2(mute.left() - 4.0, rect.max.y),
             ))
             .text(
-                rect.left_center() + vec2(24.0, 0.0),
+                rect.left_center() + vec2(super::BUTTONS_X, 0.0),
                 Align2::LEFT_CENTER,
                 w.param_name(row, l.param),
                 FontId::proportional(12.0),

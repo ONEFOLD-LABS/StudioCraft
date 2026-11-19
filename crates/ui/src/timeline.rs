@@ -15,6 +15,12 @@ pub(crate) use automation::range as param_range;
 const HEADER_W: f32 = 290.0;
 /// Anzahl der Schalter im Spurkopf.
 const HEADER_BUTTONS: usize = 8;
+/// Breite der Farbleiste links im Spurkopf; sie trägt die Spurnummer.
+const STRIP_W: f32 = 20.0;
+/// Linker Rand der Schalter im Spurkopf (hinter Farbleiste und Automationspfeil).
+const BUTTONS_X: f32 = 38.0;
+/// Breite des Lautstärkereglers oben rechts im Spurkopf.
+const VOLUME_W: f32 = 64.0;
 const RULER_H: f32 = 30.0;
 
 #[derive(Debug, Clone, Copy)]
@@ -79,6 +85,10 @@ pub(crate) enum Drag {
     Draw {
         row: usize,
         start: u64,
+    },
+    /// Lautstärkeregler im Spurkopf ziehen.
+    Volume {
+        row: usize,
     },
     /// Cycle-Bereich im Lineal aufziehen.
     Ruler {
@@ -308,17 +318,30 @@ impl Geo {
         let d = d.clamp(0, self.rows.saturating_sub(1) as isize) as usize;
         self.order.get(d).copied().unwrap_or(row)
     }
-    /// Rechtecke der Knöpfe M, S, R im Spurkopf.
-    /// Schalter im Spurkopf, von links: Mute, Solo, Aufnahme bereit, Monitor,
-    /// Automation lesen, Automation schreiben, Zeitbasis, Lanes
-    /// (Spec „Spurkopf in der Spurliste“).
+    /// Oberkante der oberen bzw. unteren Zeile im Spurkopf.
+    fn header_line(&self, row: usize, line: usize) -> f32 {
+        let mid = self.row_top(row) + self.view.row_h / 2.0;
+        if line == 0 { mid - 19.0 } else { mid + 1.0 }
+    }
+    /// Schalter im Spurkopf (Spec „Spurkopf in der Spurliste“), in zwei Zeilen:
+    /// oben Mute und Solo vor dem Namen, unten Aufnahme bereit, Monitor,
+    /// Automation lesen, Automation schreiben, Zeitbasis, Lanes.
     fn header_buttons(&self, row: usize) -> [Rect; HEADER_BUTTONS] {
-        let top = self.row_top(row) + (self.view.row_h - 18.0) / 2.0;
-        let right = self.header.right() - 6.0;
         std::array::from_fn(|i| {
-            let x = right - (HEADER_BUTTONS - i) as f32 * 21.0;
-            Rect::from_min_size(pos2(x, top), vec2(19.0, 18.0))
+            let (line, col) = if i < 2 { (0, i) } else { (1, i - 2) };
+            let x = self.header.left() + BUTTONS_X + indent(self, row) + col as f32 * 21.0;
+            Rect::from_min_size(pos2(x, self.header_line(row, line)), vec2(19.0, 18.0))
         })
+    }
+    /// Lautstärkeregler oben rechts im Spurkopf (nur Spuren mit Kanal).
+    fn header_volume(&self, row: usize) -> Rect {
+        Rect::from_min_size(
+            pos2(
+                self.header.right() - 6.0 - VOLUME_W,
+                self.header_line(row, 0),
+            ),
+            vec2(VOLUME_W, 18.0),
+        )
     }
 }
 
@@ -649,6 +672,10 @@ fn live_drag(w: &mut ProjectWindow, g: &Geo, d: Drag, p: Pos2, mods: egui::Modif
         w.snap_ticks(raw)
     };
     match d {
+        Drag::Volume { row } => {
+            set_header_volume(w, g, row, p.x);
+            return;
+        }
         Drag::Ruler { start } => {
             let t = w.snap_ticks(raw);
             w.left_locator = start.min(t);
@@ -701,6 +728,12 @@ fn start_drag(w: &mut ProjectWindow, g: &Geo, p: Pos2, alt: bool) -> Option<Drag
         return Some(Drag::Ruler {
             start: w.snap_ticks(g.ticks(p.x)),
         });
+    }
+    if g.header.contains(p) {
+        let row = g.row_at(p.y)?;
+        let kind = w.project.tracks.get(row)?.kind;
+        return (crate::mixer::has_channel(kind) && g.header_volume(row).contains(p))
+            .then_some(Drag::Volume { row });
     }
     if !g.lanes.contains(p) {
         return None;
@@ -793,9 +826,21 @@ fn move_delta(
     Some((to - from, new_start as i64 - ev.start.0 as i64))
 }
 
+/// Setzt die Lautstärke der Spur aus der Mausposition im Regler des Spurkopfs
+/// (gleiche Kennlinie wie der Fader im Mixer).
+fn set_header_volume(w: &mut ProjectWindow, g: &Geo, row: usize, x: f32) {
+    let r = g.header_volume(row);
+    let pos = ((x - r.left()) / r.width()).clamp(0.0, 1.0);
+    if let Some(track) = w.project.tracks.get_mut(row) {
+        track.volume_db = crate::mixer::pos_to_db(pos);
+        w.dirty = true;
+    }
+}
+
 fn finish_drag(w: &mut ProjectWindow, g: &Geo, d: Drag, p: Pos2, mods: egui::Modifiers) {
     match d {
         Drag::Ruler { .. } => w.send_locators(),
+        Drag::Volume { .. } => {}
         // Schon während des Ziehens angewendet.
         Drag::Range { .. } => {
             if w.range.is_some_and(|(_, _, a, b)| b <= a) {
@@ -885,7 +930,7 @@ fn click(w: &mut ProjectWindow, g: &Geo, p: Pos2, mods: egui::Modifiers) {
         }
         // Farbleiste ganz links: Palette der Spurfarbe.
         if let Some(row) = g.row_at(p.y)
-            && p.x < g.header.left() + 7.0
+            && p.x < g.header.left() + STRIP_W
         {
             w.open_color_popup(crate::colors::Target::Track(row), p);
             return;
@@ -903,8 +948,17 @@ fn click(w: &mut ProjectWindow, g: &Geo, p: Pos2, mods: egui::Modifiers) {
         }
         if let Some(row) = g.row_at(p.y) {
             let [m, s, r, mon, read, write, base, lanes] = g.header_buttons(row);
+            let kind = w.project.tracks[row].kind;
+            if crate::mixer::has_channel(kind) && g.header_volume(row).contains(p) {
+                if mods.command {
+                    w.project.tracks[row].volume_db = 0.0;
+                    w.dirty = true;
+                } else {
+                    set_header_volume(w, g, row, p.x);
+                }
+                return;
+            }
             let track = &mut w.project.tracks[row];
-            let kind = track.kind;
             if m.contains(p) {
                 track.mute = !track.mute;
             } else if s.contains(p) {
@@ -1498,45 +1552,51 @@ fn paint_headers(w: &ProjectWindow, painter: &Painter, g: &Geo) {
             pos2(g.header.left(), top),
             vec2(g.header.width(), g.row_height(row)),
         );
-        // Name und Schalter stehen in der obersten Lane.
-        let head = Rect::from_min_size(rect.min, vec2(rect.width(), g.view.row_h));
-        // Platz für den Automationspfeil vor dem Namen.
-        let name_x = indent(g, row)
-            + if crate::mixer::has_channel(track.kind) || track.kind == TrackKind::Folder {
-                24.0
-            } else {
-                12.0
-            };
+        let t = crate::theme::tokens(painter.ctx());
         if w.selected_track == Some(row) {
             // Gewählte Spur: heller hinterlegt, nicht vollflächig in Akzentfarbe (ui-parity.md).
-            painter.rect_filled(rect, 0.0, crate::theme::tokens(painter.ctx()).row_selected);
+            painter.rect_filled(rect, 0.0, t.row_selected);
         }
-        painter.rect_filled(
-            Rect::from_min_size(rect.min, vec2(5.0, rect.height())),
-            0.0,
-            track_color(track.color),
+        // Farbleiste über die ganze Höhe, oben die Spurnummer.
+        let color = track_color(track.color);
+        let strip = Rect::from_min_size(rect.min, vec2(STRIP_W, rect.height()));
+        painter.rect_filled(strip, 0.0, color);
+        painter.with_clip_rect(strip.intersect(g.header)).text(
+            pos2(strip.center().x, g.header_line(row, 0) + 9.0),
+            Align2::CENTER_CENTER,
+            (g.display_pos(row).unwrap_or(row) + 1).to_string(),
+            FontId::proportional(10.0),
+            contrast_text(color),
         );
-        // Name nur bis vor die Knöpfe, damit lange Namen nicht darüber laufen.
-        let name_clip = Rect::from_min_max(
-            rect.min,
-            pos2(g.header_buttons(row)[0].left() - 4.0, rect.max.y),
-        );
+        let [_, solo, ..] = g.header_buttons(row);
+        let volume = g.header_volume(row);
+        let channel = crate::mixer::has_channel(track.kind);
+        // Name hinter Mute/Solo, nur bis vor den Lautstärkeregler.
+        let name_right = if channel {
+            volume.left() - 6.0
+        } else {
+            rect.right() - 6.0
+        };
+        let name_clip =
+            Rect::from_x_y_ranges(solo.right() + 6.0..=name_right, rect.top()..=rect.bottom());
         painter.with_clip_rect(name_clip.intersect(g.header)).text(
-            head.left_center() + vec2(name_x, -6.0),
+            pos2(name_clip.left(), solo.center().y),
             Align2::LEFT_CENTER,
             &track.name,
             FontId::proportional(13.0),
-            crate::theme::tokens(painter.ctx()).text,
+            t.text,
         );
+        // Spurtyp unten rechts, klein und gedimmt.
         painter.text(
-            head.left_center() + vec2(name_x, 8.0),
-            Align2::LEFT_CENTER,
+            pos2(rect.right() - 6.0, g.header_line(row, 1) + 9.0),
+            Align2::RIGHT_CENTER,
             track.kind.label(),
             FontId::proportional(10.0),
             visuals.weak_text_color(),
         );
-        let t = crate::theme::tokens(painter.ctx());
-        let channel = crate::mixer::has_channel(track.kind);
+        if channel {
+            paint_header_volume(painter, volume, track.volume_db, color, &visuals);
+        }
         let flags = [
             (Flag::Text("M"), track.mute, t.mute, true),
             (Flag::Text("S"), track.solo, t.solo, true),
@@ -1614,6 +1674,41 @@ fn paint_headers(w: &ProjectWindow, painter: &Painter, g: &Geo) {
             rect.bottom(),
             Stroke::new(1.0, visuals.faint_bg_color),
         );
+    }
+}
+
+/// Lautstärkeregler im Spurkopf: Schiene, gefüllter Teil in Spurfarbe, Griff.
+fn paint_header_volume(
+    painter: &Painter,
+    r: Rect,
+    db: f32,
+    color: Color32,
+    visuals: &egui::Visuals,
+) {
+    let y = r.center().y;
+    let pos = crate::mixer::db_to_pos(db).clamp(0.0, 1.0);
+    let x = r.left() + pos * r.width();
+    let rail = Rect::from_x_y_ranges(r.x_range(), y - 1.5..=y + 1.5);
+    painter.rect_filled(rail, 1.5, visuals.widgets.inactive.bg_fill);
+    painter.rect_filled(
+        Rect::from_x_y_ranges(r.left()..=x, rail.y_range()),
+        1.5,
+        color.gamma_multiply(0.8),
+    );
+    painter.rect_filled(
+        Rect::from_center_size(pos2(x, y), vec2(6.0, 12.0)),
+        2.0,
+        visuals.widgets.active.fg_stroke.color,
+    );
+}
+
+/// Lesbare Schriftfarbe auf einer Spurfarbe.
+fn contrast_text(bg: Color32) -> Color32 {
+    let l = 0.299 * f32::from(bg.r()) + 0.587 * f32::from(bg.g()) + 0.114 * f32::from(bg.b());
+    if l > 140.0 {
+        Color32::BLACK
+    } else {
+        Color32::WHITE
     }
 }
 

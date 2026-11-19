@@ -100,7 +100,7 @@ Der Spurtyp legt fest, welche Events eine Spur trägt und ob sie einen Mixer-Kan
 | Automation | Kurve eines Parameters, unter ihrer Spur | nein | Parameter-Auswahl, Modus | ja |
 | Video | Videoframes als Thumbnails | nein | Offset, Ton an/aus | später |
 
-**Spurkopf in der Spurliste** (Reihenfolge von links): Name, Mute, Solo, Aufnahme bereit, Monitor, Automation lesen, Automation schreiben, Zeitbasis, Lanes ein/aus. Breite und sichtbare Elemente sind pro Spurtyp einstellbar.
+**Spurkopf in der Spurliste:** links eine Farbleiste mit der Spurnummer, daneben zwei Zeilen. Oben: Automationspfeil, Mute, Solo, Name und ein Lautstärkeregler (Strg+Klick: 0 dB). Unten: Aufnahme bereit, Monitor, Automation lesen, Automation schreiben, Zeitbasis, Lanes ein/aus. Breite und sichtbare Elemente sind pro Spurtyp einstellbar.
 
 **Farbe:** Jede Spur hat eine Farbe; neue Events erben sie. Die Farbe erscheint auch auf dem Mixer-Kanal.
 

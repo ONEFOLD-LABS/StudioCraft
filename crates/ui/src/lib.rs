@@ -1469,9 +1469,15 @@ mod tests {
             let w = h.state();
             let lanes = w.lanes_rect;
             let mid = lanes.top() + w.view.row_h / 2.0;
-            // Buttons sit right-aligned in the header, 21 px apart, eight of them.
-            let x = lanes.left() - 6.0 - (8 - i) as f32 * 21.0 + 9.0;
-            let pos = egui::pos2(x, mid);
+            // Two rows behind the colour strip, 21 px apart: M and S on top, the other
+            // six (record, monitor, R, W, time base, lanes) below.
+            let (y, col) = if i < 2 {
+                (mid - 10.0, i)
+            } else {
+                (mid + 10.0, i - 2)
+            };
+            let x = lanes.left() - 290.0 + 38.0 + col as f32 * 21.0 + 9.0;
+            let pos = egui::pos2(x, y);
             h.event(egui::Event::PointerMoved(pos));
             h.run_steps(1);
             for pressed in [true, false] {
@@ -1484,6 +1490,10 @@ mod tests {
             }
             h.run_steps(2);
         };
+        click_button(&mut h, 0);
+        assert!(h.state().project.tracks[0].mute);
+        click_button(&mut h, 1);
+        assert!(h.state().project.tracks[0].solo);
         click_button(&mut h, 3);
         assert!(h.state().project.tracks[0].monitor);
         click_button(&mut h, 4);
@@ -1492,6 +1502,50 @@ mod tests {
         assert!(h.state().project.tracks[0].write);
         h.state_mut().undo();
         assert!(!h.state().project.tracks[0].write);
+    }
+
+    #[test]
+    fn header_volume_slider_sets_the_track_volume() {
+        let (w, _) = one_event_window();
+        let mut h = window_harness(w);
+        let press = |h: &mut Harness<'_, ProjectWindow>, pos: egui::Pos2, mods: egui::Modifiers| {
+            h.event(egui::Event::ModifiersChanged(mods));
+            h.event(egui::Event::PointerMoved(pos));
+            h.run_steps(1);
+            for pressed in [true, false] {
+                h.event(egui::Event::PointerButton {
+                    pos,
+                    button: egui::PointerButton::Primary,
+                    pressed,
+                    modifiers: mods,
+                });
+            }
+            h.run_steps(2);
+            h.event(egui::Event::ModifiersChanged(egui::Modifiers::NONE));
+            h.run_steps(1);
+        };
+        let (left, right, y) = {
+            let w = h.state();
+            let l = w.lanes_rect;
+            // Slider: 64 px wide, 6 px from the right edge of the header, upper line.
+            (
+                l.left() - 6.0 - 64.0,
+                l.left() - 6.0,
+                l.top() + w.view.row_h / 2.0 - 10.0,
+            )
+        };
+        press(&mut h, egui::pos2(left + 1.0, y), egui::Modifiers::NONE);
+        let low = h.state().project.tracks[0].volume_db;
+        assert!(low < -40.0, "left end is near silence, got {low}");
+        press(&mut h, egui::pos2(right - 1.0, y), egui::Modifiers::NONE);
+        let high = h.state().project.tracks[0].volume_db;
+        assert!(high > 5.0, "right end is near the maximum, got {high}");
+        press(&mut h, egui::pos2(left + 30.0, y), egui::Modifiers::COMMAND);
+        assert_eq!(h.state().project.tracks[0].volume_db, 0.0);
+        h.state_mut().undo();
+        assert_eq!(h.state().project.tracks[0].volume_db, high);
+        // Clicks on the slider do not select or toggle anything else.
+        assert!(!h.state().project.tracks[0].mute);
     }
 
     #[test]
@@ -1653,9 +1707,9 @@ mod tests {
             });
             h.run_steps(2);
         };
-        // Arrow left of the track name.
+        // Arrow right of the colour strip, in the upper line of the header.
         let left = h.state().lanes_rect.left();
-        let arrow = at(&h, left - 290.0 + 14.0, 0.5);
+        let arrow = at(&h, left - 290.0 + 29.0, 0.3);
         press(&mut h, arrow, arrow);
         let lanes = &h.state().project.tracks[0].automation;
         assert_eq!(lanes.len(), 1);
@@ -2265,12 +2319,13 @@ mod tests {
             .map(|r| r.0)
             .collect();
         assert_eq!(order, [a, folder, b]);
-        // The arrow on the folder's header (second row) folds it: Gitarre disappears.
+        // The arrow on the folder's header (second row, upper line, right of the colour
+        // strip) folds it: Gitarre disappears.
         let arrow = {
             let w = h.state();
             egui::pos2(
-                w.lanes_rect.left() - 290.0 + 14.0,
-                w.lanes_rect.top() + 1.5 * w.view.row_h,
+                w.lanes_rect.left() - 290.0 + 29.0,
+                w.lanes_rect.top() + 1.5 * w.view.row_h - 10.0,
             )
         };
         h.event(egui::Event::PointerMoved(arrow));
