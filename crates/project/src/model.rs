@@ -415,6 +415,20 @@ impl Project {
         Some(&mut self.tracks[t].events[i])
     }
 
+    /// Fügt eine Kopie von `ev` mit neuer Id auf Spur `track` ein (Einfügen aus der
+    /// Zwischenablage). `None`, wenn die Spur fehlt oder keine Events trägt.
+    pub fn insert_event(&mut self, track: usize, mut ev: Event) -> Option<EventId> {
+        if !self.tracks.get(track)?.kind.holds_events() {
+            return None;
+        }
+        ev.id = self.next_event_id();
+        let id = ev.id;
+        let events = &mut self.tracks[track].events;
+        let pos = events.partition_point(|e| e.start.0 <= ev.start.0);
+        events.insert(pos, ev);
+        Some(id)
+    }
+
     /// Teilt ein Event an `at`. Gibt die Id des neuen rechten Teils zurück.
     pub fn split(&mut self, id: EventId, at: u64) -> Option<EventId> {
         let new_id = self.next_id;

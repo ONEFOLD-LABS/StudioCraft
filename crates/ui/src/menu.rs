@@ -103,8 +103,25 @@ impl ProjectWindow {
                     self.redo();
                 }
                 ui.separator();
+                use crate::shortcuts::EditCommand as E;
+                let has_sel = !self.selection.is_empty();
+                let items = [
+                    ("Ausschneiden", "Strg+X", E::Cut, has_sel),
+                    ("Kopieren", "Strg+C", E::Copy, has_sel),
+                    ("Einfügen", "Strg+V", E::Paste, true),
+                    ("Duplizieren", "Strg+D", E::Duplicate, has_sel),
+                    ("Am Cursor teilen", "Alt+X", E::SplitAtCursor, true),
+                    ("Alles auswählen", "Strg+A", E::SelectAll, true),
+                ];
+                for (label, keys, cmd, enabled) in items {
+                    let b = egui::Button::new(label).shortcut_text(keys);
+                    if ui.add_enabled(enabled, b).clicked() {
+                        self.run_edit_command(cmd);
+                        ui.close();
+                    }
+                }
                 let del = egui::Button::new("Löschen").shortcut_text("Entf");
-                if ui.add_enabled(!self.selection.is_empty(), del).clicked() {
+                if ui.add_enabled(has_sel, del).clicked() {
                     self.delete_selection();
                 }
             });
@@ -127,8 +144,9 @@ impl ProjectWindow {
                 });
             });
             ui.menu_button("Ansicht", |ui| {
-                ui.checkbox(&mut self.show_inspector, "Inspector (Alt+I)");
+                ui.checkbox(&mut self.show_inspector, "Inspector (Alt+I, Alt+L)");
                 ui.checkbox(&mut self.show_info, "Info-Zeile");
+                ui.checkbox(&mut self.show_transport, "Transportleiste (F2)");
                 ui.checkbox(&mut self.show_right, "Rechte Zone (Alt+R)");
                 if ui
                     .selectable_label(

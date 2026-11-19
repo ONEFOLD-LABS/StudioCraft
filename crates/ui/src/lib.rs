@@ -15,6 +15,7 @@ mod rightzone;
 mod routing;
 mod session;
 pub mod settings;
+mod shortcuts;
 pub mod theme;
 mod timeline;
 mod tools;
@@ -53,6 +54,9 @@ pub struct ProjectWindow {
     show_inspector: bool,
     /// Info-Zeile unter der Werkzeugzeile sichtbar.
     show_info: bool,
+    /// Transportleiste sichtbar (F2).
+    show_transport: bool,
+    clipboard: shortcuts::Clipboard,
     /// Rechte Zone (Medien, Plugins) sichtbar.
     show_right: bool,
     right: rightzone::RightZone,
@@ -148,6 +152,8 @@ impl ProjectWindow {
             grid: Grid::Beat,
             show_inspector: true,
             show_info: true,
+            show_transport: true,
+            clipboard: shortcuts::Clipboard::default(),
             show_right: false,
             right: rightzone::RightZone::default(),
             view: timeline::View::default(),
@@ -627,6 +633,7 @@ impl ProjectWindow {
                 .request_repaint_after(std::time::Duration::from_millis(15));
         }
         self.file_shortcuts(ui);
+        self.edit_shortcuts(ui);
         self.handle_keys(ui);
         let dt_s = ui.input(|i| i.unstable_dt);
         mixer::update_meters(self, dt_s);
@@ -642,7 +649,9 @@ impl ProjectWindow {
         if self.show_info {
             egui::Panel::top("info-zeile").show(ui, |ui| infoline::show(self, ui));
         }
-        egui::Panel::bottom("transportleiste").show(ui, |ui| self.transport_bar(ui));
+        if self.show_transport {
+            egui::Panel::bottom("transportleiste").show(ui, |ui| self.transport_bar(ui));
+        }
         if self.show_lower {
             egui::Panel::bottom("untere-zone")
                 .resizable(true)
@@ -2380,6 +2389,27 @@ mod tests {
                 .unwrap();
             w.show_right = true;
         });
+    }
+
+    #[test]
+    fn default_shortcuts_reach_their_commands() {
+        let (w, id) = one_event_window();
+        let mut h = window_harness(w);
+        h.key_press_modifiers(egui::Modifiers::COMMAND, Key::A);
+        h.run_steps(1);
+        assert_eq!(h.state().selection, vec![id]);
+        let track = h.state().selected_track.unwrap_or(0);
+        h.key_press(Key::M);
+        h.run_steps(1);
+        assert!(h.state().project.tracks[track].mute);
+        // Alt+X teilt am Cursor, X allein ist (noch) kein Crossfade und teilt nicht.
+        h.state_mut().cursor = h.state().project.event(id).map_or(0, |e| e.start.0 + 100);
+        h.key_press_modifiers(egui::Modifiers::ALT, Key::X);
+        h.run_steps(1);
+        assert_eq!(h.state().project.tracks[track].events.len(), 2);
+        h.key_press(Key::F2);
+        h.run_steps(1);
+        assert!(!h.state().show_transport);
     }
 
     #[test]
