@@ -17,7 +17,12 @@ fn main() {
     let names: Vec<String> = std::env::var("STUDIOCRAFT_GUI_PLUGINS")
         .map(|v| v.split(',').map(str::to_owned).collect())
         .unwrap_or_else(|_| vec!["ZamComp".into(), "Surge XT".into()]);
-    let plugins = scan(&default_paths()).0;
+    // Nur CLAP (gleichnamige LV2-Plugins haben noch kein Fenster).
+    let plugins: Vec<_> = scan(&default_paths())
+        .0
+        .into_iter()
+        .filter(|p| p.format == studiocraft_plugin_host::PluginFormat::Clap)
+        .collect();
     let mut tested = 0;
     for name in &names {
         let Some(info) = plugins.iter().find(|p| &p.name == name) else {

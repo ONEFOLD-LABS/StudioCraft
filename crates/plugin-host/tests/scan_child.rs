@@ -29,6 +29,7 @@ fn options(cache: Option<PathBuf>) -> ScanOptions {
     let exe = std::env::current_exe().expect("Testprogramm");
     let mut o = ScanOptions::new(exe, cache);
     o.timeout = Duration::from_secs(2);
+    o.lv2 = false;
     o
 }
 
@@ -87,6 +88,7 @@ fn matches_the_in_process_scan_for_installed_plugins() {
     }
     let mut opts = options(None);
     opts.timeout = Duration::from_secs(30);
+    opts.lv2 = true;
     let report = scan_isolated(&paths, &opts);
     assert_eq!(
         report.plugins, direct,

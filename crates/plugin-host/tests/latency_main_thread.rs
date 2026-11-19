@@ -12,7 +12,12 @@ fn main() {
         println!("Latenz-Test übersprungen (STUDIOCRAFT_LATENCY_TEST=1 setzen)");
         return;
     }
-    let plugins = scan(&default_paths()).0;
+    // Nur CLAP (gleichnamige LV2-Plugins haben noch kein Fenster).
+    let plugins: Vec<_> = scan(&default_paths())
+        .0
+        .into_iter()
+        .filter(|p| p.format == studiocraft_plugin_host::PluginFormat::Clap)
+        .collect();
     let mut with_latency = 0;
     for info in plugins.iter().take(200) {
         let Ok(inst) = PluginInstance::new(info, 48_000, 512) else {

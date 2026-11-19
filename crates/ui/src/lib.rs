@@ -3392,6 +3392,45 @@ mod tests {
     }
 
     #[test]
+    fn an_lv2_effect_works_as_insert_and_renders() {
+        let (mut w, _) = one_event_window();
+        // Bevorzugt ein schlichter Effekt; sonst irgendein LV2-Effekt.
+        let lv2: Vec<_> = w
+            .plugin_list()
+            .iter()
+            .filter(|p| {
+                p.format == studiocraft_plugin_host::PluginFormat::Lv2 && !p.is_instrument()
+            })
+            .cloned()
+            .collect();
+        let Some(p) = lv2
+            .iter()
+            .find(|p| p.name.contains("ZamComp"))
+            .or_else(|| lv2.first())
+            .cloned()
+        else {
+            eprintln!("keine LV2-Effekte installiert – übersprungen");
+            return;
+        };
+        assert!(p.display_name().ends_with("(LV2)"));
+        w.add_insert(0, &p);
+        let slot = w.project.tracks[0].inserts[0].clone();
+        let inst = w.instantiate(&slot);
+        assert!(inst.is_ok(), "{}: {:?}", p.name, inst.err());
+        drop(inst);
+        let range = w.render_range(0).unwrap_or_default();
+        let audio = w
+            .render_offline(render::RenderSpec::track(0, range, true))
+            .unwrap_or_default();
+        assert!(!audio.is_empty() && audio.iter().all(|s| s.is_finite()));
+        assert!(
+            audio.iter().any(|s| s.abs() > 1e-4),
+            "{} passes audio",
+            p.name
+        );
+    }
+
+    #[test]
     fn render_offline_runs_an_instrument_plugin_in_its_own_thread() {
         let mut w = ProjectWindow::new(Project::default(), None, String::new());
         // A synthesizer sounds without content; samplers (e.g. LSP) stay silent unloaded.

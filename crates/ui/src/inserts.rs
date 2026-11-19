@@ -348,7 +348,7 @@ impl ProjectWindow {
             chosen = Some(None);
         }
         if instruments.is_empty() {
-            ui.weak("Keine CLAP-Instrumente installiert");
+            ui.weak("Keine Instrumente installiert");
         }
         ui.separator();
         egui::ScrollArea::vertical()
@@ -356,9 +356,9 @@ impl ProjectWindow {
             .show(ui, |ui| {
                 for p in instruments {
                     let label = if p.vendor.is_empty() {
-                        p.name.clone()
+                        p.display_name()
                     } else {
-                        format!("{} – {}", p.name, p.vendor)
+                        format!("{} – {}", p.display_name(), p.vendor)
                     };
                     if ui.button(label).clicked() {
                         chosen = Some(Some(p));
@@ -655,7 +655,7 @@ impl ProjectWindow {
                     .max_height(480.0)
                     .show(ui, |ui| {
                         for p in list {
-                            if ui.button(&p.name).clicked() {
+                            if ui.button(p.display_name()).clicked() {
                                 self.add_insert(track, &p);
                                 ui.close();
                             }
