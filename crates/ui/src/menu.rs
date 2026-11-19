@@ -42,7 +42,12 @@ impl ProjectWindow {
                     ("Beenden", Action::Quit),
                 ];
                 for (i, (label, action)) in items.into_iter().enumerate() {
-                    if i == 5 || i == 7 {
+                    if i == 5 {
+                        ui.separator();
+                    }
+                    if i == 7 {
+                        ui.separator();
+                        self.autosave_menu(ui);
                         ui.separator();
                     }
                     let keys = self.key_label(ui.ctx(), Cmd::File(action));

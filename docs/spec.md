@@ -54,6 +54,8 @@ Ein Projekt besteht aus Spuren, auf denen Events liegen; Audio-Events verweisen 
 
 **Undo:** Jede Bearbeitung ist ein Befehl im Undo-Verlauf. Der Verlauf ist unbegrenzt konfigurierbar und wird mit dem Projekt nicht gespeichert.
 
+**Automatische Sicherung:** In einstellbarem Abstand (Datei → „Automatisch sichern“, Standard 5 Minuten, „Aus“ möglich) sichert StudioCraft geänderte Projekte als nummerierte Dateien neben der Projektdatei (`Name.backup-07.studiocraft`), ungespeicherte Projekte im Einstellungsordner. Die ältesten Sicherungen über der eingestellten Anzahl (Standard 10) werden gelöscht. Sicherungen schreiben atomar im Hintergrund und markieren das Projekt nicht als gespeichert. Wurde StudioCraft nicht sauber beendet, bietet es beim nächsten Start die neueste Sicherung an; sie öffnet sich als ungespeicherte Fassung des ursprünglichen Projekts.
+
 ## Fenster-Architektur
 
 Alles passiert in einem Projektfenster: In der Mitte liegt die Event-Anzeige, um sie herum liegen Zonen, die einzeln ein- und ausgeblendet werden. Editoren und Mixer laufen wahlweise in der unteren Zone oder als eigene Fenster.
