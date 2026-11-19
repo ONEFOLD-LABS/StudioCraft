@@ -108,6 +108,15 @@ const URI_MAX_BLOCK: &str = "http://lv2plug.in/ns/ext/buf-size#maxBlockLength";
 const URI_MIN_BLOCK: &str = "http://lv2plug.in/ns/ext/buf-size#minBlockLength";
 const URI_NOMINAL_BLOCK: &str = "http://lv2plug.in/ns/ext/buf-size#nominalBlockLength";
 const URI_SAMPLE_RATE: &str = "http://lv2plug.in/ns/ext/parameters#sampleRate";
+const URI_PRESET: &str = "http://lv2plug.in/ns/ext/presets#Preset";
+const URI_LABEL: &str = "http://www.w3.org/2000/01/rdf-schema#label";
+const URI_ATOM_DOUBLE: &str = "http://lv2plug.in/ns/ext/atom#Double";
+const URI_ATOM_BOOL: &str = "http://lv2plug.in/ns/ext/atom#Bool";
+const STATE_INTERFACE: &CStr = c"http://lv2plug.in/ns/ext/state#interface";
+/// Subjekt-URI gespeicherter Zustände (beliebig, aber fest).
+const STATE_URI: &CStr = c"urn:studiocraft:lv2-state";
+/// `LV2_STATE_IS_POD | LV2_STATE_IS_PORTABLE`: nur einfache, übertragbare Werte.
+const STATE_FLAGS: u32 = 1 | 2;
 const FEATURE_URID_MAP: &CStr = c"http://lv2plug.in/ns/ext/urid#map";
 const FEATURE_URID_UNMAP: &CStr = c"http://lv2plug.in/ns/ext/urid#unmap";
 const FEATURE_OPTIONS: &CStr = c"http://lv2plug.in/ns/ext/options#options";
@@ -238,7 +247,39 @@ lilv_api! {
     lilv_port_get_symbol: fn(Ptr, Ptr) -> Ptr;
     lilv_plugin_instantiate: fn(Ptr, f64, *const *const Lv2Feature) -> *mut LilvInstance;
     lilv_instance_free: fn(*mut LilvInstance);
+    lilv_free: fn(*mut c_void);
+    lilv_plugin_get_related: fn(Ptr, Ptr) -> Ptr;
+    lilv_nodes_begin: fn(Ptr) -> Ptr;
+    lilv_nodes_is_end: fn(Ptr, Ptr) -> bool;
+    lilv_nodes_get: fn(Ptr, Ptr) -> Ptr;
+    lilv_nodes_next: fn(Ptr, Ptr) -> Ptr;
+    lilv_nodes_free: fn(Ptr);
+    lilv_world_load_resource: fn(Ptr, Ptr) -> i32;
+    lilv_world_get: fn(Ptr, Ptr, Ptr, Ptr) -> Ptr;
+    lilv_state_new_from_instance: fn(
+        Ptr,
+        *mut LilvInstance,
+        *mut UridMap,
+        *const c_char,
+        *const c_char,
+        *const c_char,
+        *const c_char,
+        Option<GetPortValue>,
+        *mut c_void,
+        u32,
+        *const *const Lv2Feature
+    ) -> Ptr;
+    lilv_state_to_string: fn(Ptr, *mut UridMap, *mut UridUnmap, Ptr, *const c_char, *const c_char) -> *mut c_char;
+    lilv_state_new_from_string: fn(Ptr, *mut UridMap, *const c_char) -> Ptr;
+    lilv_state_new_from_world: fn(Ptr, *mut UridMap, Ptr) -> Ptr;
+    lilv_state_restore: fn(Ptr, *mut LilvInstance, Option<SetPortValue>, *mut c_void, u32, *const *const Lv2Feature);
+    lilv_state_emit_port_values: fn(Ptr, SetPortValue, *mut c_void);
+    lilv_state_free: fn(Ptr);
 }
+
+type GetPortValue =
+    unsafe extern "C" fn(*const c_char, *mut c_void, *mut u32, *mut u32) -> *const c_void;
+type SetPortValue = unsafe extern "C" fn(*const c_char, *mut c_void, *const c_void, u32, u32);
 
 /// Die lilv-Welt mit allen Beschreibungen; lebt bis zum Programmende.
 struct World {
@@ -367,6 +408,8 @@ fn world() -> Option<std::sync::MutexGuard<'static, World>> {
                 URI_ENUMERATION,
                 URI_NOT_ON_GUI,
                 URI_MIDI_EVENT,
+                URI_PRESET,
+                URI_LABEL,
             ] {
                 let Ok(c) = CString::new(uri) else { continue };
                 // SAFETY: Welt gültig; Knoten leben so lange wie die Welt.
@@ -439,6 +482,8 @@ pub struct Lv2Instance {
     max_frames: usize,
     active: bool,
     shared: Arc<Shared>,
+    /// Symbol → Port-Index der Control-Eingänge (Presets nennen Ports beim Symbol).
+    symbols: Arc<HashMap<String, u32>>,
     // Features: Zeiger darauf gibt das Plugin nicht frei; sie leben mit der Instanz.
     _map: Box<UridMap>,
     _unmap: Box<UridUnmap>,
@@ -571,6 +616,7 @@ impl Lv2Instance {
         let (mut a_in, mut a_out, mut c_in, mut c_out, mut t_in, mut t_out) = (0, 0, 0, 0, 0, 0);
         let mut params = Vec::new();
         let mut control_of_port = HashMap::new();
+        let mut symbols = HashMap::new();
         let mut controls = Vec::new();
         let mut latency_out = None;
         for i in 0..n {
@@ -604,6 +650,9 @@ impl Lv2Instance {
                     .unwrap_or(min + 1.0);
                 let def = def.unwrap_or(min).clamp(min, max);
                 if input {
+                    // SAFETY: Port gültig; das Symbol gehört dem Port.
+                    let symbol = w.string(unsafe { (w.api.lilv_port_get_symbol)(plugin, port) });
+                    symbols.insert(symbol, i);
                     control_of_port.insert(i, controls.len());
                     controls.push(def);
                     if !has(URI_NOT_ON_GUI) {
@@ -698,6 +747,7 @@ impl Lv2Instance {
             max_frames: max,
             active: false,
             shared: Arc::default(),
+            symbols: Arc::new(symbols),
             _map: map,
             _unmap: unmap,
             _options: options,
@@ -762,6 +812,9 @@ impl Lv2Instance {
     pub fn handle(&self) -> Lv2Handle {
         Lv2Handle {
             shared: self.shared.clone(),
+            inst: self.inst,
+            uri: self.info.id.clone(),
+            symbols: self.symbols.clone(),
         }
     }
 
@@ -917,11 +970,78 @@ impl Drop for Lv2Instance {
     }
 }
 
-/// Griff auf eine LV2-Instanz für den Hauptthread. Zustand und Fenster folgen; bis dahin
-/// liefert er die Latenz.
+/// Griff auf eine LV2-Instanz für den Hauptthread (Zustand, Presets, Latenz), während die
+/// Instanz in der Engine rechnet. Muss vor der Instanz freigegeben werden (wie bei CLAP).
 pub struct Lv2Handle {
     shared: Arc<Shared>,
+    inst: *mut LilvInstance,
+    uri: String,
+    symbols: Arc<HashMap<String, u32>>,
 }
+
+/// Ein Preset eines Plugins: URI und Anzeigename.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Lv2Preset {
+    pub uri: String,
+    pub name: String,
+}
+
+/// Auf dem Stack angelegte URID-Map/-Unmap für lilv-Aufrufe.
+fn map_features() -> (UridMap, UridUnmap) {
+    (
+        UridMap {
+            handle: ptr::null_mut(),
+            map: urid_map,
+        },
+        UridUnmap {
+            handle: ptr::null_mut(),
+            unmap: urid_unmap,
+        },
+    )
+}
+
+/// Sammelt Port-Werte eines Presets (Rückruf von `lilv_state_emit_port_values`).
+struct PortValues<'a> {
+    symbols: &'a HashMap<String, u32>,
+    out: Vec<(u32, f64)>,
+}
+
+unsafe extern "C" fn collect_port_value(
+    symbol: *const c_char,
+    user: *mut c_void,
+    value: *const c_void,
+    size: u32,
+    kind: u32,
+) {
+    if symbol.is_null() || user.is_null() || value.is_null() {
+        return;
+    }
+    // SAFETY: `user` ist der `PortValues`, den `preset_values` übergibt; er lebt den Aufruf über.
+    let pv = unsafe { &mut *(user as *mut PortValues) };
+    let name = cstr(symbol);
+    let Some(&port) = pv.symbols.get(&name) else {
+        return;
+    };
+    // SAFETY: lilv übergibt `size` Bytes vom Typ `kind`; nur bekannte Typen mit passender Größe.
+    let v = unsafe {
+        if kind == map_uri(URI_ATOM_FLOAT) && size == 4 {
+            f64::from(*(value as *const f32))
+        } else if kind == map_uri(URI_ATOM_DOUBLE) && size == 8 {
+            *(value as *const f64)
+        } else if (kind == map_uri(URI_ATOM_INT) || kind == map_uri(URI_ATOM_BOOL)) && size == 4 {
+            f64::from(*(value as *const i32))
+        } else {
+            return;
+        }
+    };
+    if v.is_finite() {
+        pv.out.push((port, v));
+    }
+}
+
+// SAFETY: Der Griff ruft die Instanz nur im Hauptthread über lilv auf (Zustand speichern ist laut
+// lilv parallel zu `run` erlaubt); der Zeiger lebt so lange wie die Instanz.
+unsafe impl Send for Lv2Handle {}
 
 impl Lv2Handle {
     pub fn latency(&self) -> u32 {
@@ -930,6 +1050,163 @@ impl Lv2Handle {
 
     pub fn take_latency_changed(&self) -> bool {
         self.shared.latency_changed.swap(false, Ordering::AcqRel)
+    }
+
+    /// Hat das Plugin eine Zustands-Schnittstelle (mehr als nur Parameter)?
+    fn has_state(&self) -> bool {
+        // SAFETY: Instanz lebt (Vertrag des Griffs); extension_data ist ein reiner Abruf.
+        unsafe {
+            let d = (*self.inst).descriptor;
+            !d.is_null()
+                && (*d)
+                    .extension_data
+                    .is_some_and(|f| !f(STATE_INTERFACE.as_ptr()).is_null())
+        }
+    }
+
+    /// Zustand als Text (Turtle) speichern; `None` ohne Zustands-Schnittstelle. Hauptthread;
+    /// laut lilv parallel zur Verarbeitung erlaubt.
+    pub fn save_state(&self) -> Option<Vec<u8>> {
+        if !self.has_state() {
+            return None;
+        }
+        let _main = main_thread_lock();
+        let w = world()?;
+        let plugin = w.plugin_by_uri(&self.uri)?;
+        let (mut map, mut unmap) = map_features();
+        // SAFETY: Plugin und Instanz gültig; keine Verzeichnisse, nur einfache Werte (Flags).
+        unsafe {
+            let state = (w.api.lilv_state_new_from_instance)(
+                plugin,
+                self.inst,
+                &mut map,
+                ptr::null(),
+                ptr::null(),
+                ptr::null(),
+                ptr::null(),
+                None,
+                ptr::null_mut(),
+                STATE_FLAGS,
+                ptr::null(),
+            );
+            if state.is_null() {
+                return None;
+            }
+            let text = (w.api.lilv_state_to_string)(
+                w.world,
+                &mut map,
+                &mut unmap,
+                state,
+                STATE_URI.as_ptr(),
+                ptr::null(),
+            );
+            (w.api.lilv_state_free)(state);
+            if text.is_null() {
+                return None;
+            }
+            let out = CStr::from_ptr(text).to_bytes().to_vec();
+            (w.api.lilv_free)(text.cast());
+            Some(out)
+        }
+    }
+
+    /// Gespeicherten Zustand laden. Nur bevor die Instanz rechnet (LV2: Wiederherstellen darf
+    /// nicht parallel zu `run` laufen) – StudioCraft lädt ihn beim Erzeugen.
+    pub fn load_state(&self, data: &[u8]) -> bool {
+        let Ok(text) = CString::new(data) else {
+            return false;
+        };
+        let _main = main_thread_lock();
+        let Some(w) = world() else {
+            return false;
+        };
+        let (mut map, _) = map_features();
+        // SAFETY: Text nullterminiert; Zustand wird nach dem Wiederherstellen freigegeben.
+        unsafe {
+            let state = (w.api.lilv_state_new_from_string)(w.world, &mut map, text.as_ptr());
+            if state.is_null() {
+                return false;
+            }
+            (w.api.lilv_state_restore)(state, self.inst, None, ptr::null_mut(), 0, ptr::null());
+            (w.api.lilv_state_free)(state);
+        }
+        true
+    }
+
+    /// Presets des Plugins, nach Name sortiert.
+    pub fn presets(&self) -> Vec<Lv2Preset> {
+        let _main = main_thread_lock();
+        let Some(w) = world() else {
+            return Vec::new();
+        };
+        let Some(plugin) = w.plugin_by_uri(&self.uri) else {
+            return Vec::new();
+        };
+        let mut out = Vec::new();
+        // SAFETY: Plugin und Knoten aus der Welt; die Liste wird am Ende freigegeben.
+        unsafe {
+            let list = (w.api.lilv_plugin_get_related)(plugin, w.node(URI_PRESET));
+            if list.is_null() {
+                return out;
+            }
+            let mut it = (w.api.lilv_nodes_begin)(list);
+            while !(w.api.lilv_nodes_is_end)(list, it) {
+                let node = (w.api.lilv_nodes_get)(list, it);
+                if !node.is_null() {
+                    (w.api.lilv_world_load_resource)(w.world, node);
+                    let label =
+                        (w.api.lilv_world_get)(w.world, node, w.node(URI_LABEL), ptr::null_mut());
+                    let uri = w.string(node);
+                    let name = w.take_string(label);
+                    out.push(Lv2Preset {
+                        name: if name.is_empty() { uri.clone() } else { name },
+                        uri,
+                    });
+                }
+                it = (w.api.lilv_nodes_next)(list, it);
+            }
+            (w.api.lilv_nodes_free)(list);
+        }
+        out.sort_by_key(|p| p.name.to_lowercase());
+        out
+    }
+
+    /// Parameterwerte (Port-Index, Wert) eines Presets; leer, wenn es keine hat. Der Host setzt
+    /// sie wie andere Parameteränderungen (rückgängig machbar, auch während der Wiedergabe).
+    pub fn preset_values(&self, uri: &str) -> Vec<(u32, f64)> {
+        let Ok(c) = CString::new(uri) else {
+            return Vec::new();
+        };
+        let _main = main_thread_lock();
+        let Some(w) = world() else {
+            return Vec::new();
+        };
+        let (mut map, _) = map_features();
+        let mut pv = PortValues {
+            symbols: &self.symbols,
+            out: Vec::new(),
+        };
+        // SAFETY: Knoten und Zustand werden hier angelegt und freigegeben; `pv` lebt den Aufruf.
+        unsafe {
+            let node = (w.api.lilv_new_uri)(w.world, c.as_ptr());
+            if node.is_null() {
+                return Vec::new();
+            }
+            (w.api.lilv_world_load_resource)(w.world, node);
+            let state = (w.api.lilv_state_new_from_world)(w.world, &mut map, node);
+            (w.api.lilv_node_free)(node);
+            if state.is_null() {
+                return Vec::new();
+            }
+            (w.api.lilv_state_emit_port_values)(
+                state,
+                collect_port_value,
+                (&mut pv as *mut PortValues).cast(),
+            );
+            (w.api.lilv_state_free)(state);
+        }
+        pv.out.sort_by_key(|&(p, _)| p);
+        pv.out
     }
 }
 
@@ -973,6 +1250,65 @@ mod tests {
             ok += 1;
         }
         assert!(ok > 0, "at least one LV2 effect instantiates");
+    }
+
+    fn installed(name: &str) -> Option<PluginInfo> {
+        scan().into_iter().find(|p| p.name == name)
+    }
+
+    #[test]
+    fn state_survives_a_new_instance() {
+        let Some(info) = installed("Audio Gain (Stereo)").or_else(|| installed("ZamComp")) else {
+            eprintln!("kein passendes LV2-Plugin – übersprungen");
+            return;
+        };
+        let a = Lv2Instance::new(&info, 48_000, 256);
+        let Ok(a) = a else {
+            return;
+        };
+        let Some(state) = a.handle().save_state() else {
+            eprintln!("{} ohne Zustand – übersprungen", info.name);
+            return;
+        };
+        assert!(
+            String::from_utf8_lossy(&state).contains("lv2-state"),
+            "Turtle text"
+        );
+        let b = Lv2Instance::new(&info, 48_000, 256);
+        assert!(b.is_ok(), "second instance");
+        let Ok(b) = b else { return };
+        assert!(b.handle().load_state(&state));
+        assert_eq!(
+            b.handle().save_state(),
+            Some(state),
+            "same state after loading"
+        );
+        assert!(
+            !b.handle().load_state(b"kein turtle\0"),
+            "garbage is refused"
+        );
+    }
+
+    #[test]
+    fn presets_list_and_yield_parameter_values() {
+        let Some(info) = installed("ZamComp") else {
+            eprintln!("ZamComp (LV2) nicht installiert – übersprungen");
+            return;
+        };
+        let Ok(inst) = Lv2Instance::new(&info, 48_000, 256) else {
+            return;
+        };
+        let h = inst.handle();
+        let presets = h.presets();
+        assert!(!presets.is_empty(), "ZamComp ships presets");
+        let values = h.preset_values(&presets[0].uri);
+        assert!(!values.is_empty());
+        for (id, v) in &values {
+            let p = inst.params.iter().find(|p| p.id == *id);
+            assert!(p.is_some(), "port {id} is a parameter");
+            assert!(v.is_finite());
+        }
+        assert!(h.preset_values("urn:studiocraft:kein-preset").is_empty());
     }
 
     #[test]

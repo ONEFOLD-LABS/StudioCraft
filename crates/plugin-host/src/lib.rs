@@ -42,6 +42,6 @@ pub use isolated::{
     SCAN_FLAG, ScanOptions, ScanReport, clear_scan_cache, run_scan_child, scan_isolated,
 };
 #[cfg(not(target_arch = "wasm32"))]
-pub use lv2::available as lv2_available;
+pub use lv2::{Lv2Preset as PluginPreset, available as lv2_available};
 #[cfg(not(target_arch = "wasm32"))]
 pub use scan::{PluginFormat, PluginInfo, default_paths, find_all, scan, scan_bundle};
