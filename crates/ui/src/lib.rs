@@ -3501,6 +3501,31 @@ mod tests {
         assert_eq!(h.state().project.tracks[0].out_bus, None);
     }
 
+    /// Wellenform bei nicht ganzzahliger Skalierung (Bild für den Vergleich mit
+    /// `STUDIOCRAFT_SHOTS`): keine senkrechten Streifen.
+    #[test]
+    fn waveform_has_no_seams_at_fractional_scale() {
+        let (mut w, _) = one_event_window();
+        w.view.scroll_ticks = 0.0;
+        w.view.row_h = 80.0;
+        w.show_lower = false;
+        w.show_inspector = false;
+        let mut h = Harness::builder()
+            .with_size(egui::vec2(1200.0, 500.0))
+            .with_pixels_per_point(1.25)
+            .wgpu()
+            .build_ui_state(|ui, w: &mut ProjectWindow| w.ui(ui), w);
+        h.run_steps(3);
+        let Ok(img) = h.render() else {
+            eprintln!("kein GPU-Renderer verfügbar, Bild übersprungen");
+            return;
+        };
+        if let Ok(dir) = std::env::var("STUDIOCRAFT_SHOTS") {
+            img.save(std::path::Path::new(&dir).join("waveform-125.png"))
+                .unwrap();
+        }
+    }
+
     #[test]
     fn key_commands_can_be_reassigned_with_a_conflict_warning() {
         use keymap::Cmd;
