@@ -349,17 +349,22 @@ Der MVP ist erreicht, wenn man ein Lied mit Audio- und Instrument-Spuren aufnehm
 
 **MVP-Umfang**
 
+Stand 2026-11-19; offen heißt: fehlt oder ist nicht auf echter Hardware geprüft.
+
 - [ ] Audio-Engine über cpal auf allen Systemen, Latenz ≤ 10 ms bei 48 kHz / 256 Samples
-- [ ] Projektfenster mit Spurliste, Event-Anzeige, Lineal, Inspector, Transportleiste
+  (Engine, Blockgröße und Latenzausgleich vorhanden; die Latenz ist auf Hardware nicht gemessen)
+- [x] Projektfenster mit Spurliste, Event-Anzeige, Lineal, Inspector, Transportleiste
 - [ ] Spurtypen Audio, Instrument, MIDI, Gruppe, FX, Ordner, Marker, Tempo
-- [ ] Werkzeuge 1 bis 9, Snap, Raster, Fades, Crossfades
-- [ ] Aufnahme Audio und MIDI inkl. Cycle-Takes, Punch, Metronom
-- [ ] Mixer mit Inserts, Sends, EQ, Gruppen, Bussen
-- [ ] CLAP-Hosting mit Plugin-GUI
-- [ ] Key-Editor und Sample-Editor (Basis)
-- [ ] Automation Read/Write mit Touch und Auto-Latch
-- [ ] Frei belegbare Tastatur mit Standardbelegung
-- [ ] Export als WAV/FLAC (Mixdown der Locator-Range)
+  (Audio, Instrument, MIDI, Gruppe und FX fertig; Ordner nur als Typ ohne Funktion; Marker und
+  Tempo fehlen, das Tempo ist fest)
+- [ ] Werkzeuge 1 bis 9, Snap, Raster, Fades, Crossfades (alles bis auf Crossfades)
+- [x] Aufnahme Audio und MIDI inkl. Cycle-Takes, Punch, Metronom
+- [ ] Mixer mit Inserts, Sends, EQ, Gruppen, Bussen (alles bis auf den Kanal-EQ)
+- [x] CLAP-Hosting mit Plugin-GUI
+- [ ] Key-Editor und Sample-Editor (Basis) (Key-Editor fertig, Sample-Editor fehlt)
+- [x] Automation Read/Write mit Touch und Auto-Latch (dazu Overwrite und Trim)
+- [ ] Frei belegbare Tastatur mit Standardbelegung (Standardbelegung fertig, Belegen fehlt)
+- [x] Export als WAV/FLAC (Mixdown der Locator-Range)
 
 **Offene Fragen**
 
