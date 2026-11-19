@@ -2002,6 +2002,109 @@ mod tests {
         assert!(missing.is_empty(), "no glyph for {missing:?}");
     }
 
+    fn fake_plugin(id: &str, name: &str, instrument: bool) -> studiocraft_plugin_host::PluginInfo {
+        studiocraft_plugin_host::PluginInfo {
+            id: id.into(),
+            name: name.into(),
+            vendor: String::new(),
+            version: "1".into(),
+            features: vec![
+                if instrument {
+                    "instrument"
+                } else {
+                    "audio-effect"
+                }
+                .into(),
+            ],
+            path: std::path::PathBuf::from("/nicht/vorhanden.clap"),
+        }
+    }
+
+    /// Zieht einen Eintrag der rechten Zone mit der Beschriftung `label` nach `to`.
+    fn drag_label(h: &mut Harness<'_, ProjectWindow>, label: &str, to: egui::Pos2) {
+        let from = h.get_by_label(label).rect().center();
+        let button = |pos, pressed| egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        h.event(egui::Event::PointerMoved(from));
+        h.run_steps(1);
+        h.event(button(from, true));
+        h.run_steps(1);
+        for i in 1..=6 {
+            h.event(egui::Event::PointerMoved(
+                from + (to - from) * (i as f32 / 6.0),
+            ));
+            h.run_steps(1);
+        }
+        h.event(button(to, false));
+        h.run_steps(2);
+    }
+
+    #[test]
+    fn plugins_drag_from_the_right_zone_onto_tracks() {
+        let mut p = Project::default();
+        let audio = p.add_track(TrackKind::Audio, "Gesang");
+        let mut w = ProjectWindow::new(p, None, String::new());
+        w.plugins.list = Some(vec![
+            fake_plugin("test.synth", "Synth", true),
+            fake_plugin("test.hall", "Hall", false),
+            fake_plugin("test.piano", "Piano", true),
+        ]);
+        w.show_right = true;
+        w.right.tab = rightzone::Tab::Plugins;
+        let mut h = window_harness(w);
+        let row = |h: &Harness<'_, ProjectWindow>, r: f32| {
+            let w = h.state();
+            egui::pos2(
+                w.lanes_rect.left() + 300.0,
+                w.lanes_rect.top() + r * w.view.row_h,
+            )
+        };
+        // Effect onto the audio track: a new insert.
+        let to = row(&h, 0.5);
+        drag_label(&mut h, "Hall", to);
+        assert_eq!(h.state().project.tracks[audio].inserts.len(), 1);
+        assert_eq!(
+            h.state().project.tracks[audio].inserts[0].plugin_id,
+            "test.hall"
+        );
+        // Instrument onto the empty area below: a new instrument track.
+        let to = row(&h, 3.0);
+        drag_label(&mut h, "Synth", to);
+        let tracks = &h.state().project.tracks;
+        assert_eq!(tracks.len(), 2);
+        assert_eq!(tracks[1].kind, TrackKind::Instrument);
+        assert_eq!(
+            tracks[1].instrument.as_ref().map(|i| i.plugin_id.as_str()),
+            Some("test.synth")
+        );
+        // Another instrument onto that instrument track replaces it.
+        let to = row(&h, 1.5);
+        drag_label(&mut h, "Piano", to);
+        let tracks = &h.state().project.tracks;
+        assert_eq!(tracks.len(), 2);
+        assert_eq!(
+            tracks[1].instrument.as_ref().map(|i| i.plugin_id.as_str()),
+            Some("test.piano")
+        );
+        // An effect dropped on empty space does nothing.
+        let to = row(&h, 4.0);
+        drag_label(&mut h, "Hall", to);
+        assert_eq!(h.state().project.tracks.len(), 2);
+        assert_eq!(h.state().project.tracks[audio].inserts.len(), 1);
+        h.state_mut().undo();
+        assert_eq!(
+            h.state().project.tracks[1]
+                .instrument
+                .as_ref()
+                .map(|i| i.plugin_id.as_str()),
+            Some("test.synth")
+        );
+    }
+
     #[test]
     fn toolbar_symbols_pick_tools_and_toggle_zones() {
         let (w, _) = one_event_window();

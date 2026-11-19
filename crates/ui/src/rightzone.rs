@@ -31,6 +31,10 @@ pub(crate) enum Tab {
 #[derive(Debug, Clone)]
 pub(crate) struct BrowserFile(pub PathBuf);
 
+/// Ein Plugin, das aus der rechten Zone in die Spurliste oder Event-Anzeige gezogen wird.
+#[derive(Debug, Clone)]
+pub(crate) struct BrowserPlugin(pub PluginInfo);
+
 /// Ein Eintrag im Dateibrowser.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Entry {
@@ -402,22 +406,25 @@ fn plugins(w: &mut ProjectWindow, ui: &mut Ui) {
                 .show(ui, |ui| {
                     for p in list.iter().filter(|p| p.is_instrument() == instruments) {
                         let hint = if instruments {
-                            "Doppelklick: neue Instrument-Spur mit diesem Plugin"
+                            "Doppelklick oder auf eine leere Fläche ziehen: neue Instrument-Spur"
                         } else if target.is_some() {
-                            "Doppelklick: als Insert auf die gewählte Spur"
+                            "Doppelklick: als Insert auf die gewählte Spur; oder auf eine Spur ziehen"
                         } else {
-                            "Erst eine Spur mit Mixer-Kanal wählen"
+                            "Auf eine Spur ziehen oder erst eine Spur mit Mixer-Kanal wählen"
                         };
                         let label = if p.vendor.is_empty() {
                             p.name.clone()
                         } else {
                             format!("{}  ·  {}", p.name, p.vendor)
                         };
-                        if ui
+                        let r = ui
                             .selectable_label(false, label)
                             .on_hover_text(hint)
-                            .double_clicked()
-                        {
+                            .interact(Sense::drag());
+                        // Ziehen: Instrument auf eine leere Fläche oder Instrument-Spur,
+                        // Effekt auf eine Spur mit Mixer-Kanal.
+                        r.dnd_set_drag_payload(BrowserPlugin(p.clone()));
+                        if r.double_clicked() {
                             action = Some(p.clone());
                         }
                     }

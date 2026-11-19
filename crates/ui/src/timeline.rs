@@ -290,6 +290,7 @@ pub(crate) fn show(w: &mut ProjectWindow, ui: &mut Ui) {
 
     interact(w, ui, &resp, &geo);
     let drop_target = file_drop(w, ui, &geo);
+    let plugin_target = plugin_drop(w, ui, &geo);
 
     let geo = Geo {
         view: w.view,
@@ -310,6 +311,76 @@ pub(crate) fn show(w: &mut ProjectWindow, ui: &mut Ui) {
     paint_cursor(w, &painter.with_clip_rect(ruler.union(lanes)), &geo);
     if let Some((row, ticks)) = drop_target {
         paint_drop_target(&painter.with_clip_rect(lanes), &geo, row, ticks);
+    }
+    if let Some(t) = plugin_target {
+        paint_plugin_target(&painter.with_clip_rect(header.union(lanes)), &geo, t);
+    }
+}
+
+/// Wohin ein gezogenes Plugin fällt.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PluginTarget {
+    /// Instrument auf leere Fläche (oder Spur ohne Instrument): neue Instrument-Spur.
+    NewTrack,
+    /// Instrument auf eine Instrument-Spur: ersetzt deren Instrument.
+    Replace(usize),
+    /// Effekt auf eine Spur mit Mixer-Kanal: neuer Insert.
+    Insert(usize),
+}
+
+/// Plugin aus der rechten Zone: Ziel, solange es über Spurliste oder Event-Anzeige schwebt;
+/// beim Loslassen wird es angewendet.
+fn plugin_drop(w: &mut ProjectWindow, ui: &Ui, g: &Geo) -> Option<PluginTarget> {
+    let payload = egui::DragAndDrop::payload::<crate::rightzone::BrowserPlugin>(ui.ctx())?;
+    let (pos, released) = ui.input(|i| (i.pointer.latest_pos(), i.pointer.any_released()));
+    let p = pos.filter(|p| g.lanes.contains(*p) || g.header.contains(*p))?;
+    let info = &payload.0;
+    let row = g.row_at(p.y);
+    let kind = row.and_then(|r| w.project.tracks.get(r)).map(|t| t.kind);
+    let target = match (info.is_instrument(), row, kind) {
+        (true, Some(r), Some(TrackKind::Instrument)) => Some(PluginTarget::Replace(r)),
+        (true, ..) => Some(PluginTarget::NewTrack),
+        (false, Some(r), Some(k)) if crate::mixer::has_channel(k) => Some(PluginTarget::Insert(r)),
+        (false, ..) => None,
+    };
+    if !released {
+        return target;
+    }
+    egui::DragAndDrop::clear_payload(ui.ctx());
+    match target {
+        Some(PluginTarget::NewTrack) => w.add_instrument_track(Some(info.clone())),
+        Some(PluginTarget::Replace(r)) => w.replace_instrument(r, info),
+        Some(PluginTarget::Insert(r)) => {
+            w.add_insert(r, info);
+            w.selected_track = Some(r);
+        }
+        None => {}
+    }
+    None
+}
+
+fn paint_plugin_target(painter: &Painter, g: &Geo, target: PluginTarget) {
+    let accent = crate::theme::tokens(painter.ctx()).accent;
+    let full = g.header.union(g.lanes);
+    match target {
+        PluginTarget::Replace(r) | PluginTarget::Insert(r) => {
+            let rect = Rect::from_x_y_ranges(
+                full.x_range(),
+                g.row_top(r)..=g.row_top(r) + g.row_height(r),
+            );
+            painter.rect_stroke(rect, 2.0, Stroke::new(2.0, accent), StrokeKind::Inside);
+        }
+        PluginTarget::NewTrack => {
+            let y = g.row_top(g.rows).min(g.lanes.bottom() - 2.0);
+            painter.hline(full.x_range(), y, Stroke::new(2.0, accent));
+            painter.text(
+                pos2(g.header.left() + 12.0, y + 4.0),
+                Align2::LEFT_TOP,
+                "Neue Instrument-Spur",
+                FontId::proportional(12.0),
+                accent,
+            );
+        }
     }
 }
 

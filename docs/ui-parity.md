@@ -89,7 +89,9 @@ Inhalt oben, eine schmale Reiterleiste am **unteren** Rand der Zone: Mixer, Edit
 ## Rechte Zone
 
 Reiter oben: Medien (Pool), Dateien (Dateibrowser: Ordner öffnen, ein Klick hört vor, Doppelklick
-oder Ziehen legt die Datei ins Projekt), Plugins (Issue #27). Ein-/ausblendbar über Alt+R und den
+oder Ziehen legt die Datei ins Projekt), Plugins (Doppelklick oder Ziehen: Instrument auf eine
+leere Fläche gibt eine neue Instrument-Spur, auf eine Instrument-Spur ersetzt es deren Instrument;
+Effekt auf eine Spur wird Insert) (Issue #27). Ein-/ausblendbar über Alt+R und den
 Zonen-Schalter.
 
 ## Transportleiste
@@ -121,7 +123,8 @@ Die Positionsanzeige hat einen dunklen Hintergrund (`counter_bg`) mit heller Sch
    und Lanes (#75)
 4. ✅ Transportleiste (#64) und Reiter der unteren Zone (#65)
 5. ✅ Farben: neutrale Grautöne, Akzent sparsamer (#65)
-6. ✅ Rechte Zone: Medien und Plugins (#67), Dateibrowser mit Vorhören und Ziehen ins Projekt (Issue #27)
+6. ✅ Rechte Zone: Medien und Plugins (#67), Dateibrowser mit Vorhören (#86), Dateien und Plugins
+   ins Projekt ziehen (Issue #27)
 7. ✅ Inspector-Kopf in Spurfarbe (#69)
 8. ✅ Quantisierungswert in der Werkzeugzeile, Taste Q, Panel für Swing und Stärke (#71, Issue #21)
 9. ✅ Snap-Modi, Raster-Typen Sekunden/Frames/Samples, „An Zoom anpassen“ (#72, Issue #12)
@@ -138,6 +141,5 @@ Die Positionsanzeige hat einen dunklen Hintergrund (`counter_bg`) mit heller Sch
 18. ✅ Farben: Klick auf die Farbleiste im Spurkopf öffnet die Palette; Events folgen der Spurfarbe,
     über Bearbeiten → Event-Farbe bekommen sie eine eigene (Issue #19)
 
-**Als Nächstes:** Plugins aus der rechten Zone ins Projekt ziehen (Issue #27), Mehrfachauswahl in der
-Info-Zeile (Änderungen relativ), eigene Statuszeile, Automation-Modi Overwrite und Trim (Spec:
-später).
+**Als Nächstes:** Mehrfachauswahl in der Info-Zeile (Änderungen relativ), eigene Statuszeile,
+Automation-Modi Overwrite und Trim (Spec: später).

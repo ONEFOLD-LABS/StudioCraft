@@ -346,6 +346,35 @@ impl ProjectWindow {
         self.checkpoint(before);
     }
 
+    /// Ersetzt das Instrument einer Instrument-Spur durch `p` (Ziehen aus der rechten Zone).
+    pub(crate) fn replace_instrument(&mut self, track: usize, p: &PluginInfo) {
+        let before = self.project.clone();
+        let Some(t) = self
+            .project
+            .tracks
+            .get_mut(track)
+            .filter(|t| t.kind == studiocraft_project::TrackKind::Instrument)
+        else {
+            return;
+        };
+        t.instrument = Some(InsertSlot {
+            plugin_id: p.id.clone(),
+            name: p.name.clone(),
+            bypass: false,
+            params: Vec::new(),
+            state: None,
+        });
+        // Automation des alten Instruments passt nicht mehr zum neuen.
+        t.automation.retain(|l| {
+            !matches!(
+                l.param,
+                studiocraft_project::AutoParam::Plugin { slot: u32::MAX, .. }
+            )
+        });
+        self.selected_track = Some(track);
+        self.checkpoint(before);
+    }
+
     /// Instrument-Bereich des Inspectors: Plugin wählen, ein/aus, Parameter.
     pub(crate) fn instrument_ui(&mut self, ui: &mut Ui, track: usize) {
         match self.project.tracks[track].instrument.clone() {
