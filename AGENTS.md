@@ -6,8 +6,9 @@ applies to agents as well.
 
 StudioCraft is a clean-room, pure-Rust digital audio workstation with the established
 operating concept of classic DAWs, as described in `docs/spec.md`, without code, assets or texts
-from any other product. It belongs to the Craft family of open apps and follows its conventions
-([storytold/craft-contrib](https://github.com/storytold/craft-contrib) house rules).
+from any other product. It is an independent project, not part of the Craft family of open apps,
+but follows its conventions ([storytold/craft-contrib](https://github.com/storytold/craft-contrib)
+house rules).
 
 ## Rules that are never bent
 

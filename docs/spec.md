@@ -371,7 +371,7 @@ Der MVP ist erreicht, wenn man ein Lied mit Audio- und Instrument-Spuren aufnehm
 | Audio-Backend | cpal: PipeWire, ALSA, JACK (Linux, FreeBSD), WASAPI, ASIO (Windows), CoreAudio (macOS), Web Audio (WASM) |
 | Lizenzierung | keine Aktivierung |
 | Projektformat | offenes, versioniertes Textformat plus Audio-Ordner; diff- und git-freundlich |
-| Plattform | Linux, Windows, macOS, FreeBSD und Web (WASM), Pakete wie die Craft-Familie |
+| Plattform | Linux, Windows, macOS, FreeBSD und Web (WASM), Pakete nach den Konventionen der Craft-Apps |
 
 **MVP-Umfang**
 
@@ -395,7 +395,7 @@ Stand 2026-11-19; offen heißt: fehlt oder ist nicht auf echter Hardware geprüf
 **Offene Fragen**
 
 - [ ] Projektname: entschieden, StudioCraft (Repo unter Dokumente/GitHub/StudioCraft). Verworfen: SoundCraft (in der Familie vergeben), AudioCraft (Meta), MixCraft (bestehende DAW), RecordCraft (Rust-Recorder kaptaindieter/RecordCraft). Markenrecherche steht noch aus.
-- [ ] GUI-Toolkit: entschieden, egui/eframe mit craft-ui wie die übrigen Craft-Apps (nativ und Web). Prototyp bestätigt: 0,15 ms CPU pro Frame bei 100 und 1000 Spuren (Release-Build)
+- [ ] GUI-Toolkit: entschieden, egui/eframe mit craft-ui wie die Craft-Apps (nativ und Web). Prototyp bestätigt: 0,15 ms CPU pro Frame bei 100 und 1000 Spuren (Release-Build)
 - [ ] Plugin-GUIs unter Wayland: Fremdfenster einbetten geht nur über X11/XWayland; als eigene Fenster öffnen?
 - [ ] Soll ein Standard-MIDI-File- und AAF/OMF-Import für den Umstieg von anderen DAWs ins MVP?
 - [ ] Wer übernimmt die Spec-Autor-Rolle, wer implementiert (Cleanroom-Trennung)?
