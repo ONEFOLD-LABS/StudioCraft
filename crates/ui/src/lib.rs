@@ -183,6 +183,10 @@ pub struct ProjectWindow {
     /// Angezeigte Pegel je Spur und Ausgang (linear, mit Abfall).
     meter_levels: Vec<[f32; 2]>,
     master_meter: [f32; 2],
+    /// Peak-Hold je Spur und Kanal (Wert, Alter in Sekunden) und Übersteuerung
+    /// (bis zum Klick); letzter Eintrag: Ausgangsbus.
+    meter_hold: Vec<[(f32, f32); 2]>,
+    clipped: Vec<bool>,
     /// Undo- und Redo-Verlauf (ganze Projektstände; Spec „Undo“).
     undo: Vec<Project>,
     redo: Vec<Project>,
@@ -337,6 +341,8 @@ impl ProjectWindow {
             show_lower: true,
             meter_levels: Vec::new(),
             master_meter: [0.0; 2],
+            meter_hold: Vec::new(),
+            clipped: Vec::new(),
             undo: Vec::new(),
             redo: Vec::new(),
             panel_edit_before: None,
@@ -4791,6 +4797,86 @@ mod tests {
         h.state_mut().undo();
         assert_eq!(h.state().project.tracks[0].name, name);
         assert_eq!(h.state().undo.len(), steps - 1);
+    }
+
+    #[test]
+    fn renders_mixer_solo_defeat_and_clip() {
+        shot("mixer-solo-clip", |w| {
+            w.show_lower = true;
+            w.lower = LowerZone::Mixer;
+            w.project.tracks[0].solo = true;
+            w.project.tracks[1].solo_defeat = true;
+            w.project.tracks[2].record = true;
+            let n = w.project.tracks.len();
+            w.meter_hold = vec![[(0.5, 0.0), (0.7, 0.0)]; n + 1];
+            w.clipped = vec![false; n + 1];
+            w.clipped[0] = true;
+        });
+    }
+
+    #[test]
+    fn mixer_solo_modes_clip_reset_and_strip_buttons() {
+        let (mut w, _) = one_event_window();
+        w.project.add_track(TrackKind::Audio, String::from("Zwei"));
+        w.project.tracks[0].solo = true;
+        w.show_lower = true;
+        w.lower = LowerZone::Mixer;
+        w.show_inspector = false;
+        w.meter_hold = vec![[(0.0, 0.0); 2]; 3];
+        w.clipped = vec![true, false, false];
+        let mut h = window_harness(w);
+        h.run_steps(3);
+        let solo = |h: &Harness<'_, ProjectWindow>, k: usize| {
+            let mut s: Vec<egui::Rect> = h.query_all_by_label("S").map(|n| n.rect()).collect();
+            s.sort_by(|a, b| a.left().total_cmp(&b.left()));
+            s[k].center()
+        };
+        // Alt+click on the second strip's S: exclusive solo.
+        let p = solo(&h, 1);
+        click_with(
+            &mut h,
+            p,
+            egui::Modifiers::ALT,
+            egui::PointerButton::Primary,
+        );
+        let tr = &h.state().project.tracks;
+        assert!(!tr[0].solo && tr[1].solo);
+        // Ctrl+click on the first strip's S: solo defeat, it stays audible.
+        let p = solo(&h, 0);
+        click_with(
+            &mut h,
+            p,
+            egui::Modifiers::COMMAND,
+            egui::PointerButton::Primary,
+        );
+        assert!(h.state().project.tracks[0].solo_defeat);
+        assert!(h.state().project.audible(0));
+        // The clip indicator resets on click.
+        let mut clips: Vec<egui::Rect> = h
+            .query_all_by_label("Übersteuerung zurücksetzen")
+            .map(|n| n.rect())
+            .collect();
+        clips.sort_by(|a, b| a.left().total_cmp(&b.left()));
+        click_with(
+            &mut h,
+            clips[0].center(),
+            egui::Modifiers::NONE,
+            egui::PointerButton::Primary,
+        );
+        assert!(!h.state().clipped[0]);
+        // Record and monitor on the strip.
+        let mut rec: Vec<egui::Rect> = h
+            .query_all_by_label("Aufnahme bereit")
+            .map(|n| n.rect())
+            .collect();
+        rec.sort_by(|a, b| a.left().total_cmp(&b.left()));
+        click_with(
+            &mut h,
+            rec[0].center(),
+            egui::Modifiers::NONE,
+            egui::PointerButton::Primary,
+        );
+        assert!(h.state().project.tracks[0].record);
     }
 
     #[test]

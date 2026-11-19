@@ -1551,7 +1551,14 @@ fn click(w: &mut ProjectWindow, g: &Geo, p: Pos2, mods: egui::Modifiers) {
             if m.contains(p) {
                 track.mute = !track.mute;
             } else if s.contains(p) {
-                track.solo = !track.solo;
+                // Strg: Solo-Defeat; Alt: exklusives Solo (Spec „Kanalzug-Elemente“).
+                if mods.command {
+                    track.solo_defeat = !track.solo_defeat;
+                } else if mods.alt {
+                    w.project.solo_exclusive(row);
+                } else {
+                    track.solo = !track.solo;
+                }
             } else if r.contains(p) && kind.holds_events() {
                 track.record = !track.record;
             } else if mon.contains(p) && kind == TrackKind::Audio {
@@ -2387,6 +2394,11 @@ fn paint_headers(w: &ProjectWindow, painter: &Painter, g: &Geo) {
                     );
                 }
             }
+        }
+        // Solo-Defeat: gelber Rahmen um S.
+        if track.solo_defeat {
+            let s = g.header_buttons(row)[1];
+            painter.rect_stroke(s, 3.0, Stroke::new(1.5, t.solo), StrokeKind::Inside);
         }
         automation::paint_headers(w, painter, g, row);
         painter.hline(

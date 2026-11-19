@@ -228,6 +228,9 @@ pub struct Track {
     /// Ordnerspur, zu der diese Spur gehört (siehe `folders.rs`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub parent: Option<TrackId>,
+    /// Solo-Defeat (Strg+Klick auf Solo): bleibt hörbar, wenn andere Spuren solo sind.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub solo_defeat: bool,
     /// MIDI-Spuren: Ausgang zu einem externen Gerät (Name des MIDI-Ports).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub midi_port: Option<String>,
@@ -670,6 +673,7 @@ impl Project {
                 midi_port: None,
                 midi_channel: 1,
                 program: None,
+                solo_defeat: false,
                 volume_db: 0.0,
                 pan: 0.0,
                 input: TrackInput::default(),
@@ -1264,6 +1268,7 @@ impl Project {
             midi_port: None,
             midi_channel: 1,
             program: None,
+            solo_defeat: false,
             volume_db: 0.0,
             pan: 0.0,
             input: TrackInput::default(),
@@ -1538,8 +1543,18 @@ impl Project {
         let any_solo = self.tracks.iter().any(|t| t.solo);
         self.tracks.get(track).is_some_and(|t| {
             !self.effective_mute(track)
-                && (!any_solo || self.effective_solo(track) || Self::is_bus(t.kind))
+                && (!any_solo
+                    || self.effective_solo(track)
+                    || t.solo_defeat
+                    || Self::is_bus(t.kind))
         })
+    }
+
+    /// Exklusives Solo (Alt+Klick auf Solo): nur `track` ist solo.
+    pub fn solo_exclusive(&mut self, track: usize) {
+        for (i, t) in self.tracks.iter_mut().enumerate() {
+            t.solo = i == track;
+        }
     }
 
     /// Ende des letzten Events in Ticks (mindestens ein Takt).
@@ -1862,6 +1877,25 @@ mod tests {
         // Unknown in older files: a part without controllers still loads.
         let json = crate::file::to_json(&p);
         assert!(crate::file::from_json(&json).is_ok());
+    }
+
+    #[test]
+    fn solo_defeat_and_exclusive_solo() {
+        let mut p = Project::default();
+        for n in ["a", "b", "c"] {
+            p.add_track(TrackKind::Audio, n);
+        }
+        p.tracks[0].solo = true;
+        p.tracks[2].solo_defeat = true;
+        assert!(
+            p.audible(0) && !p.audible(1) && p.audible(2),
+            "defeat stays audible"
+        );
+        p.tracks[2].mute = true;
+        assert!(!p.audible(2), "mute still wins");
+        p.tracks[1].solo = true;
+        p.solo_exclusive(1);
+        assert!(!p.tracks[0].solo && p.tracks[1].solo && !p.tracks[2].solo);
     }
 
     #[test]
