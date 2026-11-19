@@ -121,6 +121,22 @@ pub(super) fn start_drag(
             };
             idx.map(|idx| Drag::AutoPoint { row, lane, idx })
         }
+        // Bereichsauswahl: innerhalb der Auswahl skaliert Ziehen die Werte; außerhalb
+        // entsteht wie üblich eine neue Auswahl.
+        Tool::Range => {
+            let (r0, r1, a, b) = w.range?;
+            let tick = g.ticks(p.x).max(0.0) as u64;
+            if !(r0..=r1).contains(&row) || tick < a || tick > b || b <= a {
+                return None;
+            }
+            Some(Drag::AutoScale {
+                row,
+                lane,
+                y0: p.y,
+                from: a,
+                to: b,
+            })
+        }
         Tool::Draw => {
             let tick = tick_at(w, g, p.x, alt);
             add_point(w, g, row, lane, p, alt);
@@ -189,6 +205,31 @@ pub(super) fn live_drag(w: &mut ProjectWindow, g: &Geo, d: Drag, p: Pos2, alt: b
                 lane,
                 last: tick,
             }
+        }
+        Drag::AutoScale {
+            row,
+            lane,
+            y0,
+            from,
+            to,
+        } => {
+            // Eine halbe Spurhöhe nach oben verdoppelt, ganz nach unten gibt 0.
+            let h = lane_rect(w, g, row, lane, g.lanes.x_range()).map_or(40.0, |r| r.height());
+            let factor = (1.0 + f64::from((y0 - p.y) / (h * 0.5))).clamp(0.0, 10.0);
+            let original = w
+                .drag_before
+                .as_ref()
+                .and_then(|b| b.tracks.get(row))
+                .and_then(|t| t.automation.get(lane))
+                .cloned();
+            if let (Some(orig), Some(track)) = (original, w.project.tracks.get(row)) {
+                let r = range(w, track, orig.param);
+                if let Some(l) = w.project.tracks[row].automation.get_mut(lane) {
+                    *l = orig;
+                    l.scale(from, to, factor, r);
+                }
+            }
+            d
         }
         other => other,
     }
