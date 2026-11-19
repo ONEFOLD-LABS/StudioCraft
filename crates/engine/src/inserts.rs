@@ -75,6 +75,41 @@ impl InsertChain {
         }
     }
 
+    /// Nur das Instrument (vor Eingangsgain und Pre-Filtern). Echtzeitsicher.
+    pub fn process_instrument(&mut self, left: &mut [f32], right: &mut [f32]) {
+        if let Some(i) = self.instrument.as_mut().filter(|i| !i.bypass) {
+            i.instance.process(left, right);
+        }
+    }
+
+    /// Die Insert-Slots vor (`post == false`) bzw. nach dem Fader: Slots im Projekt ab
+    /// `post_from` liegen hinter dem Fader. Echtzeitsicher.
+    pub fn process_slots(
+        &mut self,
+        post: bool,
+        post_from: usize,
+        left: &mut [f32],
+        right: &mut [f32],
+    ) {
+        for s in self
+            .slots
+            .iter_mut()
+            .filter(|s| !s.bypass && (s.model >= post_from) == post)
+        {
+            s.instance.process(left, right);
+        }
+    }
+
+    /// Ob hinter dem Fader ein aktiver Slot liegt.
+    pub fn has_post(&self, post_from: usize) -> bool {
+        self.slots.iter().any(|s| !s.bypass && s.model >= post_from)
+    }
+
+    /// Ob vor dem Fader ein aktiver Slot liegt.
+    pub fn has_pre(&self, post_from: usize) -> bool {
+        self.slots.iter().any(|s| !s.bypass && s.model < post_from)
+    }
+
     /// Vor der Rückgabe an den Hauptthread (im Audio-Thread aufrufen).
     pub fn stop_processing(&mut self) {
         for s in self.instrument.iter_mut().chain(&mut self.slots) {
