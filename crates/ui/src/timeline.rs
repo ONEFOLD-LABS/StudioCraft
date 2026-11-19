@@ -1131,7 +1131,7 @@ fn paint_headers(w: &ProjectWindow, painter: &Painter, g: &Geo) {
             Align2::LEFT_CENTER,
             &track.name,
             FontId::proportional(13.0),
-            visuals.strong_text_color(),
+            crate::theme::tokens(painter.ctx()).text,
         );
         painter.text(
             rect.left_center() + vec2(12.0, 8.0),

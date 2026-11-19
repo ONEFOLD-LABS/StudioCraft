@@ -171,7 +171,7 @@ impl Strip<'_> {
     fn show(self, ui: &mut Ui, height: f32) -> (bool, bool) {
         let mut changed = false;
         let fill = if self.selected {
-            ui.visuals().selection.bg_fill.gamma_multiply(0.35)
+            crate::theme::tokens(ui.ctx()).row_selected
         } else {
             ui.visuals().faint_bg_color
         };
@@ -192,10 +192,24 @@ impl Strip<'_> {
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 2.0;
                     if let Some(m) = self.mute {
-                        changed |= ui.toggle_value(m, "M").on_hover_text("Mute").changed();
+                        changed |= crate::icons::state_toggle(
+                            ui,
+                            m,
+                            "M",
+                            crate::theme::tokens(ui.ctx()).mute,
+                        )
+                        .on_hover_text("Mute")
+                        .changed();
                     }
                     if let Some(s) = self.solo {
-                        changed |= ui.toggle_value(s, "S").on_hover_text("Solo").changed();
+                        changed |= crate::icons::state_toggle(
+                            ui,
+                            s,
+                            "S",
+                            crate::theme::tokens(ui.ctx()).solo,
+                        )
+                        .on_hover_text("Solo")
+                        .changed();
                     }
                 });
                 ui.label(
@@ -342,7 +356,11 @@ fn fader(ui: &mut Ui, name: &str, db: &mut f32, meter: [f32; 2], height: f32) ->
         Stroke::new(1.0, v.widgets.inactive.fg_stroke.color),
         StrokeKind::Inside,
     );
-    p.hline(knob.x_range(), ky, Stroke::new(1.0, v.strong_text_color()));
+    p.hline(
+        knob.x_range(),
+        ky,
+        Stroke::new(1.0, crate::theme::tokens(ui.ctx()).text),
+    );
 
     let value = f64::from(*db);
     let label = format!("Lautstärke {name}");

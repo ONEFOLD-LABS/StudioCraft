@@ -356,6 +356,24 @@ pub fn icon_button(
     response.on_hover_text(label)
 }
 
+/// A small state switch (Mute, Solo, Aufnahme bereit) that fills with its status colour when on,
+/// the same colours as in the track headers.
+pub fn state_toggle(ui: &mut Ui, value: &mut bool, label: &str, color: Color32) -> Response {
+    let t = crate::theme::tokens(ui.ctx());
+    let text = egui::RichText::new(label).color(if *value { Color32::BLACK } else { t.text });
+    let fill = if *value { color } else { t.button };
+    let mut r = ui.add(
+        egui::Button::new(text)
+            .fill(fill)
+            .min_size(vec2(20.0, 18.0)),
+    );
+    if r.clicked() {
+        *value = !*value;
+        r.mark_changed();
+    }
+    r
+}
+
 /// A thin vertical divider between toolbar groups.
 pub fn group_gap(ui: &mut Ui) {
     ui.add_space(4.0);

@@ -641,21 +641,27 @@ impl ProjectWindow {
                 .default_size(300.0)
                 .min_size(200.0)
                 .show(ui, |ui| {
-                    ui.horizontal(|ui| {
-                        ui.selectable_value(&mut self.lower, LowerZone::Mixer, "Mixer");
-                        ui.selectable_value(&mut self.lower, LowerZone::Editor, "Key-Editor");
-                        if self.lower == LowerZone::Editor
-                            && let Some(ev) =
-                                self.key_editor.part.and_then(|p| self.project.event(p))
+                    // Reiter am unteren Rand der Zone, Inhalt darüber (docs/ui-parity.md).
+                    ui.with_layout(egui::Layout::bottom_up(egui::Align::LEFT), |ui| {
+                        ui.horizontal(|ui| {
+                            ui.selectable_value(&mut self.lower, LowerZone::Mixer, "Mixer");
+                            ui.selectable_value(&mut self.lower, LowerZone::Editor, "Key-Editor");
+                            if self.lower == LowerZone::Editor
+                                && let Some(ev) =
+                                    self.key_editor.part.and_then(|p| self.project.event(p))
+                            {
+                                ui.separator();
+                                ui.weak(format!("{} · {} Noten", ev.name, ev.notes.len()));
+                            }
+                        });
+                        ui.separator();
+                        ui.with_layout(egui::Layout::top_down(egui::Align::LEFT), |ui| match self
+                            .lower
                         {
-                            ui.separator();
-                            ui.weak(format!("{} · {} Noten", ev.name, ev.notes.len()));
-                        }
+                            LowerZone::Mixer => mixer::show(self, ui),
+                            LowerZone::Editor => keyeditor::show(self, ui),
+                        });
                     });
-                    match self.lower {
-                        LowerZone::Mixer => mixer::show(self, ui),
-                        LowerZone::Editor => keyeditor::show(self, ui),
-                    }
                 });
         }
         if self.show_inspector {
@@ -805,11 +811,13 @@ impl ProjectWindow {
                 });
         }
         ui.horizontal(|ui| {
-            let m = ui.toggle_value(&mut track.mute, "M").changed();
-            let s = ui.toggle_value(&mut track.solo, "S").changed();
+            let m = icons::state_toggle(ui, &mut track.mute, "M", theme::tokens(ui.ctx()).mute)
+                .changed();
+            let s = icons::state_toggle(ui, &mut track.solo, "S", theme::tokens(ui.ctx()).solo)
+                .changed();
             self.dirty |= m || s;
             if track.kind.holds_events() {
-                ui.toggle_value(&mut track.record, "R");
+                icons::state_toggle(ui, &mut track.record, "R", theme::tokens(ui.ctx()).rec);
             }
         });
         ui.horizontal(|ui| {
