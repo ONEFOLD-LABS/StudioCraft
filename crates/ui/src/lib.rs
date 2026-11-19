@@ -651,11 +651,24 @@ impl ProjectWindow {
             zones.right = Some(r.response.rect);
         }
         if self.show_inspector {
+            // Linke Zone in zwei Spalten: Kanalzug der gewählten Spur, daneben der
+            // Inspector (docs/ui-parity.md, „Linke Zone“).
             let r = egui::Panel::left("inspector")
                 .resizable(true)
-                .default_size(200.0)
+                .default_size(200.0 + mixer::COLUMN_W)
+                .min_size(200.0 + mixer::COLUMN_W)
                 .show(ui, |ui| {
-                    egui::ScrollArea::vertical().show(ui, |ui| self.inspector(ui));
+                    let height = ui.available_height();
+                    ui.horizontal_top(|ui| {
+                        ui.vertical(|ui| {
+                            ui.set_min_height(height);
+                            mixer::channel_column(self, ui);
+                        });
+                        ui.separator();
+                        ui.vertical(|ui| {
+                            egui::ScrollArea::vertical().show(ui, |ui| self.inspector(ui));
+                        });
+                    });
                 });
             zones.left = Some(r.response.rect);
         }
@@ -2839,6 +2852,50 @@ mod tests {
                 .contains("Phantom: nicht installiert")
         );
         assert_eq!(w.plugins.sent[0].map, [None]);
+    }
+
+    #[test]
+    fn left_zone_shows_the_channel_strip_of_the_selected_track() {
+        let (mut w, _) = one_event_window();
+        let name = w.project.tracks[0].name.clone();
+        w.project.add_track(TrackKind::Midi, String::from("Noten"));
+        w.selected_track = Some(0);
+        w.show_lower = false;
+        let mut h = window_harness(w);
+        let label = format!("Lautstärke {name}");
+        assert_eq!(h.query_all_by_label(&label).count(), 1);
+        // Drag the column's fader down: the track gets quieter.
+        let rect = h.get_by_label(&label).rect();
+        let (from, to) = (rect.center(), rect.center() + egui::vec2(0.0, 60.0));
+        h.event(egui::Event::PointerMoved(from));
+        h.run_steps(1);
+        h.event(egui::Event::PointerButton {
+            pos: from,
+            button: egui::PointerButton::Primary,
+            pressed: true,
+            modifiers: egui::Modifiers::NONE,
+        });
+        h.run_steps(1);
+        for i in 1..=4 {
+            h.event(egui::Event::PointerMoved(
+                from + (to - from) * (i as f32 / 4.0),
+            ));
+            h.run_steps(1);
+        }
+        h.event(egui::Event::PointerButton {
+            pos: to,
+            button: egui::PointerButton::Primary,
+            pressed: false,
+            modifiers: egui::Modifiers::NONE,
+        });
+        h.run_steps(2);
+        let db = h.state().project.tracks[0].volume_db;
+        assert!(db < -1.0, "fader moved down, got {db}");
+        // A MIDI track has no channel: the column says so instead of showing a fader.
+        h.state_mut().selected_track = Some(1);
+        h.run_steps(2);
+        assert_eq!(h.query_all_by_label(&label).count(), 0);
+        h.get_by_label("Kein Kanal");
     }
 
     #[test]

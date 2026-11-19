@@ -154,6 +154,130 @@ pub(crate) fn show(w: &mut ProjectWindow, ui: &mut Ui) {
     }
 }
 
+/// Breite der Kanalzug-Spalte in der linken Zone.
+pub(crate) const COLUMN_W: f32 = STRIP_W + 8.0;
+
+/// Kanalzug der gewählten Spur als eigene Spalte links neben dem Inspector
+/// (docs/ui-parity.md, „Linke Zone“): oben Name in Spurfarbe, Inserts und Sends,
+/// darunter Aufnahme, Monitor, R/W, dann Panorama, M/S und Fader mit Pegel.
+pub(crate) fn channel_column(w: &mut ProjectWindow, ui: &mut Ui) {
+    ui.set_width(COLUMN_W - 8.0);
+    let Some(i) = w
+        .selected_track
+        .filter(|&i| w.project.tracks.get(i).is_some_and(|t| has_channel(t.kind)))
+    else {
+        ui.weak("Kein Kanal");
+        return;
+    };
+    let sends: Vec<(String, bool)> = w.project.tracks[i]
+        .sends
+        .iter()
+        .map(|s| (w.track_name(s.target), s.on))
+        .collect();
+    let meter = w.meter_levels.get(i).copied().unwrap_or_default();
+    let t = crate::theme::tokens(ui.ctx());
+    let track = &mut w.project.tracks[i];
+    let color = Color32::from_rgb(track.color[0], track.color[1], track.color[2]);
+    let mut changed = false;
+
+    let (head, _) = ui.allocate_exact_size(vec2(COLUMN_W - 8.0, 20.0), Sense::hover());
+    ui.painter().rect_filled(head, 3.0, color);
+    ui.painter().with_clip_rect(head).text(
+        head.left_center() + vec2(5.0, 0.0),
+        Align2::LEFT_CENTER,
+        &track.name,
+        FontId::proportional(11.0),
+        on_color(color),
+    );
+    let inserts: Vec<(String, bool)> = track
+        .inserts
+        .iter()
+        .map(|s| (s.name.clone(), !s.bypass))
+        .collect();
+    slot_list(ui, "Inserts", &inserts);
+    slot_list(ui, "Sends", &sends);
+    ui.add_space(2.0);
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 2.0;
+        if track.kind.holds_events()
+            && crate::icons::icon_button(
+                ui,
+                crate::icons::Icon::Record,
+                track.record,
+                Some(t.rec),
+                "Aufnahme bereit",
+            )
+            .clicked()
+        {
+            track.record = !track.record;
+        }
+        if track.kind == TrackKind::Audio
+            && crate::icons::icon_button(
+                ui,
+                crate::icons::Icon::Play,
+                track.monitor,
+                Some(t.monitor),
+                "Monitor",
+            )
+            .clicked()
+        {
+            track.monitor = !track.monitor;
+            changed = true;
+        }
+    });
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 2.0;
+        crate::icons::state_toggle(ui, &mut track.read, "R", t.monitor)
+            .on_hover_text("Automation lesen");
+        crate::icons::state_toggle(ui, &mut track.write, "W", t.rec)
+            .on_hover_text("Automation schreiben");
+    });
+    let height = ui.available_height().max(160.0);
+    let strip = Strip {
+        id: i,
+        name: &track.name,
+        color,
+        selected: false,
+        volume_db: &mut track.volume_db,
+        pan: Some(&mut track.pan),
+        mute: Some(&mut track.mute),
+        solo: Some(&mut track.solo),
+        meter,
+    };
+    changed |= ui
+        .push_id("kanalzug-spalte", |ui| strip.show(ui, height))
+        .inner
+        .0;
+    if changed {
+        w.dirty = true;
+    }
+}
+
+/// Kurze Liste der Inserts bzw. Sends: Titel, dann je Slot eine Zeile (umgangen gedimmt).
+fn slot_list(ui: &mut Ui, title: &str, slots: &[(String, bool)]) {
+    ui.add_space(2.0);
+    let color = crate::theme::tokens(ui.ctx()).text;
+    ui.label(RichText::new(title).size(10.0).strong().color(color));
+    if slots.is_empty() {
+        ui.weak(RichText::new("leer").size(10.0));
+    }
+    for (name, active) in slots {
+        let text = RichText::new(name).size(10.0);
+        let text = if *active { text } else { text.weak() };
+        ui.add(egui::Label::new(text).truncate());
+    }
+}
+
+/// Lesbare Schriftfarbe auf einer Spurfarbe.
+fn on_color(bg: Color32) -> Color32 {
+    let l = 0.299 * f32::from(bg.r()) + 0.587 * f32::from(bg.g()) + 0.114 * f32::from(bg.b());
+    if l > 140.0 {
+        Color32::BLACK
+    } else {
+        Color32::WHITE
+    }
+}
+
 struct Strip<'a> {
     id: usize,
     name: &'a str,

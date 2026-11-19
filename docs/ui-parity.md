@@ -75,7 +75,12 @@ Bei Mehrfachauswahl: Werte des frühesten Events, Beschriftungen gelb, davor die
 - Rasterlinien: Takte kräftig, Zählzeiten schwächer, das feinere Snap-Raster (1/16, Frames,
   „An Zoom anpassen“) als zarte Linien, sobald die Abstände mindestens 6 px betragen.
 
-## Linke Zone (Inspector)
+## Linke Zone (Kanalzug und Inspector)
+
+Zwei Spalten. Links ein schmaler **Kanalzug** der gewählten Spur: Name in Spurfarbe, Liste der
+Inserts und Sends (umgangene gedimmt), Aufnahme bereit und Monitor, R/W, Panorama, M/S, Wert
+in dB, senkrechter Fader mit Pegelanzeige, unten der Name in Spurfarbe. Spuren ohne Kanal (MIDI)
+zeigen „Kein Kanal“. Rechts daneben der Inspector:
 
 Kopf mit Spurname und Spurfarbe, darunter aufklappbare Sektionen; die oberste Sektion ohne Titel
 enthält Lautstärke, Pan, M/S, Aufnahme, Monitor, R/W, Zeitbasis, Lanes, Eingang, Ausgang. Danach
@@ -143,6 +148,7 @@ Die Positionsanzeige hat einen dunklen Hintergrund (`counter_bg`) mit heller Sch
 17. ✅ Comping: Comp-Werkzeug, Abschnitte eines Takes per Klick oder Ziehen hörbar machen (#82)
 18. ✅ Farben: Klick auf die Farbleiste im Spurkopf öffnet die Palette; Events folgen der Spurfarbe,
     über Bearbeiten → Event-Farbe bekommen sie eine eigene (Issue #19)
+19. ✅ Linke Zone mit Kanalzug-Spalte neben dem Inspector
 
 **Als Nächstes:** Aus dieser Liste ist nichts mehr offen; die Automationsmodi Overwrite und Trim
 kommen mit #91. Weitere Angleichungen ergeben sich aus `docs/spec.md`.
