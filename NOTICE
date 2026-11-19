@@ -24,3 +24,7 @@ packaging/windows and apps/soundcraft/build.rs), licensed under Apache-2.0.
 macOS packaging: packaging/macos (package.sh, import-cert.sh, Info.plist.in,
 entitlements.plist) is adapted from SoundCraft (storytold/soundcraft,
 packaging/macos), licensed under Apache-2.0.
+
+Linux packaging: packaging/linux/flatpak-bundle.sh, the Flatpak manifest and
+postinst.sh are adapted from SoundCraft (storytold/soundcraft, packaging/linux),
+licensed under Apache-2.0.

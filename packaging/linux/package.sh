@@ -49,6 +49,8 @@ install -Dm755 "$BIN/studiocraft" "$STAGE/usr/bin/studiocraft"
 install -Dm755 "$BIN/studiocraft-cli" "$STAGE/usr/bin/studiocraft-cli"
 strip "$STAGE/usr/bin/studiocraft" "$STAGE/usr/bin/studiocraft-cli" 2>/dev/null || true
 install -Dm644 "$HERE/$APP_ID.desktop" "$STAGE/usr/share/applications/$APP_ID.desktop"
+# Dateityp für .studiocraft-Projekte (Doppelklick öffnet das Projekt).
+install -Dm644 "$HERE/$APP_ID.mime.xml" "$STAGE/usr/share/mime/packages/$APP_ID.xml"
 mkdir -p "$STAGE/usr/share/metainfo"
 sed -e "s/@VERSION@/$VERSION/g" -e "s/@DATE@/$STUDIOCRAFT_BUILD_DATE/g" \
   "$HERE/$APP_ID.metainfo.xml.in" >"$STAGE/usr/share/metainfo/$APP_ID.metainfo.xml"
