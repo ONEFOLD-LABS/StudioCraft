@@ -624,21 +624,24 @@ fn paint_grid(w: &ProjectWindow, p: &Painter, g: &KGeo, part_start: u64, part_en
         0.0,
         Color32::from_black_alpha(90),
     );
-    // Takt- und Zählzeitlinien.
-    let bar = w.bar_ticks();
-    let beat = w.beat_ticks();
-    let step = w.grid_ticks().max(1);
-    let t0 = (g.tick(g.grid.left()).max(0.0) as u64 / step) * step;
-    let mut t = t0;
-    let end = g.tick(g.grid.right()).max(0.0) as u64;
-    let px_step = step as f32 / TPQ as f32 * g.view.px_per_quarter;
-    while t <= end && px_step >= 4.0 {
+    // Feines Snap-Raster, darüber Zählzeit- und Taktlinien.
+    let bar = w.bar_ticks().max(1);
+    let beat = w.beat_ticks().max(1);
+    let t0 = g.tick(g.grid.left()).max(0.0);
+    let t1 = g.tick(g.grid.right()).max(0.0);
+    let ppq = g.view.px_per_quarter;
+    let beat_px = beat as f32 / TPQ as f32 * ppq;
+    let beats = beat_px >= 4.0;
+    for t in w.fine_grid_lines(t0, t1, ppq, beats) {
+        p.vline(g.x(t), g.grid.y_range(), Stroke::new(1.0, v.faint_bg_color));
+    }
+    let step = if beats { beat } else { bar };
+    let mut t = (t0 as u64 / step) * step;
+    while t as f64 <= t1 {
         let col = if t % bar == 0 {
             v.widgets.noninteractive.bg_stroke.color
-        } else if t % beat == 0 {
-            v.widgets.noninteractive.bg_stroke.color.gamma_multiply(0.5)
         } else {
-            v.faint_bg_color
+            v.widgets.noninteractive.bg_stroke.color.gamma_multiply(0.5)
         };
         p.vline(g.x(t as f64), g.grid.y_range(), Stroke::new(1.0, col));
         t += step;

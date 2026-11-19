@@ -12,6 +12,10 @@ use crate::tools::{Grid, SnapMode};
 const MAGNET_PX: f32 = 8.0;
 /// „An Zoom anpassen“ teilt das Raster, solange ein Schritt breiter als so viele Pixel ist.
 const ZOOM_STEP_PX: f32 = 48.0;
+/// Feine Rasterlinien erst ab diesem Abstand in Pixeln.
+pub(crate) const FINE_LINE_PX: f32 = 6.0;
+/// Höchstens so viele feine Linien pro Bild (Schutz bei extremem Zoom).
+const MAX_FINE_LINES: usize = 4000;
 /// Feinstes Raster beim Anpassen an den Zoom: 1/64.
 const ZOOM_MIN_TICKS: f64 = TICKS_PER_QUARTER as f64 / 16.0;
 
@@ -63,6 +67,37 @@ impl ProjectWindow {
     /// Rasterabstand auf ganze Ticks gerundet, mindestens 1 (z. B. Länge neuer Events).
     pub(crate) fn grid_ticks(&self) -> u64 {
         self.grid_step().round().max(1.0) as u64
+    }
+
+    /// Feine Rasterlinien des Snap-Rasters in `t0..=t1` (Ticks) bei `px_per_quarter`.
+    /// Leer, wenn die Linien enger als [`FINE_LINE_PX`] lägen. Mit `skip_beats` fallen Linien
+    /// weg, die auf einer Zählzeit liegen (die zeichnet der Aufrufer kräftiger).
+    pub(crate) fn fine_grid_lines(
+        &self,
+        t0: f64,
+        t1: f64,
+        px_per_quarter: f32,
+        skip_beats: bool,
+    ) -> Vec<f64> {
+        let step = self.grid_step();
+        let step_px = step / TICKS_PER_QUARTER as f64 * f64::from(px_per_quarter);
+        if !step_px.is_finite() || step_px < f64::from(FINE_LINE_PX) || t1 < t0 {
+            return Vec::new();
+        }
+        let beat = self.beat_ticks() as f64;
+        let first = (t0.max(0.0) / step).ceil() as u64;
+        let mut out = Vec::new();
+        for k in first.. {
+            let t = k as f64 * step;
+            if t > t1 || out.len() >= MAX_FINE_LINES {
+                break;
+            }
+            if skip_beats && beat > 0.0 && (t - (t / beat).round() * beat).abs() < 0.5 {
+                continue;
+            }
+            out.push(t);
+        }
+        out
     }
 
     fn on_grid(&self, t: f64) -> f64 {
@@ -221,6 +256,25 @@ mod tests {
         w.grid = Grid::Samples;
         assert!(w.grid_step() > 0.0 && w.grid_step() < 1.0);
         assert_eq!(w.grid_ticks(), 1);
+    }
+
+    #[test]
+    fn fine_lines_follow_the_snap_grid_and_skip_beats() {
+        let mut w = window();
+        w.grid = Grid::UseQuantize; // 1/16 = 240 ticks
+        // 24 px per quarter: 6 px per sixteenth, just visible.
+        let lines = w.fine_grid_lines(0.0, 960.0, 24.0, true);
+        assert_eq!(lines, [240.0, 480.0, 720.0]);
+        assert_eq!(w.fine_grid_lines(0.0, 960.0, 24.0, false).len(), 5);
+        assert!(
+            w.fine_grid_lines(0.0, 960.0, 20.0, true).is_empty(),
+            "too dense"
+        );
+        w.grid = Grid::Frames; // 76.8 ticks
+        let frames = w.fine_grid_lines(0.0, 1920.0, 200.0, false);
+        assert_eq!(frames.len(), 26);
+        assert!((frames[1] - 76.8).abs() < 1e-9);
+        assert!(w.fine_grid_lines(0.0, 1e12, 2000.0, false).len() <= MAX_FINE_LINES);
     }
 
     #[test]

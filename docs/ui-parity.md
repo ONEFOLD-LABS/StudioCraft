@@ -116,4 +116,7 @@ Die Positionsanzeige hat einen dunklen Hintergrund (`counter_bg`) mit heller Sch
 11. ✅ Fokusrahmen: Klick gibt einer Zone den Fokus, schmaler Rahmen in Akzentfarbe
 12. ✅ Zeitbasis (musikalisch/linear) und Lanes ein/aus in Spurkopf und Inspector (#19)
 
-**Als Nächstes:** Rasterlinien für feinere Raster, Automation (#34), Comping in den Lanes.
+13. ✅ Feine Rasterlinien: Event-Anzeige und Key-Editor zeigen das Snap-Raster (1/16, Frames,
+    „An Zoom anpassen“) zwischen den Zählzeiten
+
+**Als Nächstes:** Automation (#34), Comping in den Lanes.

@@ -829,6 +829,14 @@ fn paint_grid(w: &ProjectWindow, painter: &Painter, g: &Geo, rect: Rect, labels:
         }
         b += 1;
     }
+    // Feines Snap-Raster (z. B. 1/16, Frames, „An Zoom anpassen“) zwischen den Zählzeiten.
+    if !labels {
+        let fine = Stroke::new(1.0, weak.color.gamma_multiply(0.75));
+        let lines = w.fine_grid_lines(t0 as f64, t1 as f64, w.view.px_per_quarter, beat_px >= 10.0);
+        for t in lines {
+            painter.vline(g.x(t), rect.y_range(), fine);
+        }
+    }
 }
 
 fn paint_lanes(w: &ProjectWindow, painter: &Painter, g: &Geo) {

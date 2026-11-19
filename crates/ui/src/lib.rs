@@ -1547,6 +1547,18 @@ mod tests {
     }
 
     #[test]
+    fn renders_fine_grid_lines() {
+        shot("raster-1-16", |w| {
+            w.grid = Grid::UseQuantize;
+            w.view.zoom(4.0, None);
+        });
+        shot("raster-frames", |w| {
+            w.grid = Grid::Frames;
+            w.view.zoom(6.0, None);
+        });
+    }
+
+    #[test]
     fn toolbar_symbols_pick_tools_and_toggle_zones() {
         let (w, _) = one_event_window();
         let mut h = window_harness(w);
