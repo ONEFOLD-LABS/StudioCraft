@@ -51,6 +51,10 @@ pub enum Command {
     Locate(u64),
     /// Eingang zum Mithören (Monitor). Ein vorheriger geht über die Rückgabe-Queue zurück.
     SetMonitorInput(Box<MonitorInput>),
+    /// Vorhören (Browser): verschachteltes Stereo in der Abtastrate der Engine, unabhängig vom
+    /// Transport, hinter dem Ausgangsfader. `None` beendet es. Die alten Samples gehen über die
+    /// Rückgabe-Queue zurück.
+    Preview(Option<Arc<[f32]>>),
 }
 
 /// Vom Audio-Thread veröffentlichter Zustand, lesbar von jedem Thread.
@@ -59,6 +63,8 @@ pub struct EngineStatus {
     cursor: AtomicU64,
     state: AtomicU8,
     cycle: AtomicBool,
+    /// Vorhören läuft.
+    previewing: AtomicBool,
     /// Projektposition (Frames), an der die letzte Aufnahme begann.
     rec_start: AtomicU64,
     /// Zeitpunkt (Uhr aus [`crate::clock`]), zu dem `rec_start` hörbar wurde; 0 = unbekannt.
@@ -81,6 +87,10 @@ impl EngineStatus {
     pub fn rec_played_at(&self) -> Option<u64> {
         Some(self.rec_played_at.load(Ordering::Relaxed)).filter(|&n| n > 0)
     }
+    /// Ob gerade etwas vorgehört wird.
+    pub fn previewing(&self) -> bool {
+        self.previewing.load(Ordering::Relaxed)
+    }
     pub fn cycle(&self) -> bool {
         self.cycle.load(Ordering::Relaxed)
     }
@@ -95,6 +105,7 @@ pub struct EngineControl {
     garbage: rtrb::Consumer<Arc<Song>>,
     plugin_garbage: rtrb::Consumer<Box<InsertChain>>,
     monitor_garbage: rtrb::Consumer<Box<MonitorInput>>,
+    preview_garbage: rtrb::Consumer<Arc<[f32]>>,
     /// Schreibzugang für MIDI-Eingänge (Keyboard).
     pub midi: MidiSender,
     /// Während der Aufnahme gespielte Noten (vom Audio-Thread).
@@ -128,6 +139,7 @@ impl EngineControl {
         // Plugins werden hier, im Hauptthread, deaktiviert und zerstört.
         while self.plugin_garbage.pop().is_ok() {}
         while self.monitor_garbage.pop().is_ok() {}
+        while self.preview_garbage.pop().is_ok() {}
     }
 
     pub fn frames(&self, pos: Position) -> u64 {
@@ -152,6 +164,9 @@ pub struct EngineCore {
     monitor_garbage: rtrb::Producer<Box<MonitorInput>>,
     /// Eingang zum Mithören, sobald die Oberfläche ihn geöffnet hat.
     monitor: Option<Box<MonitorInput>>,
+    /// Vorhören: Samples und Leseposition in Samples.
+    preview: Option<(Arc<[f32]>, usize)>,
+    preview_garbage: rtrb::Producer<Arc<[f32]>>,
     midi_in: rtrb::Consumer<MidiMsg>,
     midi_rec: rtrb::Producer<RecordedMidi>,
     midi_target: Option<usize>,
@@ -204,6 +219,7 @@ pub fn engine(sample_rate: u32, tempo: TempoMap) -> (EngineCore, EngineControl) 
     let (garbage_tx, garbage_rx) = rtrb::RingBuffer::new(64);
     let (plugin_tx, plugin_rx) = rtrb::RingBuffer::new(64);
     let (monitor_tx, monitor_rx) = rtrb::RingBuffer::new(4);
+    let (preview_tx, preview_rx) = rtrb::RingBuffer::new(16);
     let (midi_tx, midi_rx) = rtrb::RingBuffer::new(1024);
     let (rec_tx, rec_rx) = rtrb::RingBuffer::new(8192);
     let status = Arc::new(EngineStatus::default());
@@ -217,6 +233,8 @@ pub fn engine(sample_rate: u32, tempo: TempoMap) -> (EngineCore, EngineControl) 
         plugin_garbage: plugin_tx,
         monitor_garbage: monitor_tx,
         monitor: None,
+        preview: None,
+        preview_garbage: preview_tx,
         midi_in: midi_rx,
         midi_rec: rec_tx,
         midi_target: None,
@@ -256,6 +274,7 @@ pub fn engine(sample_rate: u32, tempo: TempoMap) -> (EngineCore, EngineControl) 
         garbage: garbage_rx,
         plugin_garbage: plugin_rx,
         monitor_garbage: monitor_rx,
+        preview_garbage: preview_rx,
         midi: std::sync::Arc::new(std::sync::Mutex::new(midi_tx)),
         recorded_midi: rec_rx,
         status,
@@ -357,6 +376,13 @@ impl EngineCore {
                 if let Some(old) = self.monitor.replace(input) {
                     // Volle Queue: dann bleibt nur das Freigeben hier (praktisch nie).
                     let _ = self.monitor_garbage.push(old);
+                }
+            }
+            Command::Preview(samples) => {
+                let next = samples.map(|s| (s, 0));
+                if let Some((old, _)) = std::mem::replace(&mut self.preview, next) {
+                    // Volle Queue: dann bleibt nur das Freigeben hier (praktisch nie).
+                    let _ = self.preview_garbage.push(old);
                 }
             }
             Command::SetBypass(track, slot, bypass) => {
@@ -675,6 +701,23 @@ impl EngineCore {
         }
         self.meters.feed_master(pl, pr);
 
+        // Vorhören hinter dem Ausgangsfader, unabhängig vom Transport.
+        if let Some((samples, at)) = &mut self.preview {
+            let n = out.len().min(samples.len().saturating_sub(*at));
+            for (o, s) in out[..n].iter_mut().zip(&samples[*at..*at + n]) {
+                *o += s;
+            }
+            *at += n;
+            if *at >= samples.len()
+                && let Some((old, _)) = self.preview.take()
+            {
+                let _ = self.preview_garbage.push(old);
+            }
+        }
+        self.status
+            .previewing
+            .store(self.preview.is_some(), Ordering::Relaxed);
+
         let s = &self.status;
         s.cursor.store(self.transport.cursor, Ordering::Relaxed);
         s.state.store(self.transport.state as u8, Ordering::Relaxed);
@@ -802,6 +845,26 @@ mod tests {
         crate::monitor::push_frames(&mut tx, 2, [0.1, 0.8].into_iter());
         core.process(&mut out);
         assert!(out.iter().all(|&s| s == 0.0));
+    }
+
+    #[test]
+    fn preview_plays_once_while_stopped_and_can_be_stopped() {
+        let (mut core, mut ctl) = engine(48_000, TempoMap::default());
+        ctl.send(Command::Preview(Some(vec![0.5f32; 6].into())));
+        let mut out = [0.0f32; 4];
+        core.process(&mut out);
+        assert_eq!(out, [0.5; 4]);
+        assert!(ctl.status.previewing());
+        core.process(&mut out);
+        assert_eq!(out, [0.5, 0.5, 0.0, 0.0], "ends after the last sample");
+        assert!(!ctl.status.previewing());
+        ctl.send(Command::Preview(Some(vec![0.25f32; 100].into())));
+        core.process(&mut out);
+        ctl.send(Command::Preview(None));
+        core.process(&mut out);
+        assert_eq!(out, [0.0; 4]);
+        // Old buffers come back to the main thread.
+        ctl.collect_garbage();
     }
 
     #[test]

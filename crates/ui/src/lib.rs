@@ -1870,6 +1870,138 @@ mod tests {
         });
     }
 
+    /// Testordner mit einer kurzen WAV-Datei `Loop.wav`.
+    fn browser_dir(name: &str) -> std::path::PathBuf {
+        let d = std::env::temp_dir().join(format!("studiocraft-ui-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(d.join("Takes")).unwrap();
+        let clip = tone_clip(0.5, 220.0);
+        let frames = clip.samples.len() / 2;
+        let mut b = Vec::new();
+        let data = (frames * 4) as u32;
+        b.extend_from_slice(b"RIFF");
+        b.extend_from_slice(&(36 + data).to_le_bytes());
+        b.extend_from_slice(b"WAVEfmt ");
+        b.extend_from_slice(&16u32.to_le_bytes());
+        for v in [1u16, 2] {
+            b.extend_from_slice(&v.to_le_bytes());
+        }
+        b.extend_from_slice(&48_000u32.to_le_bytes());
+        b.extend_from_slice(&192_000u32.to_le_bytes());
+        for v in [4u16, 16] {
+            b.extend_from_slice(&v.to_le_bytes());
+        }
+        b.extend_from_slice(b"data");
+        b.extend_from_slice(&data.to_le_bytes());
+        for s in clip.samples.iter() {
+            b.extend_from_slice(&((s * 20000.0) as i16).to_le_bytes());
+        }
+        std::fs::write(d.join("Loop.wav"), b).unwrap();
+        d
+    }
+
+    #[test]
+    fn files_drag_from_the_browser_into_the_event_display() {
+        let d = browser_dir("drag");
+        let mut p = Project::default();
+        p.add_track(TrackKind::Audio, "Audio");
+        let mut w = ProjectWindow::new(p, None, String::new());
+        w.show_right = true;
+        w.right.tab = rightzone::Tab::Files;
+        rightzone::open_dir(&mut w, d.clone());
+        let mut h = window_harness(w);
+        let from = h.get_by_label("Loop.wav").rect().center();
+        let to = {
+            let w = h.state();
+            egui::pos2(
+                w.lanes_rect.left() + 200.0,
+                w.lanes_rect.top() + w.view.row_h / 2.0,
+            )
+        };
+        let button = |pos, pressed| egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        h.event(egui::Event::PointerMoved(from));
+        h.run_steps(1);
+        h.event(button(from, true));
+        h.run_steps(1);
+        for i in 1..=6 {
+            h.event(egui::Event::PointerMoved(
+                from + (to - from) * (i as f32 / 6.0),
+            ));
+            h.run_steps(1);
+        }
+        h.event(button(to, false));
+        h.run_steps(2);
+        let events = &h.state().project.tracks[0].events;
+        assert_eq!(events.len(), 1, "dropped on the audio track");
+        assert_eq!(h.state().project.pool.len(), 1);
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn renders_file_browser() {
+        let d = browser_dir("shot");
+        shot("dateibrowser", |w| {
+            w.show_right = true;
+            w.right.tab = rightzone::Tab::Files;
+            rightzone::open_dir(w, d.clone());
+            w.right.selected = Some(d.join("Loop.wav"));
+        });
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// Jedes Sonderzeichen in einem Text der Oberfläche muss in der eingebauten Schrift sein,
+    /// sonst bricht egui beim Zeichnen ab (so geschehen mit Pfeilen im Dateibrowser).
+    #[test]
+    fn every_ui_text_character_has_a_glyph() {
+        fn sources(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+            for e in std::fs::read_dir(dir).unwrap().flatten() {
+                let p = e.path();
+                if p.is_dir() {
+                    sources(&p, out);
+                } else if p.extension().is_some_and(|x| x == "rs") {
+                    out.push(p);
+                }
+            }
+        }
+        let mut files = Vec::new();
+        sources(
+            &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src"),
+            &mut files,
+        );
+        let mut chars = std::collections::BTreeSet::new();
+        for f in files {
+            let text = std::fs::read_to_string(&f).unwrap();
+            // Nur Code vor dem Testmodul, ohne Kommentarzeilen: Texte, die angezeigt werden.
+            let code = text.split("#[cfg(test)]").next().unwrap_or("");
+            for line in code.lines().filter(|l| !l.trim_start().starts_with("//")) {
+                let mut inside = false;
+                for c in line.chars() {
+                    if c == '"' {
+                        inside = !inside;
+                    } else if inside && !c.is_ascii() {
+                        chars.insert(c);
+                    }
+                }
+            }
+        }
+        let ctx = egui::Context::default();
+        let mut out = ctx.run_ui(egui::RawInput::default(), |_| {});
+        out.textures_delta.clear();
+        let missing: Vec<char> = ctx.fonts_mut(|f| {
+            chars
+                .iter()
+                .copied()
+                .filter(|&c| !f.has_glyph(&egui::FontId::proportional(13.0), c))
+                .collect()
+        });
+        assert!(missing.is_empty(), "no glyph for {missing:?}");
+    }
+
     #[test]
     fn toolbar_symbols_pick_tools_and_toggle_zones() {
         let (w, _) = one_event_window();

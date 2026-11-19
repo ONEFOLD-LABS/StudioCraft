@@ -130,7 +130,7 @@ impl ProjectWindow {
                 .and_then(|t| t.sends.get(index as usize))
                 .map(|s| self.track_name(s.target));
             return match target {
-                Some(name) => format!("{} → {name}", param.label()),
+                Some(name) => format!("{} · {name}", param.label()),
                 None => param.label(),
             };
         }

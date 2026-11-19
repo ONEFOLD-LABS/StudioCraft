@@ -316,7 +316,7 @@ pub(crate) fn show(w: &mut ProjectWindow, ui: &mut Ui) {
 /// Audiodateien per Drag & Drop: auf eine Audio-Spur an die Mausposition,
 /// sonst auf neue Spuren. Gibt das Ziel zurück, solange Dateien darüber schweben.
 fn file_drop(w: &mut ProjectWindow, ui: &Ui, g: &Geo) -> Option<(Option<usize>, u64)> {
-    let (hovering, dropped, pos) = ui.input(|i| {
+    let (hovering, mut dropped, pos, released) = ui.input(|i| {
         let paths: Vec<std::path::PathBuf> = i
             .raw
             .dropped_files
@@ -327,8 +327,20 @@ fn file_drop(w: &mut ProjectWindow, ui: &Ui, g: &Geo) -> Option<(Option<usize>, 
             !i.raw.hovered_files.is_empty(),
             paths,
             i.pointer.latest_pos(),
+            i.pointer.any_released(),
         )
     });
+    // Aus dem Dateibrowser der rechten Zone gezogen.
+    let browser = egui::DragAndDrop::payload::<crate::rightzone::BrowserFile>(ui.ctx());
+    let hovering = hovering || browser.is_some();
+    if let Some(file) = &browser
+        && released
+    {
+        egui::DragAndDrop::clear_payload(ui.ctx());
+        if pos.is_some_and(|p| g.lanes.contains(p)) {
+            dropped.push(file.0.clone());
+        }
+    }
     let target = pos.filter(|p| g.lanes.contains(*p)).map(|p| {
         let row = g
             .row_at(p.y)
