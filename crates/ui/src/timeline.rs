@@ -158,23 +158,65 @@ struct Geo {
     ruler: Rect,
     lanes: Rect,
     view: View,
+    /// Anzahl der angezeigten Zeilen (Spuren in zugeklappten Ordnern fehlen).
     rows: usize,
-    /// Oberkante jeder Spur ab Inhaltsanfang, dazu die Gesamthöhe (Länge `rows + 1`).
+    /// Oberkante jeder Anzeigezeile ab Inhaltsanfang, dazu die Gesamthöhe (Länge `rows + 1`).
     /// Spuren mit aufgeklappten Lanes sind so hoch wie alle ihre Lanes.
     tops: Vec<f32>,
+    /// Spur je Anzeigezeile, in Baumreihenfolge (Ordner, darunter ihre Spuren).
+    order: Vec<usize>,
+    /// Anzeigezeile je Spur; `None` in zugeklappten Ordnern.
+    pos: Vec<Option<usize>>,
+    /// Einrückung je Spur (Ordnertiefe).
+    depth: Vec<usize>,
 }
 
-/// Oberkanten aller Spuren und Gesamthöhe (siehe [`Geo::tops`]).
-fn row_tops(w: &ProjectWindow) -> Vec<f32> {
-    let mut tops = Vec::with_capacity(w.project.tracks.len() + 1);
+/// Anzeigereihenfolge, Zeilen und Einrückung der Spuren (siehe [`Geo`]).
+fn layout(w: &ProjectWindow) -> (Vec<usize>, Vec<Option<usize>>, Vec<usize>, Vec<f32>) {
+    let n = w.project.tracks.len();
+    let tree = w.project.display_order();
+    let mut pos = vec![None; n];
+    let mut depth = vec![0; n];
+    let mut order = Vec::with_capacity(tree.len());
+    let mut tops = Vec::with_capacity(tree.len() + 1);
     let mut y = 0.0;
     tops.push(y);
-    for t in &w.project.tracks {
-        let lanes = automation::rows_of(t);
+    for (i, (t, d)) in tree.into_iter().enumerate() {
+        order.push(t);
+        pos[t] = Some(i);
+        depth[t] = d;
+        let lanes = automation::rows_of(&w.project.tracks[t]);
         y += w.view.row_h * lanes as f32;
         tops.push(y);
     }
-    tops
+    (order, pos, depth, tops)
+}
+
+/// Einrückung des Spurkopfs nach Ordnertiefe.
+fn indent(g: &Geo, row: usize) -> f32 {
+    g.depth.get(row).copied().unwrap_or(0) as f32 * 14.0
+}
+
+/// Ordnerzeile: die Events aller enthaltenen Spuren als schmale Balken (Überblick, auch
+/// zugeklappt).
+fn paint_folder_summary(w: &ProjectWindow, painter: &Painter, g: &Geo, row: usize) {
+    let top = g.row_top(row);
+    let band = top + g.view.row_h * 0.3..=top + g.view.row_h * 0.7;
+    let t0 = g.ticks(g.lanes.left()).max(0.0) as u64;
+    let t1 = g.ticks(g.lanes.right()).max(0.0) as u64;
+    for (i, t) in w.project.tracks.iter().enumerate() {
+        if !w.project.is_inside(i, row) {
+            continue;
+        }
+        let color = track_color(t.color).gamma_multiply(0.7);
+        for e in t.events.iter().filter(|e| e.end() >= t0 && e.start.0 <= t1) {
+            let r = Rect::from_x_y_ranges(
+                g.x(e.start.0 as f64)..=g.x(e.end() as f64).max(g.x(e.start.0 as f64) + 1.0),
+                band.clone(),
+            );
+            painter.rect_filled(r, 2.0, color);
+        }
+    }
 }
 
 /// Lane eines Events in seiner Spur (0 ohne aufgeklappte Lanes).
@@ -221,31 +263,50 @@ impl Geo {
     fn ticks(&self, x: f32) -> f64 {
         self.view.scroll_ticks + f64::from((x - self.lanes.left()) / self.view.px_per_quarter) * TPQ
     }
+    /// Oberkante der Spur `row` (Spur-Index). Ausgeblendete Spuren liegen weit außerhalb.
     fn row_top(&self, row: usize) -> f32 {
-        let y = self.tops.get(row).copied().unwrap_or(0.0);
-        self.lanes.top() + y - self.view.scroll_y
-    }
-    fn row_height(&self, row: usize) -> f32 {
-        match (self.tops.get(row), self.tops.get(row + 1)) {
-            (Some(a), Some(b)) => b - a,
-            _ => self.view.row_h,
+        match self.pos.get(row).copied().flatten() {
+            Some(d) => self.lanes.top() + self.tops[d] - self.view.scroll_y,
+            None => -1.0e6,
         }
     }
-    /// Spur, deren Oberkante als letzte bei oder über `content_y` liegt.
+    fn row_height(&self, row: usize) -> f32 {
+        match self.pos.get(row).copied().flatten() {
+            Some(d) => self.tops[d + 1] - self.tops[d],
+            None => 0.0,
+        }
+    }
+    /// Unterkante der letzten Zeile (dort entstehen neue Spuren).
+    fn content_bottom(&self) -> f32 {
+        self.lanes.top() + self.tops.last().copied().unwrap_or(0.0) - self.view.scroll_y
+    }
+    /// Anzeigezeile, deren Oberkante als letzte bei oder über `content_y` liegt.
     fn row_index(&self, content_y: f32) -> usize {
         self.tops
             .partition_point(|&t| t <= content_y)
             .saturating_sub(1)
     }
+    /// Spur unter `y`.
     fn row_at(&self, y: f32) -> Option<usize> {
         let c = y - self.lanes.top() + self.view.scroll_y;
         let total = self.tops.last().copied().unwrap_or(0.0);
-        (c >= 0.0 && c < total).then(|| self.row_index(c))
+        (c >= 0.0 && c < total).then(|| self.order.get(self.row_index(c)).copied())?
     }
-    fn visible_rows(&self) -> std::ops::Range<usize> {
+    /// Sichtbare Spuren in Anzeigereihenfolge.
+    fn visible_rows(&self) -> Vec<usize> {
         let first = self.row_index(self.view.scroll_y.max(0.0));
         let last = self.row_index(self.view.scroll_y + self.lanes.height()) + 1;
-        first.min(self.rows)..last.min(self.rows)
+        self.order[first.min(self.rows)..last.min(self.rows)].to_vec()
+    }
+    /// Anzeigezeile der Spur `row`.
+    fn display_pos(&self, row: usize) -> Option<usize> {
+        self.pos.get(row).copied().flatten()
+    }
+    /// Spur `delta` Anzeigezeilen von `row` entfernt (am Rand begrenzt).
+    fn offset_row(&self, row: usize, delta: isize) -> usize {
+        let d = self.display_pos(row).unwrap_or(0) as isize + delta;
+        let d = d.clamp(0, self.rows.saturating_sub(1) as isize) as usize;
+        self.order.get(d).copied().unwrap_or(row)
     }
     /// Rechtecke der Knöpfe M, S, R im Spurkopf.
     /// Schalter im Spurkopf, von links: Mute, Solo, Aufnahme bereit, Monitor,
@@ -273,10 +334,10 @@ pub(crate) fn show(w: &mut ProjectWindow, ui: &mut Ui) {
         pos2(r.right(), r.top() + RULER_H),
     );
     let lanes = Rect::from_min_max(pos2(r.left() + HEADER_W, r.top() + RULER_H), r.max);
-    let rows = w.project.tracks.len();
     w.lanes_rect = lanes;
 
-    let tops = row_tops(w);
+    let (order, pos, depth, tops) = layout(w);
+    let rows = order.len();
     scroll_and_zoom(w, ui, &resp, lanes, tops.last().copied().unwrap_or(0.0));
     follow_cursor(w, lanes);
     let geo = Geo {
@@ -286,6 +347,9 @@ pub(crate) fn show(w: &mut ProjectWindow, ui: &mut Ui) {
         view: w.view,
         rows,
         tops,
+        order,
+        pos,
+        depth,
     };
 
     interact(w, ui, &resp, &geo);
@@ -371,7 +435,7 @@ fn paint_plugin_target(painter: &Painter, g: &Geo, target: PluginTarget) {
             painter.rect_stroke(rect, 2.0, Stroke::new(2.0, accent), StrokeKind::Inside);
         }
         PluginTarget::NewTrack => {
-            let y = g.row_top(g.rows).min(g.lanes.bottom() - 2.0);
+            let y = g.content_bottom().min(g.lanes.bottom() - 2.0);
             painter.hline(full.x_range(), y, Stroke::new(2.0, accent));
             painter.text(
                 pos2(g.header.left() + 12.0, y + 4.0),
@@ -723,10 +787,10 @@ fn move_delta(
     let target_row = g
         .row_at(p.y.clamp(g.lanes.top(), g.lanes.bottom() - 1.0))
         .unwrap_or(row);
-    Some((
-        target_row as isize - row as isize,
-        new_start as i64 - ev.start.0 as i64,
-    ))
+    // Versatz in Anzeigezeilen (Ordner zeigen ihre Spuren in Baumreihenfolge).
+    let from = g.display_pos(row).unwrap_or(0) as isize;
+    let to = g.display_pos(target_row).map_or(from, |d| d as isize);
+    Some((to - from, new_start as i64 - ev.start.0 as i64))
 }
 
 fn finish_drag(w: &mut ProjectWindow, g: &Geo, d: Drag, p: Pos2, mods: egui::Modifiers) {
@@ -786,7 +850,7 @@ fn finish_drag(w: &mut ProjectWindow, g: &Geo, d: Drag, p: Pos2, mods: egui::Mod
                 let Some(ev) = w.project.event(sel) else {
                     continue;
                 };
-                let target = (t as isize + drow).clamp(0, g.rows as isize - 1) as usize;
+                let target = g.offset_row(t, drow);
                 let start = (ev.start.0 as i64 + dt).max(0) as u64;
                 match w.project.move_event(sel, target, start, copy) {
                     Some(nid) => new_sel.push(nid),
@@ -829,7 +893,12 @@ fn click(w: &mut ProjectWindow, g: &Geo, p: Pos2, mods: egui::Modifiers) {
         if let Some(row) = g.row_at(p.y)
             && automation::arrow_rect(g, row).expand(3.0).contains(p)
         {
-            automation::toggle(&mut w.project.tracks[row]);
+            let track = &mut w.project.tracks[row];
+            if track.kind == TrackKind::Folder {
+                track.folded = !track.folded;
+            } else {
+                automation::toggle(track);
+            }
             return;
         }
         if let Some(row) = g.row_at(p.y) {
@@ -1084,6 +1153,11 @@ fn paint_lanes(w: &ProjectWindow, painter: &Painter, g: &Geo) {
                     from = from.max(b);
                 }
             }
+        }
+    }
+    for row in g.visible_rows() {
+        if w.project.tracks[row].kind == TrackKind::Folder {
+            paint_folder_summary(w, painter, g, row);
         }
     }
     automation::paint(w, painter, g);
@@ -1364,7 +1438,7 @@ fn paint_drag_preview(w: &ProjectWindow, painter: &Painter, g: &Geo) {
                 let (Some((t, _)), Some(ev)) = (w.project.find(sel), w.project.event(sel)) else {
                     continue;
                 };
-                let target = (t as isize + drow).clamp(0, g.rows as isize - 1) as usize;
+                let target = g.offset_row(t, drow);
                 let start = (ev.start.0 as i64 + dt).max(0) as f64;
                 let top = g.row_top(target) + 2.0;
                 let rect = Rect::from_min_max(
@@ -1427,11 +1501,12 @@ fn paint_headers(w: &ProjectWindow, painter: &Painter, g: &Geo) {
         // Name und Schalter stehen in der obersten Lane.
         let head = Rect::from_min_size(rect.min, vec2(rect.width(), g.view.row_h));
         // Platz für den Automationspfeil vor dem Namen.
-        let name_x = if crate::mixer::has_channel(track.kind) {
-            24.0
-        } else {
-            12.0
-        };
+        let name_x = indent(g, row)
+            + if crate::mixer::has_channel(track.kind) || track.kind == TrackKind::Folder {
+                24.0
+            } else {
+                12.0
+            };
         if w.selected_track == Some(row) {
             // Gewählte Spur: heller hinterlegt, nicht vollflächig in Akzentfarbe (ui-parity.md).
             painter.rect_filled(rect, 0.0, crate::theme::tokens(painter.ctx()).row_selected);

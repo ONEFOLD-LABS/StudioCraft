@@ -293,7 +293,8 @@ fn header_buttons(rect: Rect) -> [Rect; 2] {
 /// Pfeil im Spurkopf, der die Automation auf- und zuklappt.
 pub(super) fn arrow_rect(g: &Geo, row: usize) -> Rect {
     let top = g.row_top(row) + (g.view.row_h - 14.0) / 2.0;
-    Rect::from_min_size(pos2(g.header.left() + 8.0, top), vec2(12.0, 14.0))
+    let left = g.header.left() + 8.0 + super::indent(g, row);
+    Rect::from_min_size(pos2(left, top), vec2(12.0, 14.0))
 }
 
 /// Klick auf den Pfeil: alle Automationsspuren der Spur zeigen bzw. verbergen. Ohne
@@ -342,9 +343,15 @@ pub(super) fn paint_headers(w: &ProjectWindow, painter: &Painter, g: &Geo, row: 
     let t = crate::theme::tokens(painter.ctx());
     let visuals = painter.ctx().global_style().visuals.clone();
     let track = &w.project.tracks[row];
-    if crate::mixer::has_channel(track.kind) {
+    let folder = track.kind == studiocraft_project::TrackKind::Folder;
+    if crate::mixer::has_channel(track.kind) || folder {
         let a = arrow_rect(g, row);
-        let open = track.automation.iter().any(|l| l.visible);
+        // Ordner: Pfeil klappt die enthaltenen Spuren auf und zu; sonst die Automation.
+        let open = if folder {
+            !track.folded
+        } else {
+            track.automation.iter().any(|l| l.visible)
+        };
         let pts = if open {
             vec![
                 a.left_top() + vec2(1.0, 4.0),
@@ -358,7 +365,7 @@ pub(super) fn paint_headers(w: &ProjectWindow, painter: &Painter, g: &Geo, row: 
                 a.left_bottom() + vec2(3.0, -1.0),
             ]
         };
-        let c = if track.automation.is_empty() {
+        let c = if !folder && track.automation.is_empty() {
             visuals.weak_text_color()
         } else {
             t.text

@@ -9,6 +9,7 @@ mod automation_write;
 mod colors;
 mod eq_ui;
 mod focus;
+mod folders_ui;
 mod icons;
 mod infoline;
 mod inserts;
@@ -1015,6 +1016,7 @@ impl ProjectWindow {
                 });
         }
         ui.label(format!("{} Events", track.events.len()));
+        self.folder_ui(ui, idx);
         ui.separator();
         if self.project.tracks[idx].kind == TrackKind::Instrument {
             egui::CollapsingHeader::new("Instrument")
@@ -2256,6 +2258,73 @@ mod tests {
         let json = studiocraft_project::file::to_json(&h.state().project);
         let back = studiocraft_project::file::from_json(&json).unwrap();
         assert_eq!(back.tracks[0].eq, h.state().project.tracks[0].eq);
+    }
+
+    #[test]
+    fn folder_tracks_hold_tracks_fold_away_and_mute_them() {
+        let mut p = Project::default();
+        let a = p.add_track(TrackKind::Audio, "Gesang");
+        let b = p.add_track(TrackKind::Audio, "Gitarre");
+        let mut w = ProjectWindow::new(p, None, String::new());
+        w.selected_track = Some(b);
+        let mut h = window_harness(w);
+        h.get_by_label("Projekt").click();
+        h.run_steps(2);
+        h.get_by_label("Ordner-Spur hinzufügen").click();
+        h.run_steps(2);
+        let folder = 2;
+        assert_eq!(h.state().project.tracks[folder].kind, TrackKind::Folder);
+        assert_eq!(h.state().project.parent_of(b), Some(folder));
+        // Display: Gesang, then the folder with Gitarre below it.
+        let order: Vec<usize> = h
+            .state()
+            .project
+            .display_order()
+            .iter()
+            .map(|r| r.0)
+            .collect();
+        assert_eq!(order, [a, folder, b]);
+        // The arrow on the folder's header (second row) folds it: Gitarre disappears.
+        let arrow = {
+            let w = h.state();
+            egui::pos2(
+                w.lanes_rect.left() - 290.0 + 14.0,
+                w.lanes_rect.top() + 1.5 * w.view.row_h,
+            )
+        };
+        h.event(egui::Event::PointerMoved(arrow));
+        h.run_steps(1);
+        for pressed in [true, false] {
+            h.event(egui::Event::PointerButton {
+                pos: arrow,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            });
+        }
+        h.run_steps(2);
+        assert!(h.state().project.tracks[folder].folded);
+        assert!(h.state().project.is_hidden(b));
+        // Muting the folder mutes its track for playback.
+        h.state_mut().project.tracks[folder].mute = true;
+        assert!(!h.state().project.audible(b));
+        assert!(h.state().project.audible(a));
+        h.state_mut().undo();
+        assert!(!h.state().project.tracks[folder].folded);
+    }
+
+    #[test]
+    fn renders_folder_tracks() {
+        shot("ordner", |w| {
+            w.project = Project::demo(8);
+            let f = w.project.add_track(TrackKind::Folder, "Rhythmus");
+            for t in [1, 2, 3] {
+                w.project.set_parent(t, Some(f));
+            }
+            let g = w.project.add_track(TrackKind::Folder, "Leer");
+            w.project.tracks[g].folded = true;
+            w.project.set_parent(5, Some(g));
+        });
     }
 
     #[test]

@@ -139,6 +139,12 @@ pub struct Track {
     /// Automationsspuren (Spec „Automation“).
     #[serde(default)]
     pub automation: Vec<crate::AutomationLane>,
+    /// Ordnerspur, zu der diese Spur gehört (siehe `folders.rs`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent: Option<TrackId>,
+    /// Ordnerspuren: zugeklappt, die enthaltenen Spuren sind ausgeblendet.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub folded: bool,
     /// Kanal-EQ (4 Bänder); Standard: neutral, wird dann nicht gespeichert.
     #[serde(default, skip_serializing_if = "crate::ChannelEq::is_default")]
     pub eq: crate::ChannelEq,
@@ -500,6 +506,8 @@ impl Project {
                 show_lanes: false,
                 automation: Vec::new(),
                 eq: crate::ChannelEq::default(),
+                parent: None,
+                folded: false,
                 volume_db: 0.0,
                 pan: 0.0,
                 input: TrackInput::default(),
@@ -906,6 +914,8 @@ impl Project {
             show_lanes: false,
             automation: Vec::new(),
             eq: crate::ChannelEq::default(),
+            parent: None,
+            folded: false,
             volume_db: 0.0,
             pan: 0.0,
             input: TrackInput::default(),
@@ -1123,11 +1133,13 @@ impl Project {
 
     /// Ob eine Spur zu hören ist: nicht stumm, und bei aktivem Solo selbst Solo.
     /// Gruppen und FX-Kanäle sind solo-sicher (sonst fehlte bei Solo der Hall).
+    /// Mute und Solo eines Ordners wirken auf alle Spuren darin.
     pub fn audible(&self, track: usize) -> bool {
         let any_solo = self.tracks.iter().any(|t| t.solo);
-        self.tracks
-            .get(track)
-            .is_some_and(|t| !t.mute && (!any_solo || t.solo || Self::is_bus(t.kind)))
+        self.tracks.get(track).is_some_and(|t| {
+            !self.effective_mute(track)
+                && (!any_solo || self.effective_solo(track) || Self::is_bus(t.kind))
+        })
     }
 
     /// Ende des letzten Events in Ticks (mindestens ein Takt).

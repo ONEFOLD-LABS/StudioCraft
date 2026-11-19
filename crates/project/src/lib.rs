@@ -7,6 +7,7 @@
 pub mod automation;
 pub mod eq;
 pub mod file;
+pub mod folders;
 pub mod model;
 pub mod quantize;
 pub mod time;

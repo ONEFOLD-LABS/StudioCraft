@@ -144,6 +144,13 @@ impl ProjectWindow {
                 if ui.button("FX-Kanal hinzufügen").clicked() {
                     self.add_bus_track(studiocraft_project::TrackKind::Fx);
                 }
+                if ui
+                    .button("Ordner-Spur hinzufügen")
+                    .on_hover_text("Die gewählte Spur kommt gleich in den neuen Ordner")
+                    .clicked()
+                {
+                    self.add_folder_track();
+                }
                 ui.menu_button("Instrument-Spur hinzufügen", |ui| {
                     if let Some(info) = self.instrument_menu(ui) {
                         self.add_instrument_track(info);
