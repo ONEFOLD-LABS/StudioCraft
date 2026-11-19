@@ -29,19 +29,22 @@ Status: ✅ umgesetzt · 🟡 teilweise · ⬜ offen
 ## Werkzeugzeile
 
 Eine Zeile, Gruppen durch schmale Trenner getrennt, Knöpfe quadratisch mit Symbol und Tooltip
-(Name und Taste). Reihenfolge von links:
+(Name und Taste). Drei Bereiche:
 
-1. **Zonen-Schalter links:** linke Zone (Inspector, Alt+I), untere Zone, rechte Zone (Alt+R).
-   Hervorgehoben, wenn die Zone sichtbar ist.
-2. **Transport-Kurzform:** Zum Anfang, Stopp, Start, Aufnahme, Cycle (gleiches Verhalten wie die
-   Transportleiste).
-3. **Werkzeuge 1–0** als Symbolknöpfe, aktiver Knopf in Akzentfarbe hinterlegt:
+1. **Links: globale Zustände** M, S, R, W. Sie leuchten in der Statusfarbe, sobald irgendeine Spur
+   gemutet, solo, auf Lesen oder auf Schreiben steht. Klick hebt Mute, Solo bzw. Schreiben für
+   alle Spuren auf; R schaltet Lesen für alle Kanäle ein bzw. aus. Jeder Klick ist ein
+   Undo-Schritt. Daneben die **Transport-Kurzform:** Zum Anfang, Stopp, Start, Aufnahme, Cycle
+   (gleiches Verhalten wie die Transportleiste).
+2. **Mitte, auf die Fensterbreite zentriert** (in schmalen Fenstern direkt im Anschluss):
+   **Werkzeuge 1–0** als Symbolknöpfe, aktiver Knopf in Akzentfarbe hinterlegt:
    Pfeil (Auswahl), Pfeil mit Rahmen (Bereich), Comping (ohne Taste, Lanes mit hervorgehobenem
    Abschnitt), Schere (Trennen), Tube/Klebstoff (Kleben), Radierer (Löschen), Lupe (Zoom),
    X (Stumm), Stift (Zeichnen), Lautsprecher (Wiedergabe), Metronom-ähnliche Uhr (Zeitkorrektur).
-4. **Snap-Gruppe:** Snap an/aus (Magnet-Symbol, J), Snap-Modus, Raster-Typ, Quantisierungswert,
-   Knopf für das Quantisierungs-Panel (Swing, Stärke).
-5. **Rechts:** Zonen-Schalter für die rechte Zone.
+   Danach die **Snap-Gruppe:** Snap an/aus (Magnet-Symbol, J), Snap-Modus, Raster-Typ,
+   Quantisierungswert, Knopf für das Quantisierungs-Panel (Swing, Stärke).
+3. **Rechts:** die Zonen-Schalter linke Zone (Alt+I), untere Zone, rechte Zone (Alt+R),
+   hervorgehoben, wenn die Zone sichtbar ist.
 
 ## Info-Zeile
 
@@ -156,6 +159,7 @@ Die Positionsanzeige hat einen dunklen Hintergrund (`counter_bg`) mit heller Sch
 19. ✅ Linke Zone mit Kanalzug-Spalte neben dem Inspector
 20. ✅ Spurkopf zweizeilig mit Farbleiste, Spurnummer und Lautstärkeregler
 21. ✅ Inspector: Sektionen mit Titelleiste, Eingang und Ausgang unter „Routing“
+22. ✅ Werkzeugzeile: globale Zustände links, Werkzeuge zentriert, Zonen-Schalter rechts
 
 **Als Nächstes:** Aus dieser Liste ist nichts mehr offen. Weitere Angleichungen ergeben sich aus
 `docs/spec.md`.

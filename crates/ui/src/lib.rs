@@ -717,34 +717,15 @@ impl ProjectWindow {
         }
     }
 
+    /// Werkzeugzeile (docs/ui-parity.md, „Werkzeugzeile“): links globale Zustände und die
+    /// Transport-Kurzform, in der Mitte Werkzeuge und Snap, rechts die Zonen-Schalter.
     fn toolbar(&mut self, ui: &mut Ui) {
         use icons::{Icon, icon_button};
         let t = theme::tokens(ui.ctx());
+        let row = ui.available_rect_before_wrap();
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 2.0;
-            // Zonen-Schalter (docs/ui-parity.md, „Werkzeugzeile“)
-            if icon_button(
-                ui,
-                Icon::ZoneLeft,
-                self.show_inspector,
-                Some(t.accent),
-                "Linke Zone (Alt+I)",
-            )
-            .clicked()
-            {
-                self.show_inspector = !self.show_inspector;
-            }
-            if icon_button(
-                ui,
-                Icon::ZoneLower,
-                self.show_lower,
-                Some(t.accent),
-                "Untere Zone",
-            )
-            .clicked()
-            {
-                self.show_lower = !self.show_lower;
-            }
+            self.global_states(ui);
             icons::group_gap(ui);
             // Transport-Kurzform
             if icon_button(ui, Icon::ToStart, false, None, "Zum Anfang (Pos1)").clicked() {
@@ -754,7 +735,6 @@ impl ProjectWindow {
                 self.stop_transport();
             }
             let playing = self.is_playing();
-            let t = theme::tokens(ui.ctx());
             if icon_button(
                 ui,
                 Icon::Start,
@@ -780,7 +760,14 @@ impl ProjectWindow {
             if icon_button(ui, Icon::Cycle, self.cycle, Some(t.accent), "Cycle (/)").clicked() {
                 self.toggle_cycle();
             }
-            icons::group_gap(ui);
+
+            // Mitte: Werkzeuge und Snap, auf die Fensterbreite zentriert. Die Breite der
+            // Gruppe stammt aus dem letzten Frame; ist kein Platz, folgt sie direkt links.
+            let id = egui::Id::unique("werkzeugzeile-mitte");
+            let width = ui.ctx().data(|d| d.get_temp::<f32>(id)).unwrap_or(0.0);
+            let x = (row.center().x - width / 2.0).max(ui.cursor().left() + 12.0);
+            ui.add_space((x - ui.cursor().left()).max(0.0));
+            let start = ui.cursor().left();
             for tool in Tool::TOOLBAR {
                 let mut hint = match tool.key_label() {
                     "" => tool.label().to_owned(),
@@ -799,6 +786,13 @@ impl ProjectWindow {
             }
             snap::toolbar(self, ui);
             quantize::toolbar(self, ui);
+            let used = ui.cursor().left() - start;
+            if (used - width).abs() > 0.5 {
+                ui.ctx().data_mut(|d| d.insert_temp(id, used));
+                ui.ctx().request_repaint();
+            }
+
+            // Rechts: Zonen-Schalter, von rechts nach links gelegt.
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if icon_button(
                     ui,
@@ -811,8 +805,84 @@ impl ProjectWindow {
                 {
                     self.show_right = !self.show_right;
                 }
+                if icon_button(
+                    ui,
+                    Icon::ZoneLower,
+                    self.show_lower,
+                    Some(t.accent),
+                    "Untere Zone",
+                )
+                .clicked()
+                {
+                    self.show_lower = !self.show_lower;
+                }
+                if icon_button(
+                    ui,
+                    Icon::ZoneLeft,
+                    self.show_inspector,
+                    Some(t.accent),
+                    "Linke Zone (Alt+I)",
+                )
+                .clicked()
+                {
+                    self.show_inspector = !self.show_inspector;
+                }
             });
         });
+    }
+
+    /// Globale Zustände links in der Werkzeugzeile: leuchten, sobald eine Spur gemutet, solo,
+    /// auf Lesen oder auf Schreiben steht. Klick auf M, S oder W hebt den Zustand für alle
+    /// Spuren auf; R schaltet Lesen für alle Kanäle ein bzw. aus.
+    fn global_states(&mut self, ui: &mut Ui) {
+        let t = theme::tokens(ui.ctx());
+        let tracks = &self.project.tracks;
+        let channel = |k: TrackKind| mixer::has_channel(k);
+        let any_mute = tracks.iter().any(|t| t.mute);
+        let any_solo = tracks.iter().any(|t| t.solo);
+        let any_read = tracks.iter().any(|t| channel(t.kind) && t.read);
+        let any_write = tracks.iter().any(|t| channel(t.kind) && t.write);
+        let switches = [
+            ("M", any_mute, t.mute, "Mute aufheben (alle Spuren)"),
+            ("S", any_solo, t.solo, "Solo aufheben (alle Spuren)"),
+            ("R", any_read, t.monitor, "Automation lesen (alle Kanäle)"),
+            (
+                "W",
+                any_write,
+                t.rec,
+                "Automation schreiben aus (alle Kanäle)",
+            ),
+        ];
+        let mut clicked = None;
+        for (k, (label, on, color, name)) in switches.into_iter().enumerate() {
+            let text = egui::RichText::new(label).color(if on { Color32::BLACK } else { t.text });
+            let r = ui
+                .add(
+                    egui::Button::new(text)
+                        .fill(if on { color } else { t.button })
+                        .min_size(egui::vec2(20.0, 20.0)),
+                )
+                .on_hover_text(name);
+            r.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, true, on, name));
+            if r.clicked() {
+                clicked = Some(k);
+            }
+        }
+        let Some(k) = clicked else { return };
+        let before = self.project.clone();
+        for track in &mut self.project.tracks {
+            match k {
+                0 => track.mute = false,
+                1 => track.solo = false,
+                2 => {
+                    if channel(track.kind) {
+                        track.read = !any_read;
+                    }
+                }
+                _ => track.write = false,
+            }
+        }
+        self.checkpoint(before);
     }
 
     fn inspector(&mut self, ui: &mut Ui) {
@@ -2618,6 +2688,48 @@ mod tests {
         h.get_by_label("Untere Zone").click();
         h.run_steps(2);
         assert!(!h.state().show_lower);
+    }
+
+    #[test]
+    fn global_state_switches_clear_mute_solo_and_write() {
+        let (mut w, _) = one_event_window();
+        w.project.add_track(TrackKind::Audio, String::from("Zwei"));
+        w.project.tracks[0].mute = true;
+        w.project.tracks[1].solo = true;
+        w.project.tracks[1].write = true;
+        let mut h = window_harness(w);
+        h.get_by_label("Mute aufheben (alle Spuren)").click();
+        h.get_by_label("Solo aufheben (alle Spuren)").click();
+        h.get_by_label("Automation schreiben aus (alle Kanäle)")
+            .click();
+        h.run_steps(2);
+        let tracks = &h.state().project.tracks;
+        assert!(tracks.iter().all(|t| !t.mute && !t.solo && !t.write));
+        // R switches reading on for every channel, a second click switches it off.
+        h.get_by_label("Automation lesen (alle Kanäle)").click();
+        h.run_steps(2);
+        assert!(h.state().project.tracks.iter().all(|t| t.read));
+        h.get_by_label("Automation lesen (alle Kanäle)").click();
+        h.run_steps(2);
+        assert!(h.state().project.tracks.iter().all(|t| !t.read));
+        // Each click is one undo step.
+        h.state_mut().undo();
+        assert!(h.state().project.tracks.iter().all(|t| t.read));
+    }
+
+    #[test]
+    fn toolbar_tools_sit_in_the_middle_of_the_window() {
+        let (w, _) = one_event_window();
+        let mut h = window_harness(w);
+        h.run_steps(3);
+        let split = h.get_by_label("Trennen (3)").rect();
+        let right = h.get_by_label("Rechte Zone (Alt+R)").rect();
+        // The tool group starts left of the centre and the zone switches sit at the right edge.
+        assert!(
+            split.center().x > 400.0 && split.center().x < 700.0,
+            "{split:?}"
+        );
+        assert!(right.right() > 1350.0, "{right:?}");
     }
 
     #[test]
