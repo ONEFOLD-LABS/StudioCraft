@@ -11,7 +11,7 @@ clap-sys = "0.5"
 libloading = "0.9"
 
 [target.'cfg(all(unix, not(target_os = "macos"), not(target_arch = "wasm32")))'.dependencies]
-x11rb = "0.13"
+x11rb = "0.14"
 
 [target.'cfg(all(unix, not(target_arch = "wasm32")))'.dependencies]
 libc = "0.2"
