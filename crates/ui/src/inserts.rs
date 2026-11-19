@@ -64,6 +64,8 @@ pub(crate) struct PluginState {
     pub changed: bool,
     pub list: Option<Vec<PluginInfo>>,
     pub params: HashMap<String, Vec<ParamInfo>>,
+    /// Presets je Plugin-Id (beim ersten Anzeigen gelesen).
+    pub presets: HashMap<String, Vec<studiocraft_plugin_host::PluginPreset>>,
     pub sent: Vec<SentChain>,
 }
 
@@ -665,6 +667,88 @@ impl ProjectWindow {
         }
     }
 
+    /// Einen Parameter setzen: im Projekt, in der Engine und in der gemerkten Kette.
+    fn apply_param(&mut self, track: usize, k: usize, id: u32, v: f64) {
+        if let Some(s) = self.slot_mut(track, k) {
+            s.set_param(id, v);
+        }
+        if let Some(idx) = self.engine_index(track, k) {
+            self.send(Command::SetParam(track, idx, id, v));
+            let sent = self.plugins.sent.get_mut(track);
+            let s = sent.and_then(|s| {
+                if k == INSTRUMENT {
+                    s.instrument.as_mut()
+                } else {
+                    s.slots.get_mut(k)
+                }
+            });
+            if let Some(s) = s {
+                s.set_param(id, v);
+            }
+        }
+    }
+
+    /// Preset-Auswahl, wenn das Plugin welche mitbringt. Ein Preset setzt seine Parameter
+    /// wie Regler (gespeichert mit dem Projekt, rückgängig machbar).
+    fn presets_ui(&mut self, ui: &mut Ui, track: usize, k: usize) {
+        let Some(id) = self.slot(track, k).map(|s| s.plugin_id.clone()) else {
+            return;
+        };
+        if !self.plugins.presets.contains_key(&id) {
+            let list = self
+                .handle_mut(track, k)
+                .map(|h| h.presets())
+                .unwrap_or_default();
+            self.plugins.presets.insert(id.clone(), list);
+        }
+        let presets = self.plugins.presets.get(&id).cloned().unwrap_or_default();
+        if presets.is_empty() {
+            return;
+        }
+        let mut chosen = None;
+        // Zuletzt gewähltes Preset dieses Slots (nur Anzeige, nicht im Projekt).
+        let last_id = ui.make_persistent_id(("insert-preset-last", track, k, id.as_str()));
+        let last: Option<String> = ui.data(|d| d.get_temp(last_id));
+        ui.horizontal(|ui| {
+            let l = ui.label("Preset");
+            let shown = presets
+                .iter()
+                .find(|p| last.as_deref() == Some(p.uri.as_str()))
+                .map_or("wählen …", |p| p.name.as_str());
+            egui::ComboBox::from_id_salt(("insert-preset", track, k))
+                .selected_text(shown)
+                .show_ui(ui, |ui| {
+                    for p in &presets {
+                        let on = last.as_deref() == Some(p.uri.as_str());
+                        if ui.selectable_label(on, &p.name).clicked() {
+                            chosen = Some(p.uri.clone());
+                        }
+                    }
+                })
+                .response
+                .labelled_by(l.id);
+        });
+        if let Some(uri) = &chosen {
+            ui.data_mut(|d| d.insert_temp(last_id, uri.clone()));
+        }
+        let Some(uri) = chosen else {
+            return;
+        };
+        let values = self
+            .handle_mut(track, k)
+            .map(|h| h.preset_values(&uri))
+            .unwrap_or_default();
+        if values.is_empty() {
+            self.message = Some("Preset ohne Parameterwerte".into());
+            return;
+        }
+        let before = self.project.clone();
+        for (pid, v) in values {
+            self.apply_param(track, k, pid, v);
+        }
+        self.checkpoint(before);
+    }
+
     /// Allgemeine Parameteransicht (Regler je Parameter). Eigene Plugin-Fenster folgen.
     /// `k` ist der Insert-Slot oder [`INSTRUMENT`].
     pub(crate) fn params_ui(&mut self, ui: &mut Ui, track: usize, k: usize) {
@@ -674,6 +758,7 @@ impl ProjectWindow {
         let Some(infos) = self.plugins.params.get(&slot.plugin_id).cloned() else {
             return;
         };
+        self.presets_ui(ui, track, k);
         egui::CollapsingHeader::new(format!("Parameter ({})", infos.len()))
             .id_salt(("insert-params", track, k))
             .show(ui, |ui| {
@@ -716,23 +801,7 @@ impl ProjectWindow {
                                 slider = slider.step_by(1.0);
                             }
                             if ui.add(slider).changed() {
-                                if let Some(s) = self.slot_mut(track, k) {
-                                    s.set_param(info.id, v);
-                                }
-                                if let Some(idx) = self.engine_index(track, k) {
-                                    self.send(Command::SetParam(track, idx, info.id, v));
-                                    let sent = self.plugins.sent.get_mut(track);
-                                    let s = sent.and_then(|s| {
-                                        if k == INSTRUMENT {
-                                            s.instrument.as_mut()
-                                        } else {
-                                            s.slots.get_mut(k)
-                                        }
-                                    });
-                                    if let Some(s) = s {
-                                        s.set_param(info.id, v);
-                                    }
-                                }
+                                self.apply_param(track, k, info.id, v);
                             }
                         }
                     });

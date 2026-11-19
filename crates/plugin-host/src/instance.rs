@@ -3,7 +3,7 @@
 
 use crate::{
     clap::{ClapHandle, ClapInstance, ParamInfo},
-    lv2::{Lv2Handle, Lv2Instance},
+    lv2::{Lv2Handle, Lv2Instance, Lv2Preset},
     scan::{PluginFormat, PluginInfo},
 };
 
@@ -111,14 +111,30 @@ impl PluginHandle {
     pub fn save_state(&self) -> Option<Vec<u8>> {
         match self {
             Self::Clap(h) => h.save_state(),
-            Self::Lv2(_) => None,
+            Self::Lv2(h) => h.save_state(),
         }
     }
 
     pub fn load_state(&self, data: &[u8]) -> bool {
         match self {
             Self::Clap(h) => h.load_state(data),
-            Self::Lv2(_) => false,
+            Self::Lv2(h) => h.load_state(data),
+        }
+    }
+
+    /// Presets des Plugins (heute nur LV2), nach Name sortiert.
+    pub fn presets(&self) -> Vec<Lv2Preset> {
+        match self {
+            Self::Clap(_) => Vec::new(),
+            Self::Lv2(h) => h.presets(),
+        }
+    }
+
+    /// Parameterwerte (Id, Wert) eines Presets aus [`Self::presets`].
+    pub fn preset_values(&self, uri: &str) -> Vec<(u32, f64)> {
+        match self {
+            Self::Clap(_) => Vec::new(),
+            Self::Lv2(h) => h.preset_values(uri),
         }
     }
 
