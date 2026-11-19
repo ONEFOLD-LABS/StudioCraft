@@ -228,6 +228,12 @@ pub struct Track {
     /// Ordnerspur, zu der diese Spur gehört (siehe `folders.rs`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub parent: Option<TrackId>,
+    /// Im Mixer ausgeblendet (Kanalliste, Spec „Sichtbarkeit und Ansicht“).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub mixer_hidden: bool,
+    /// Im Mixer als schmaler Kanalzug.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub mixer_narrow: bool,
     /// Pan-Modus: Stereo-Balance (Standard) oder Stereo kombiniert.
     #[serde(default, skip_serializing_if = "PanMode::is_balance")]
     pub pan_mode: PanMode,
@@ -494,6 +500,59 @@ impl Track {
     }
 }
 
+/// Eine gespeicherte Mixer-Ansicht (Spec „Sichtbarkeit und Ansicht“).
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct MixerView {
+    pub name: String,
+    /// Ausgeblendete und schmale Kanäle (nach Spur-Kennung).
+    #[serde(default)]
+    pub hidden: Vec<TrackId>,
+    #[serde(default)]
+    pub narrow: Vec<TrackId>,
+}
+
+/// Höchstzahl gespeicherter Mixer-Ansichten.
+pub const MAX_MIXER_VIEWS: usize = 9;
+
+impl Project {
+    /// Speichert Sichtbarkeit und Breite aller Kanäle als Ansicht `name` (gleicher Name
+    /// ersetzt). `false`, wenn schon [`MAX_MIXER_VIEWS`] andere Ansichten da sind.
+    pub fn save_mixer_view(&mut self, name: &str) -> bool {
+        let name: String = name.trim().chars().take(64).collect();
+        if name.is_empty() {
+            return false;
+        }
+        let pick = |f: fn(&Track) -> bool| -> Vec<TrackId> {
+            self.tracks.iter().filter(|t| f(t)).map(|t| t.id).collect()
+        };
+        let view = MixerView {
+            name: name.clone(),
+            hidden: pick(|t| t.mixer_hidden),
+            narrow: pick(|t| t.mixer_narrow),
+        };
+        if let Some(v) = self.mixer_views.iter_mut().find(|v| v.name == name) {
+            *v = view;
+        } else if self.mixer_views.len() < MAX_MIXER_VIEWS {
+            self.mixer_views.push(view);
+        } else {
+            return false;
+        }
+        true
+    }
+
+    /// Ruft Ansicht `i` ab; Kanäle, die es damals nicht gab, werden sichtbar und breit.
+    pub fn apply_mixer_view(&mut self, i: usize) -> bool {
+        let Some(v) = self.mixer_views.get(i).cloned() else {
+            return false;
+        };
+        for t in &mut self.tracks {
+            t.mixer_hidden = v.hidden.contains(&t.id);
+            t.mixer_narrow = v.narrow.contains(&t.id);
+        }
+        true
+    }
+}
+
 /// Pan-Modus eines Kanals (Spec „Kanalzug-Elemente“).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub enum PanMode {
@@ -569,6 +628,9 @@ pub struct Project {
     /// Benannte Fensterlayouts, abrufbar per Taste.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub layouts: Vec<crate::NamedLayout>,
+    /// Gespeicherte Mixer-Ansichten: welche Kanäle sichtbar und welche schmal sind.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub mixer_views: Vec<MixerView>,
 }
 
 /// Farben neuer Spuren, reihum; auch die Palette der Farbauswahl.
@@ -597,6 +659,7 @@ impl Default for Project {
             click: crate::ClickSettings::default(),
             layout: crate::WindowLayout::default(),
             layouts: Vec::new(),
+            mixer_views: Vec::new(),
         }
     }
 }
@@ -735,6 +798,8 @@ impl Project {
                 program: None,
                 solo_defeat: false,
                 pan_mode: PanMode::Balance,
+                mixer_hidden: false,
+                mixer_narrow: false,
                 volume_db: 0.0,
                 pan: 0.0,
                 input: TrackInput::default(),
@@ -1331,6 +1396,8 @@ impl Project {
             program: None,
             solo_defeat: false,
             pan_mode: PanMode::Balance,
+            mixer_hidden: false,
+            mixer_narrow: false,
             volume_db: 0.0,
             pan: 0.0,
             input: TrackInput::default(),
@@ -1939,6 +2006,29 @@ mod tests {
         // Unknown in older files: a part without controllers still loads.
         let json = crate::file::to_json(&p);
         assert!(crate::file::from_json(&json).is_ok());
+    }
+
+    #[test]
+    fn mixer_views_save_and_apply() {
+        let mut p = Project::default();
+        for n in ["a", "b", "c"] {
+            p.add_track(TrackKind::Audio, n);
+        }
+        p.tracks[1].mixer_hidden = true;
+        p.tracks[2].mixer_narrow = true;
+        assert!(p.save_mixer_view("Mischen"));
+        p.tracks.iter_mut().for_each(|t| {
+            t.mixer_hidden = false;
+            t.mixer_narrow = false;
+        });
+        assert!(p.apply_mixer_view(0));
+        assert!(p.tracks[1].mixer_hidden && p.tracks[2].mixer_narrow && !p.tracks[0].mixer_hidden);
+        assert!(!p.apply_mixer_view(5));
+        assert!(!p.save_mixer_view("   "));
+        for k in 0..20 {
+            p.save_mixer_view(&format!("v{k}"));
+        }
+        assert_eq!(p.mixer_views.len(), MAX_MIXER_VIEWS);
     }
 
     #[test]
