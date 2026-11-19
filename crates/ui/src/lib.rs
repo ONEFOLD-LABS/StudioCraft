@@ -19,6 +19,7 @@
 mod automation_panel;
 mod automation_write;
 mod colors;
+mod devices;
 mod eq_ui;
 mod fades_ui;
 mod focus;
@@ -189,6 +190,12 @@ pub struct ProjectWindow {
     stop_twice: settings::StopTarget,
     /// Position, an der die Wiedergabe zuletzt begann.
     play_from: u64,
+    /// Gewählte Audio-Geräte (Einstellungen) und MIDI-Eingänge an/aus.
+    audio_choice: studiocraft_engine::DeviceChoice,
+    midi_inputs_on: bool,
+    device_dialog: devices::DeviceDialog,
+    /// Gerätewechsel, den die App ausführen soll.
+    device_request: Option<studiocraft_engine::DeviceChoice>,
     theme_installed: bool,
     /// Zuletzt an die Engine gemeldetes Tempo.
     sent_tempo: Option<studiocraft_project::TempoMap>,
@@ -287,6 +294,10 @@ impl ProjectWindow {
             return_on_stop: prefs.return_on_stop,
             stop_twice: prefs.stop_twice,
             play_from: 0,
+            audio_choice: prefs.audio.clone(),
+            midi_inputs_on: prefs.midi_inputs,
+            device_dialog: devices::DeviceDialog::default(),
+            device_request: None,
             theme_installed: false,
             sent_tempo: None,
             tempo_before: None,
@@ -453,6 +464,8 @@ impl ProjectWindow {
             theme: self.theme,
             return_on_stop: self.return_on_stop,
             stop_twice: self.stop_twice,
+            audio: self.audio_choice.clone(),
+            midi_inputs: self.midi_inputs_on,
         };
         if let Err(e) = s.save() {
             self.message = Some(format!("Einstellung nicht gespeichert: {e}"));
@@ -766,6 +779,7 @@ impl ProjectWindow {
         self.key_commands_dialog(ui.ctx());
         self.repeat_dialog(ui.ctx());
         self.fade_editor_dialog(ui.ctx());
+        self.device_dialog(ui.ctx());
 
         self.sync_tempo();
         let playing = self.is_playing();
@@ -2688,6 +2702,47 @@ mod tests {
         w.stop();
         run(&mut w, &mut core);
         assert!(w.cursor > 1920, "stays at the stop position: {}", w.cursor);
+    }
+
+    #[test]
+    fn render_device_dialog() {
+        shot("devices", |w| {
+            w.open_device_dialog();
+            w.device_dialog.choice.block_frames = Some(128);
+        });
+    }
+
+    #[test]
+    fn device_dialog_requests_a_switch_and_turns_midi_off() {
+        let (w, _) = one_event_window();
+        let mut h = window_harness(w);
+        h.get_by_label("Transport").click();
+        h.run_steps(2);
+        h.get_by_label("Audio- und MIDI-Geräte …").click();
+        h.run_steps(2);
+        assert!(h.state().device_dialog.open);
+        h.get_by_role_and_label(egui::accesskit::Role::ComboBox, "Blockgröße")
+            .click();
+        h.run_steps(2);
+        let rate = h.state().sample_rate();
+        let item = format!("128 ({:.1} ms)", devices::block_ms(128, rate));
+        h.get_by_label(&item).click();
+        h.run_steps(2);
+        h.get_by_label("Übernehmen").click();
+        h.run_steps(2);
+        let req = h.state_mut().take_device_request().unwrap();
+        assert_eq!(req.block_frames, Some(128));
+        assert_eq!(h.state().audio_choice().block_frames, Some(128));
+        assert!(h.state_mut().take_device_request().is_none(), "taken once");
+        h.state_mut()
+            .audio_switched(Ok("Test · Gerät · 48000 Hz · Block 128".into()));
+        h.run_steps(2);
+        h.get_by_label("Übernommen");
+        assert!(h.state().audio_status.contains("Block 128"));
+        h.get_by_label("MIDI-Eingänge").click();
+        h.run_steps(2);
+        assert!(!h.state().midi_inputs_on);
+        assert_eq!(h.state().midi_status, "MIDI: aus");
     }
 
     #[test]

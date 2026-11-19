@@ -16,9 +16,11 @@
 
 mod keypad;
 
-use std::{path::Path, process::ExitCode};
+use std::{path::Path, process::ExitCode, time::Duration};
 
-use studiocraft_engine::{PreparedOutput, engine};
+use studiocraft_engine::{
+    AudioOutput, DeviceChoice, EngineCore, OutputInfo, PreparedOutput, engine,
+};
 use studiocraft_project::{Project, file};
 use studiocraft_ui::ProjectWindow;
 
@@ -46,14 +48,97 @@ fn app_icon() -> egui::IconData {
 }
 
 struct App {
+    // Reihenfolge der Felder = Reihenfolge beim Aufräumen: erst das Fenster (es hält
+    // Plugin-Handles), dann der Kern mit den Plugin-Instanzen.
     window: ProjectWindow,
     /// Hält den Audio-Stream am Leben.
-    _audio: Option<studiocraft_engine::AudioOutput>,
+    audio: Option<AudioOutput>,
+    /// Kern ohne Stream, wenn ein Gerätewechsel scheiterte; wird nie nebenbei zerstört.
+    parked: Option<EngineCore>,
+    /// Ein verschwundenes Gerät nur einmal melden.
+    lost_reported: bool,
 }
 
 impl eframe::App for App {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         self.window.ui(ui);
+        if let Some(choice) = self.window.take_device_request() {
+            self.switch_audio(&choice);
+        }
+        if !self.lost_reported && self.audio.as_ref().is_some_and(AudioOutput::device_lost) {
+            self.lost_reported = true;
+            self.window.audio_lost();
+        }
+    }
+}
+
+/// Statuszeile für eine laufende Ausgabe.
+fn status_line(info: &OutputInfo) -> String {
+    let block = info
+        .block_frames
+        .map_or("Treiber".into(), |b| b.to_string());
+    format!(
+        "{} · {} · {} Hz · Block {block}",
+        info.host, info.device, info.sample_rate
+    )
+}
+
+impl App {
+    /// Wechselt das Audiogerät ohne Neustart: der laufende Kern (Song, Plugins, Transport)
+    /// zieht auf das neue Gerät um. Das geht nur mit derselben Abtastrate.
+    fn switch_audio(&mut self, choice: &DeviceChoice) {
+        let rate = self.window.sample_rate();
+        let want = DeviceChoice {
+            sample_rate: Some(rate),
+            ..choice.clone()
+        };
+        let prepared = match PreparedOutput::open_with(&want) {
+            Ok(p) => p,
+            Err(e) => return self.window.audio_switched(Err(e)),
+        };
+        let info = prepared.info.clone();
+        if info.sample_rate != rate {
+            return self.window.audio_switched(Err(format!(
+                "„{}“ läuft nicht mit {rate} Hz; die Wahl gilt nach einem Neustart",
+                info.device
+            )));
+        }
+        let core = match (self.parked.take(), self.audio.take()) {
+            (Some(core), audio) => {
+                self.audio = audio;
+                core
+            }
+            (None, Some(out)) => match out.take_core(Duration::from_millis(500)) {
+                Ok(core) => core,
+                Err(b) => {
+                    let (out, e) = *b;
+                    self.audio = Some(out);
+                    return self.window.audio_switched(Err(e));
+                }
+            },
+            (None, None) => {
+                return self.window.audio_switched(Err(
+                    "Ohne Audio gestartet; die Wahl gilt nach einem Neustart".into(),
+                ));
+            }
+        };
+        match prepared.start(core) {
+            Ok(out) => {
+                self.audio = Some(out);
+                self.lost_reported = false;
+                let mut status = status_line(&info);
+                if choice.sample_rate.is_some_and(|r| r != rate) {
+                    status.push_str(" (neue Abtastrate nach Neustart)");
+                }
+                self.window.audio_switched(Ok(status));
+            }
+            Err(b) => {
+                let (core, e) = *b;
+                self.parked = Some(core);
+                self.window
+                    .audio_switched(Err(format!("Gerätewechsel fehlgeschlagen: {e}")));
+            }
+        }
     }
 }
 
@@ -97,29 +182,48 @@ fn main() -> ExitCode {
         Project::default()
     };
 
-    let (transport, audio, status) = match PreparedOutput::open(host.as_deref(), 48_000) {
+    // Audio-Geräte aus den Einstellungen; ein Host von der Kommandozeile hat Vorrang.
+    let mut choice = studiocraft_ui::settings::Settings::load().audio;
+    if host.is_some() {
+        choice = DeviceChoice {
+            host: host.clone(),
+            ..DeviceChoice::default()
+        };
+    }
+    let wanted = DeviceChoice {
+        sample_rate: Some(choice.sample_rate.unwrap_or(48_000)),
+        ..choice.clone()
+    };
+    let mut note = None;
+    let prepared = PreparedOutput::open_with(&wanted).or_else(|e| {
+        // Gespeichertes Gerät fehlt: Standardgerät, mit Hinweis.
+        if wanted.output.is_none() {
+            return Err(e);
+        }
+        note = Some(e);
+        PreparedOutput::open_with(&DeviceChoice {
+            output: None,
+            ..wanted.clone()
+        })
+    });
+    let (transport, audio, status) = match prepared {
         Ok(prepared) => {
             let info = prepared.info.clone();
             let (core, ctl) = engine(info.sample_rate, project.tempo.clone());
             match prepared.start(core) {
-                Ok(out) => {
-                    let block = info
-                        .block_frames
-                        .map_or("Treiber".into(), |b| b.to_string());
-                    let status = format!(
-                        "{} · {} · {} Hz · Block {block}",
-                        info.host, info.device, info.sample_rate
-                    );
-                    (Some(ctl), Some(out), status)
-                }
-                Err(e) => (None, None, format!("Kein Audio: {e}")),
+                Ok(out) => (Some(ctl), Some(out), status_line(&info)),
+                // Beim Start gibt es noch keine Plugins: der Kern darf hier gehen.
+                Err(b) => (None, None, format!("Kein Audio: {}", b.1)),
             }
         }
         Err(e) => (None, None, format!("Kein Audio: {e}")),
     };
 
     let mut window = ProjectWindow::new(project, transport, status);
-    window.audio_host = host.clone();
+    window.set_audio_choice(choice);
+    if let Some(n) = note {
+        window.audio_switched(Err(format!("{n}; Standardgerät verwendet")));
+    }
     window.open_midi_inputs();
     for f in &files {
         let path = Path::new(f);
@@ -170,7 +274,9 @@ fn main() -> ExitCode {
         Box::new(move |_cc| {
             Ok(Box::new(App {
                 window,
-                _audio: audio,
+                audio,
+                parked: None,
+                lost_reported: false,
             }))
         }),
         &event_loop,

@@ -39,6 +39,6 @@ pub use input::{AudioInput, InputInfo, PreparedInput, Recorder, Recording};
 pub use inserts::{Insert, InsertChain};
 pub use meters::{MAX_METERED_TRACKS, Meters};
 pub use monitor::MonitorInput;
-pub use output::{AudioOutput, OutputInfo, PreparedOutput};
+pub use output::{AudioOutput, DeviceChoice, OutputInfo, PreparedOutput, device_names};
 pub use song::{PlayEvent, PlayNote, PlayTrack, Song};
 pub use transport::{Transport, TransportState};

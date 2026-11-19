@@ -176,6 +176,8 @@ Die Transportleiste unten im Projektfenster bedient Wiedergabe, Aufnahme und Loc
 
 **Punch:** Punch-In und Punch-Out an den Locatoren (Tasten I und O). Aufnahme startet bzw. endet dort automatisch, auch während laufender Wiedergabe.
 
+**Audio- und MIDI-Geräte:** Menü Transport → „Audio- und MIDI-Geräte …“: Host, Aus- und Eingang, Abtastrate, Blockgröße (mit Latenz) und MIDI-Eingänge an/aus. Die Wahl liegt in den Einstellungen. Ein Wechsel von Gerät oder Blockgröße gilt sofort, eine andere Abtastrate nach einem Neustart. Verschwindet das Gerät, meldet die Statuszeile es.
+
 **Vorzähler und Metronom:** Metronom an/aus mit C; Vorzähler in Takten einstellbar. Klick-Sound, Lautstärke und Ausgang sind Projekteinstellungen.
 
 **Aufnahmemodi**
