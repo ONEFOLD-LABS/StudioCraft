@@ -87,6 +87,8 @@ pub struct ProjectWindow {
     /// Offene Farbpalette (Klick auf die Farbleiste im Spurkopf) und ihr Alter in Bildern.
     color_popup: Option<(colors::Target, egui::Pos2)>,
     color_popup_age: u8,
+    /// Wiedergabe-Werkzeug bei gedrückter Maustaste (Spec „Werkzeuge“, Taste 9).
+    audition: Option<timeline::Audition>,
     /// Tastaturbelegung (Standard plus eigene Änderungen) und der Dialog dazu.
     keymap: keymap::Keymap,
     key_dialog: keymap::KeyDialog,
@@ -228,6 +230,7 @@ impl ProjectWindow {
             grid_zoom: false,
             color_popup: None,
             color_popup_age: 0,
+            audition: None,
             keymap: keymap::Keymap::default(),
             key_dialog: keymap::KeyDialog::default(),
             keypad: None,
@@ -3380,6 +3383,46 @@ mod tests {
             "{split:?}"
         );
         assert!(right.right() > 1350.0, "{right:?}");
+    }
+
+    #[test]
+    fn play_tool_auditions_scrubs_and_returns_the_cursor() {
+        let (mut w, _) = one_event_window();
+        w.tool = Tool::Play;
+        let bar = w.bar_ticks();
+        let mut h = window_harness(w);
+        let at = |h: &Harness<'_, ProjectWindow>, t: u64| {
+            let w = h.state();
+            let r = w.lanes_rect;
+            let x =
+                r.left() + ((t as f64 - w.view.scroll_ticks) / TPQ) as f32 * w.view.px_per_quarter;
+            egui::pos2(x, r.top() + w.view.row_h / 2.0)
+        };
+        let button = |pos, pressed| egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        let (a, b) = (at(&h, 2 * bar), at(&h, 3 * bar));
+        h.event(egui::Event::PointerMoved(a));
+        h.run_steps(1);
+        h.event(button(a, true));
+        h.run_steps(1);
+        let near = |x: u64, y: u64| x.abs_diff(y) < TPQ as u64 / 4;
+        assert!(
+            near(h.state().cursor, 2 * bar),
+            "press plays from the mouse"
+        );
+        for i in 1..=4 {
+            h.event(egui::Event::PointerMoved(a + (b - a) * (i as f32 / 4.0)));
+            h.run_steps(1);
+        }
+        assert!(near(h.state().cursor, 3 * bar), "dragging scrubs");
+        h.event(button(b, false));
+        h.run_steps(2);
+        assert_eq!(h.state().cursor, 0, "release returns the cursor");
+        assert!(h.state().audition.is_none());
     }
 
     #[test]

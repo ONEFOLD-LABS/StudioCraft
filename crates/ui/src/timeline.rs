@@ -57,6 +57,17 @@ impl View {
     }
 }
 
+/// Zustand des Wiedergabe-Werkzeugs, solange die Maustaste gedrückt ist.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Audition {
+    /// Cursor vor dem Drücken; ohne laufende Wiedergabe kehrt er beim Loslassen dorthin zurück.
+    cursor_before: u64,
+    /// Lief die Wiedergabe schon? Dann läuft sie nach dem Loslassen weiter.
+    was_playing: bool,
+    /// Mausposition des letzten Sprungs; erst nach 2 px Bewegung wird neu positioniert.
+    last_x: f32,
+}
+
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum Drag {
     /// Punkt `idx` der Automationsspur `lane` (Index in `Track::automation`) ziehen.
@@ -730,6 +741,9 @@ fn interact(w: &mut ProjectWindow, ui: &Ui, resp: &egui::Response, g: &Geo) {
     if resp.clicked() || resp.drag_started() {
         w.key_editor.focused = false;
     }
+    if audition(w, ui, resp, g) {
+        return;
+    }
     // Doppelklick auf einen Fade-Griff öffnet den Kurveneditor.
     let fade_hit = resp
         .double_clicked()
@@ -817,6 +831,58 @@ fn interact(w: &mut ProjectWindow, ui: &Ui, resp: &egui::Response, g: &Geo) {
             Some(Zone::FadeIn | Zone::FadeOut) => ui.ctx().set_cursor_icon(egui::CursorIcon::Grab),
             Some(Zone::Gain) => ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeVertical),
             _ => {}
+        }
+    }
+}
+
+/// Wiedergabe-Werkzeug (Spec „Werkzeuge“, Taste 9): Drücken spielt ab der Mausposition,
+/// Ziehen scrubbt (der Cursor folgt der Maus), Loslassen hält an und setzt den Cursor
+/// zurück. Lief die Wiedergabe schon, springt sie nur und läuft weiter. Gibt `true` zurück,
+/// solange das Werkzeug die Maus für sich beansprucht.
+fn audition(w: &mut ProjectWindow, ui: &Ui, resp: &egui::Response, g: &Geo) -> bool {
+    if w.tool != Tool::Play && w.audition.is_none() {
+        return false;
+    }
+    let (pressed, down, pos) = ui.input(|i| {
+        (
+            i.pointer.primary_pressed(),
+            i.pointer.primary_down(),
+            i.pointer.interact_pos(),
+        )
+    });
+    match w.audition {
+        None => {
+            let Some(p) = pos.filter(|p| pressed && resp.hovered() && g.lanes.contains(*p)) else {
+                return false;
+            };
+            let was_playing = w.is_playing();
+            w.audition = Some(Audition {
+                cursor_before: w.cursor,
+                was_playing,
+                last_x: p.x,
+            });
+            w.locate(g.ticks(p.x).max(0.0) as u64);
+            if !was_playing {
+                w.play();
+            }
+            true
+        }
+        Some(a) if down => {
+            if let Some(p) = pos
+                && (p.x - a.last_x).abs() >= 2.0
+            {
+                w.locate(g.ticks(p.x).max(0.0) as u64);
+                w.audition = Some(Audition { last_x: p.x, ..a });
+            }
+            true
+        }
+        Some(a) => {
+            w.audition = None;
+            if !a.was_playing {
+                w.stop_transport();
+                w.locate(a.cursor_before);
+            }
+            true
         }
     }
 }
@@ -1317,12 +1383,8 @@ fn click(w: &mut ProjectWindow, g: &Geo, p: Pos2, mods: egui::Modifiers) {
             let f = if mods.alt { 1.0 / 1.5 } else { 1.5 };
             w.view.zoom(f, Some(p.x - g.lanes.left()));
         }
-        (Tool::Play, _) => {
-            w.locate(w.snap_ticks(ticks));
-            if !w.is_playing() {
-                w.toggle_play();
-            }
-        }
+        // Wiedergabe-Werkzeug: läuft über Drücken und Loslassen, siehe `audition`.
+        (Tool::Play, _) => {}
         _ => {}
     }
 }
