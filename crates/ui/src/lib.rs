@@ -3543,6 +3543,86 @@ mod tests {
     }
 
     #[test]
+    fn renders_key_editor_with_several_parts() {
+        shot("key-editor-parts", |w| {
+            let row = w
+                .project
+                .add_track(TrackKind::Instrument, String::from("Synth"));
+            let mut ids = Vec::new();
+            for (k, name) in ["Strophe", "Refrain"].iter().enumerate() {
+                let id = w.project.create_event(row, k as u64 * 3840, 3840).unwrap();
+                let ev = w.project.event_mut(id).unwrap();
+                ev.name = (*name).into();
+                ev.notes = (0..4)
+                    .map(|i| studiocraft_project::Note {
+                        pitch: 60 + 2 * i as u8 + 5 * k as u8,
+                        velocity: 100,
+                        start: i * 960,
+                        length: 720,
+                    })
+                    .collect();
+                ids.push(id);
+            }
+            w.open_key_editor_parts(&ids);
+        });
+    }
+
+    #[test]
+    fn several_parts_open_together_one_active() {
+        let mut p = Project::default();
+        let t = p.add_track(TrackKind::Instrument, "Synth");
+        let a = p.create_event(t, 0, 3840).unwrap();
+        let b = p.create_event(t, 3840, 3840).unwrap();
+        p.event_mut(a).unwrap().name = "Strophe".into();
+        p.event_mut(b).unwrap().name = "Refrain".into();
+        for (id, pitch) in [(a, 60), (b, 67)] {
+            p.event_mut(id).unwrap().notes = vec![studiocraft_project::Note {
+                pitch,
+                velocity: 100,
+                start: 0,
+                length: 960,
+            }];
+        }
+        let mut w = ProjectWindow::new(p, None, String::new());
+        w.selection = vec![a, b];
+        w.open_key_editor_from_selection(b);
+        assert_eq!(w.key_editor.part, Some(b), "the clicked part is active");
+        assert_eq!(w.key_editor.open.len(), 2);
+        let mut h = window_harness(w);
+        h.run_steps(2);
+        // Tabs switch the active part.
+        h.get_by_label("Strophe").click();
+        h.run_steps(2);
+        assert_eq!(h.state().key_editor.part, Some(a));
+        // A click on the dimmed note of the other part makes that part active and selects it.
+        let pos = {
+            let s = h.state();
+            let g = s.key_editor.grid_rect;
+            let v = s.key_editor.view;
+            let x = g.left() + ((3840.0 + 480.0 - v.scroll_ticks) / TPQ) as f32 * v.px_per_quarter;
+            let y = g.top() + (127 - 67) as f32 * v.key_h - v.scroll_y + v.key_h / 2.0;
+            egui::pos2(x, y)
+        };
+        h.event(egui::Event::PointerMoved(pos));
+        h.run_steps(1);
+        for pressed in [true, false] {
+            h.event(egui::Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            });
+        }
+        h.run_steps(2);
+        assert_eq!(h.state().key_editor.part, Some(b));
+        assert_eq!(h.state().key_editor.selection, vec![0]);
+        // A single part opens alone again.
+        h.state_mut().selection = vec![a];
+        h.state_mut().open_key_editor_from_selection(a);
+        assert_eq!(h.state().key_editor.open, vec![a]);
+    }
+
+    #[test]
     fn shift_arrows_transpose_by_an_octave_also_in_the_editor_window() {
         let (w, part) = key_editor_window();
         let mut h = window_harness(w);

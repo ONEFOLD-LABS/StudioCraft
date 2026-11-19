@@ -820,7 +820,7 @@ fn interact(w: &mut ProjectWindow, ui: &Ui, resp: &egui::Response, g: &Geo) {
         )
         && let Some(id) = hit_event(w, g, row, p.y, g.ticks(p.x).max(0.0) as u64)
     {
-        w.open_key_editor(id);
+        w.open_key_editor_from_selection(id);
         return;
     }
 
