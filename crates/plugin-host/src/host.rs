@@ -2,7 +2,7 @@
 //!
 //! Je Instanz gibt es gemeinsame Daten ([`HostShared`]); `clap_host.host_data`
 //! zeigt darauf. Timer und Dateideskriptoren werden im UI-Takt bedient
-//! (siehe `PluginHandle::idle`), wie es Plugin-GUIs unter Linux brauchen.
+//! (siehe `ClapHandle::idle`), wie es Plugin-GUIs unter Linux brauchen.
 
 use std::{
     ffi::{CStr, c_char, c_void},

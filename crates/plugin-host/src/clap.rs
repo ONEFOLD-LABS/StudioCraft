@@ -190,6 +190,7 @@ impl Library {
             (0..count(f))
                 .filter_map(|i| get(f, i).as_ref())
                 .map(|d| PluginInfo {
+                    format: crate::scan::PluginFormat::Clap,
                     id: cstr(d.id),
                     name: cstr(d.name),
                     vendor: cstr(d.vendor),
@@ -308,14 +309,14 @@ unsafe extern "C" fn out_push(_: *const clap_output_events, _: *const clap_event
 /// CLAP erlaubt Hauptthread-Funktionen, während der Audio-Thread verarbeitet.
 /// Vertrag: Der Griff muss freigegeben sein, bevor die Instanz zerstört wird
 /// (StudioCraft gibt Griffe frei, bevor es eine Kette austauscht).
-pub struct PluginHandle {
+pub struct ClapHandle {
     pub(crate) plugin: *const clap_plugin,
     _lib: Arc<Library>,
     pub(crate) shared: Arc<HostShared>,
     pub(crate) gui: crate::gui::GuiState,
 }
 
-impl Drop for PluginHandle {
+impl Drop for ClapHandle {
     fn drop(&mut self) {
         // Fenster vor der Instanz schließen (Vertrag: Griff stirbt zuerst).
         self.close_gui();
@@ -351,7 +352,7 @@ unsafe extern "C" fn istream_read(stream: *const clap_istream, buf: *mut c_void,
     }
 }
 
-impl PluginHandle {
+impl ClapHandle {
     /// Erweiterung des Plugins oder null.
     pub(crate) fn extension<T>(&self, id: &CStr) -> *const T {
         // SAFETY: `plugin` lebt (Vertrag oben).
@@ -567,9 +568,9 @@ impl ClapInstance {
         Ok(inst)
     }
 
-    /// Griff für Hauptthread-Aufrufe (siehe [`PluginHandle`]).
-    pub fn handle(&self) -> PluginHandle {
-        PluginHandle {
+    /// Griff für Hauptthread-Aufrufe (siehe [`ClapHandle`]).
+    pub fn handle(&self) -> ClapHandle {
+        ClapHandle {
             plugin: self.plugin,
             _lib: self._lib.clone(),
             shared: self.shared.clone(),

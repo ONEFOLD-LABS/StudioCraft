@@ -2587,6 +2587,7 @@ mod tests {
 
     fn fake_plugin(id: &str, name: &str, instrument: bool) -> studiocraft_plugin_host::PluginInfo {
         studiocraft_plugin_host::PluginInfo {
+            format: studiocraft_plugin_host::PluginFormat::Clap,
             id: id.into(),
             name: name.into(),
             vendor: String::new(),

@@ -155,6 +155,7 @@ fn parse_child(text: &str, path: &Path) -> Option<Outcome> {
             [DONE] => done = true,
             ["E", msg] => error = Some(unescape(msg)),
             ["P", id, name, vendor, version, features] => plugins.push(PluginInfo {
+                format: crate::scan::PluginFormat::Clap,
                 id: unescape(id),
                 name: unescape(name),
                 vendor: unescape(vendor),
@@ -399,6 +400,7 @@ mod tests {
 
     fn info(id: &str, name: &str) -> PluginInfo {
         PluginInfo {
+            format: crate::scan::PluginFormat::Clap,
             id: id.into(),
             name: name.into(),
             vendor: "V\tx".into(),

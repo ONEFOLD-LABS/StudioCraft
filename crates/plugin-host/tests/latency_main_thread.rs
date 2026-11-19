@@ -5,7 +5,7 @@
 //! STUDIOCRAFT_LATENCY_TEST=1 cargo test -p studiocraft-plugin-host --test latency_main_thread
 //! ```
 
-use studiocraft_plugin_host::{ClapInstance, MAX_LATENCY, default_paths, scan};
+use studiocraft_plugin_host::{MAX_LATENCY, PluginInstance, default_paths, scan};
 
 fn main() {
     if std::env::var_os("STUDIOCRAFT_LATENCY_TEST").is_none() {
@@ -15,7 +15,7 @@ fn main() {
     let plugins = scan(&default_paths()).0;
     let mut with_latency = 0;
     for info in plugins.iter().take(200) {
-        let Ok(inst) = ClapInstance::new(info, 48_000, 512) else {
+        let Ok(inst) = PluginInstance::new(info, 48_000, 512) else {
             continue;
         };
         let h = inst.handle();
