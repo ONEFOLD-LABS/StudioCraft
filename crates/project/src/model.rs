@@ -547,6 +547,31 @@ impl Project {
         Some((before, total))
     }
 
+    /// Snap-Modus „Schieben“: Das Event wandert innerhalb seiner Spur an die Stelle, an der
+    /// seine Mitte bei `new_start` läge. Die Events zwischen alter und neuer Stelle rücken ohne
+    /// Lücke zusammen, beginnend am Anfang des frühesten von ihnen. Andere Events bleiben.
+    /// Gibt zurück, ob sich die Reihenfolge geändert hat.
+    pub fn shuffle_event(&mut self, id: EventId, new_start: u64) -> bool {
+        let Some((t, from)) = self.find(id) else {
+            return false;
+        };
+        let events = &mut self.tracks[t].events;
+        let ev = events.remove(from);
+        let mid = new_start.saturating_add(ev.length / 2);
+        let to = events.partition_point(|e| e.start.0.saturating_add(e.length / 2) < mid);
+        events.insert(to, ev);
+        if to == from {
+            return false;
+        }
+        let (a, b) = (from.min(to), from.max(to));
+        let mut pos = events[a..=b].iter().map(|e| e.start.0).min().unwrap_or(0);
+        for e in &mut events[a..=b] {
+            e.start = Position(pos);
+            pos = pos.saturating_add(e.length);
+        }
+        true
+    }
+
     /// Verschiebt den Anfang eines Events (Länge ändern am linken Rand).
     /// Bei Audio bleibt der Inhalt an seiner Stelle; der Offset wandert mit.
     pub fn trim_start(&mut self, id: EventId, new_start: u64) -> bool {
@@ -855,6 +880,28 @@ impl Project {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn shuffle_swaps_neighbours_without_gaps() {
+        let mut p = Project::default();
+        let t = p.add_track(TrackKind::Audio, "A");
+        let a = p.create_event(t, 0, 960).expect("a");
+        let b = p.create_event(t, 1920, 480).expect("b");
+        let c = p.create_event(t, 2400, 960).expect("c");
+        let far = p.create_event(t, 9600, 960).expect("far");
+        // Drop A behind B: B moves to 0, A follows directly.
+        assert!(p.shuffle_event(a, 2000));
+        let order: Vec<(EventId, u64)> = p.tracks[t]
+            .events
+            .iter()
+            .map(|e| (e.id, e.start.0))
+            .collect();
+        assert_eq!(order, [(b, 0), (a, 480), (c, 2400), (far, 9600)]);
+        // Dropping in place changes nothing.
+        assert!(!p.shuffle_event(c, 2400));
+        assert!(!p.shuffle_event(12345, 0));
+    }
+
     use super::*;
 
     fn one_event() -> (Project, EventId) {

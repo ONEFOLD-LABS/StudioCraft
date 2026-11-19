@@ -1,7 +1,7 @@
 //! Werkzeuge und Raster (Spec-Abschnitte „Werkzeuge“ und „Raster, Snap und Bearbeitung“).
 
 use egui::Key;
-use studiocraft_project::{Project, QuantizeValue};
+use studiocraft_project::{Project, QuantizeValue, TICKS_PER_QUARTER};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Tool {
@@ -100,34 +100,134 @@ impl Tool {
     }
 }
 
+/// Wohin eingerastet wird (Spec „Raster, Snap und Bearbeitung“ → Snap-Modi).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SnapMode {
+    Grid,
+    GridRelative,
+    Events,
+    Cursor,
+    GridCursor,
+    EventsCursor,
+    EventsGridCursor,
+    Shuffle,
+}
+
+impl SnapMode {
+    pub const ALL: [SnapMode; 8] = [
+        SnapMode::Grid,
+        SnapMode::GridRelative,
+        SnapMode::Events,
+        SnapMode::Cursor,
+        SnapMode::GridCursor,
+        SnapMode::EventsCursor,
+        SnapMode::EventsGridCursor,
+        SnapMode::Shuffle,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            SnapMode::Grid => "Raster",
+            SnapMode::GridRelative => "Raster relativ",
+            SnapMode::Events => "Events",
+            SnapMode::Cursor => "Cursor",
+            SnapMode::GridCursor => "Raster + Cursor",
+            SnapMode::EventsCursor => "Events + Cursor",
+            SnapMode::EventsGridCursor => "Events + Raster + Cursor",
+            SnapMode::Shuffle => "Schieben",
+        }
+    }
+
+    /// Rastet auf Rasterlinien ein.
+    pub fn uses_grid(self) -> bool {
+        matches!(
+            self,
+            SnapMode::Grid
+                | SnapMode::GridRelative
+                | SnapMode::GridCursor
+                | SnapMode::EventsGridCursor
+                | SnapMode::Shuffle
+        )
+    }
+
+    /// Rastet auf Anfang und Ende anderer Events ein.
+    pub fn uses_events(self) -> bool {
+        matches!(
+            self,
+            SnapMode::Events | SnapMode::EventsCursor | SnapMode::EventsGridCursor
+        )
+    }
+
+    /// Rastet auf den Projekt-Cursor ein.
+    pub fn uses_cursor(self) -> bool {
+        matches!(
+            self,
+            SnapMode::Cursor
+                | SnapMode::GridCursor
+                | SnapMode::EventsCursor
+                | SnapMode::EventsGridCursor
+        )
+    }
+}
+
+/// Bildrate des Raster-Typs „Frames“, bis das Projekt eine eigene Bildrate hat.
+pub const FRAMES_PER_SECOND: f64 = 25.0;
+
 /// Raster-Typ für Snap. „Quantisierung verwenden“ folgt dem globalen Quantisierungswert.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Grid {
     Bar,
     Beat,
     UseQuantize,
+    Seconds,
+    Frames,
+    Samples,
 }
 
 impl Grid {
-    pub const ALL: [Grid; 3] = [Grid::Bar, Grid::Beat, Grid::UseQuantize];
+    pub const ALL: [Grid; 6] = [
+        Grid::Bar,
+        Grid::Beat,
+        Grid::UseQuantize,
+        Grid::Seconds,
+        Grid::Frames,
+        Grid::Samples,
+    ];
 
     pub fn label(self) -> &'static str {
         match self {
             Grid::Bar => "Takt",
             Grid::Beat => "Zählzeit",
             Grid::UseQuantize => "Quantisierung verwenden",
+            Grid::Seconds => "Sekunden",
+            Grid::Frames => "Frames (25 fps)",
+            Grid::Samples => "Samples",
         }
     }
 
-    /// Rasterabstand in Ticks, nie 0.
-    pub fn ticks(self, project: &Project, quantize: QuantizeValue) -> u64 {
+    /// Musikalisches Raster (Takt, Zählzeit, Quantisierung), das „An Zoom anpassen“ teilt.
+    pub fn is_musical(self) -> bool {
+        matches!(self, Grid::Bar | Grid::Beat | Grid::UseQuantize)
+    }
+
+    /// Rasterabstand in Ticks (nicht ganzzahlig bei Sekunden, Frames und Samples), stets > 0.
+    pub fn step(self, project: &Project, quantize: QuantizeValue, sample_rate: u32) -> f64 {
         let sig = project.tempo.signature;
-        let t = match self {
-            Grid::Bar => sig.bar_ticks(),
-            Grid::Beat => sig.beat_ticks(),
-            Grid::UseQuantize => quantize.ticks(),
+        let bpm = if project.tempo.bpm.is_finite() && project.tempo.bpm > 0.0 {
+            project.tempo.bpm
+        } else {
+            120.0
         };
-        t.max(1)
+        let per_second = bpm / 60.0 * TICKS_PER_QUARTER as f64;
+        let t = match self {
+            Grid::Bar => sig.bar_ticks() as f64,
+            Grid::Beat => sig.beat_ticks() as f64,
+            Grid::UseQuantize => quantize.ticks() as f64,
+            Grid::Seconds => per_second,
+            Grid::Frames => per_second / FRAMES_PER_SECOND,
+            Grid::Samples => per_second / f64::from(sample_rate.max(1)),
+        };
+        if t.is_finite() && t > 0.0 { t } else { 1.0 }
     }
 }
 

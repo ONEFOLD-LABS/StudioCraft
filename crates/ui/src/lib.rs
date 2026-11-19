@@ -17,6 +17,7 @@ mod routing;
 mod session;
 pub mod settings;
 mod shortcuts;
+mod snap;
 pub mod theme;
 mod timeline;
 mod tools;
@@ -51,7 +52,10 @@ pub struct ProjectWindow {
     pub audio_status: String,
     tool: Tool,
     snap: bool,
+    snap_mode: tools::SnapMode,
     grid: Grid,
+    /// „An Zoom anpassen“: musikalisches Raster beim Einzoomen verfeinern.
+    grid_zoom: bool,
     /// Globaler Quantisierungswert mit Swing und Stärke (Taste Q).
     quantize: studiocraft_project::Quantize,
     /// Quantisierungs-Panel offen.
@@ -154,7 +158,9 @@ impl ProjectWindow {
             audio_status,
             tool: Tool::Select,
             snap: true,
+            snap_mode: tools::SnapMode::Grid,
             grid: Grid::Beat,
+            grid_zoom: false,
             quantize: studiocraft_project::Quantize::default(),
             show_quantize: false,
             show_inspector: true,
@@ -255,20 +261,6 @@ impl ProjectWindow {
     fn toggle_cycle(&mut self) {
         self.cycle = !self.cycle;
         self.send(Command::ToggleCycle);
-    }
-
-    /// Rasterabstand des Snap-Rasters in Ticks.
-    pub(crate) fn grid_ticks(&self) -> u64 {
-        self.grid.ticks(&self.project, self.quantize.value)
-    }
-
-    pub(crate) fn snap_ticks(&self, ticks: f64) -> u64 {
-        let t = ticks.max(0.0);
-        if !self.snap {
-            return t.round() as u64;
-        }
-        let g = self.grid_ticks() as f64;
-        ((t / g).round() * g) as u64
     }
 
     /// Lädt eine WAV-Datei in den Pool und legt ein Event an. Ohne Ziel
@@ -809,16 +801,7 @@ impl ProjectWindow {
             if icon_button(ui, Icon::Snap, self.snap, Some(t.accent), "Snap an/aus (J)").clicked() {
                 self.snap = !self.snap;
             }
-            egui::ComboBox::from_id_salt("raster")
-                .selected_text(self.grid.label())
-                .width(90.0)
-                .show_ui(ui, |ui| {
-                    for g in Grid::ALL {
-                        ui.selectable_value(&mut self.grid, g, g.label());
-                    }
-                })
-                .response
-                .on_hover_text("Raster");
+            snap::toolbar(self, ui);
             quantize::toolbar(self, ui);
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if icon_button(
@@ -1329,6 +1312,37 @@ mod tests {
             .build_ui_state(|ui, w: &mut ProjectWindow| w.ui(ui), w);
         h.run_steps(2);
         h
+    }
+
+    #[test]
+    fn shuffle_mode_swaps_events_by_dragging() {
+        let mut p = Project::default();
+        let t = p.add_track(TrackKind::Audio, "A");
+        let mut w = ProjectWindow::new(p, None, String::new());
+        let (bar, beat) = (w.bar_ticks(), w.beat_ticks());
+        let a = w.project.create_event(t, 0, bar).unwrap();
+        let b = w.project.create_event(t, bar, 2 * beat).unwrap();
+        w.snap_mode = tools::SnapMode::Shuffle;
+        w.view.scroll_ticks = 0.0;
+        let mut h = window_harness(w);
+        drag(&mut h, (bar / 2, 0.8), (bar / 2 + bar + beat, 0.8), 0.0);
+        let order: Vec<(EventId, u64)> = h.state().project.tracks[t]
+            .events
+            .iter()
+            .map(|e| (e.id, e.start.0))
+            .collect();
+        assert_eq!(order, [(b, 0), (a, 2 * beat)]);
+        h.state_mut().undo();
+        assert_eq!(h.state().project.event(a).map(|e| e.start.0), Some(0));
+    }
+
+    #[test]
+    fn renders_snap_mode_menu() {
+        shot("snap-modus", |w| {
+            w.snap_mode = tools::SnapMode::EventsGridCursor;
+            w.grid = Grid::Frames;
+            w.grid_zoom = true;
+        });
     }
 
     #[test]

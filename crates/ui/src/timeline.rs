@@ -510,7 +510,7 @@ fn move_delta(
     let new_start = if no_snap {
         raw.max(0.0).round() as u64
     } else {
-        w.snap_ticks(raw)
+        w.snap_move(raw, ev.length, ev.start.0)
     };
     let target_row = g
         .row_at(p.y.clamp(g.lanes.top(), g.lanes.bottom() - 1.0))
@@ -551,6 +551,19 @@ fn finish_drag(w: &mut ProjectWindow, g: &Geo, d: Drag, p: Pos2, mods: egui::Mod
                 return;
             }
             let copy = mods.command;
+            // Snap-Modus „Schieben“: ein Event innerhalb seiner Spur, die Nachbarn rücken nach.
+            if w.snap
+                && w.snap_mode == crate::tools::SnapMode::Shuffle
+                && !mods.alt
+                && !copy
+                && drow == 0
+                && let [only] = w.selection[..]
+                && let Some(ev) = w.project.event(only)
+            {
+                let start = (ev.start.0 as i64 + dt).max(0) as u64;
+                w.project.shuffle_event(only, start);
+                return;
+            }
             let mut new_sel = Vec::new();
             for sel in w.selection.clone() {
                 let Some((t, _)) = w.project.find(sel) else {
