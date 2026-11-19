@@ -42,6 +42,15 @@ impl Project {
         }
 
         fix(self.layout.sanitize());
+        clamp!(self.pre_fader_inserts, self.pre_fader_inserts.min(8));
+        for t in &mut self.tracks {
+            let (lo, hi) = crate::model::INPUT_GAIN_DB;
+            clamp!(t.input_gain_db, finite_f32(t.input_gain_db, (lo, hi), 0.0));
+            let (flo, fhi) = crate::model::PRE_FILTER_HZ;
+            let fix_hz = |v: Option<f32>| v.filter(|f| f.is_finite()).map(|f| f.clamp(flo, fhi));
+            clamp!(t.pre_hpf, fix_hz(t.pre_hpf));
+            clamp!(t.pre_lpf, fix_hz(t.pre_lpf));
+        }
         if self.mixer_views.len() > crate::MAX_MIXER_VIEWS {
             self.mixer_views.truncate(crate::MAX_MIXER_VIEWS);
             fix(true);
