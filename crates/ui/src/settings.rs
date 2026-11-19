@@ -22,7 +22,14 @@ pub struct Settings {
     pub midi_inputs: bool,
     /// Lage der eigenen Fenster (Mixer, Editor).
     pub windows: WindowRects,
+    /// Automatische Sicherung: Abstand in Minuten (0 = aus) und Anzahl der Sicherungen.
+    pub autosave_minutes: u32,
+    pub autosave_keep: u32,
 }
+
+/// Vorgaben der automatischen Sicherung.
+pub const AUTOSAVE_MINUTES: u32 = 5;
+pub const AUTOSAVE_KEEP: u32 = 10;
 
 /// Lage eines eigenen Fensters: Position (fehlt, wo das System sie nicht verrät, etwa unter
 /// Wayland) und Innengröße in Punkten.
@@ -76,6 +83,8 @@ impl Default for Settings {
             audio: DeviceChoice::default(),
             midi_inputs: true,
             windows: WindowRects::default(),
+            autosave_minutes: AUTOSAVE_MINUTES,
+            autosave_keep: AUTOSAVE_KEEP,
         }
     }
 }
@@ -90,6 +99,8 @@ struct File {
     audio: AudioFile,
     midi_inputs: bool,
     windows: WindowRects,
+    autosave_minutes: u32,
+    autosave_keep: u32,
 }
 
 #[derive(Default, serde::Serialize, serde::Deserialize)]
@@ -170,6 +181,8 @@ impl Settings {
             },
             midi_inputs: self.midi_inputs,
             windows: self.windows,
+            autosave_minutes: self.autosave_minutes,
+            autosave_keep: self.autosave_keep,
         }
     }
 
@@ -198,6 +211,8 @@ impl Settings {
                 mixer: f.windows.mixer.and_then(WindowRect::sanitized),
                 editor: f.windows.editor.and_then(WindowRect::sanitized),
             },
+            autosave_minutes: f.autosave_minutes.min(120),
+            autosave_keep: f.autosave_keep.clamp(1, 100),
         }
     }
 
@@ -246,6 +261,8 @@ mod tests {
                 }),
                 editor: None,
             },
+            autosave_minutes: 2,
+            autosave_keep: 20,
         };
         s.save().unwrap();
         assert_eq!(Settings::load(), s);
@@ -253,6 +270,10 @@ mod tests {
         std::fs::write(d.join("settings.json"), "{\n  \"theme\": \"light\"\n}\n").unwrap();
         let old = Settings::load();
         assert_eq!(old.theme, ThemePreference::Light);
+        assert_eq!(
+            (old.autosave_minutes, old.autosave_keep),
+            (AUTOSAVE_MINUTES, AUTOSAVE_KEEP)
+        );
         assert!(!old.return_on_stop && old.midi_inputs);
         assert_eq!(old.audio, DeviceChoice::default());
         // Hostile values fall back.
