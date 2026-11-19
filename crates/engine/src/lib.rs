@@ -20,6 +20,7 @@ pub mod automation;
 pub mod clip;
 pub mod clock;
 pub mod core;
+pub mod delay;
 pub mod eq;
 pub mod export;
 pub mod input;

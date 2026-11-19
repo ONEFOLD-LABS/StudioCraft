@@ -226,6 +226,8 @@ Der Mixer zeigt zu jeder Spur mit Kanal einen Kanalzug, links Eingänge, rechts 
 7. Sends 1–8, je Pre- oder Post-Fader, mit eigenem Pegel und Ziel (FX-Kanal oder Gruppe)
 8. Ausgang (Bus oder Gruppe)
 
+**Latenzausgleich:** Plugins melden ihre Latenz (CLAP `latency`, auch wenn sie sich ändert). Jeder Weg – Spur zum Ausgang oder zur Gruppe, Send zum FX-Kanal, Gruppe und FX-Kanal zum Ausgang – wird so verzögert, dass alles gleichzeitig am Ausgang ankommt. Die Latenz einer Spur steht im Inspector unter Inserts, der gesamte Ausgleich im Menü Transport. „Latenzausgleich begrenzen“ (Menü Transport) umgeht bei aufnahmebereiten und mitgehörten Spuren Plugins mit mehr als 256 Samples Latenz, ohne das Projekt zu ändern.
+
 Die Insert-Aufteilung Pre/Post ist eine Projekt-Voreinstellung; jeder Slot ist einzeln schaltbar (an/aus, Bypass).
 
 **Kanalzug-Elemente**

@@ -448,6 +448,24 @@ impl ProjectWindow {
             self.save_settings();
         }
         ui.separator();
+        let mut constrain = self.latency.constrain;
+        if ui
+            .checkbox(&mut constrain, "Latenzausgleich begrenzen")
+            .on_hover_text(
+                "Bei Aufnahme und Mithören: Plugins mit hoher Latenz auf diesen Spuren umgehen",
+            )
+            .changed()
+        {
+            self.latency.constrain = constrain;
+            self.dirty = true;
+        }
+        let total = self.latency.sent.total;
+        if total > 0 {
+            ui.label(
+                egui::RichText::new(format!("Ausgleich: {}", self.latency_text(total))).weak(),
+            );
+        }
+        ui.separator();
         if ui.button("Audio- und MIDI-Geräte …").clicked() {
             self.open_device_dialog();
             ui.close();

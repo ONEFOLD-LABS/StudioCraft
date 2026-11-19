@@ -35,6 +35,9 @@ pub enum Command {
     SetMidiTarget(Option<usize>),
     /// Insert umgehen oder wieder einschalten: Spur, Slot, umgangen.
     SetBypass(usize, usize, bool),
+    /// Verzögerungen für den Latenzausgleich (im Hauptthread angelegt); die alten gehen über
+    /// die Rückgabe-Queue zurück. Dazu die Latenz am Ausgang in Frames.
+    SetDelays(Box<crate::delay::DelayBank>, u32),
     /// Neue Abspielliste. Die alte geht über die Rückgabe-Queue an die
     /// Oberfläche zurück und wird dort freigegeben, nicht im Audio-Thread.
     SetSong(Arc<Song>),
@@ -84,6 +87,8 @@ pub struct EngineStatus {
     count_in: AtomicU64,
     /// Die letzte Aufnahme hat wirklich begonnen (nach einem Vorzähler erst an seinem Ende).
     rec_started: AtomicBool,
+    /// Latenz am Ausgang durch Plugins (Frames, mit Latenzausgleich).
+    latency: AtomicU32,
 }
 
 impl EngineStatus {
@@ -123,6 +128,10 @@ impl EngineStatus {
     pub fn rec_started(&self) -> bool {
         self.rec_started.load(Ordering::Relaxed)
     }
+    /// Latenz am Ausgang durch Plugins in Frames.
+    pub fn latency(&self) -> u32 {
+        self.latency.load(Ordering::Relaxed)
+    }
 }
 
 /// Seite der Oberfläche: sendet Befehle, liest Status, rechnet Positionen um.
@@ -132,6 +141,7 @@ pub struct EngineControl {
     plugin_garbage: rtrb::Consumer<Box<InsertChain>>,
     monitor_garbage: rtrb::Consumer<Box<MonitorInput>>,
     preview_garbage: rtrb::Consumer<Arc<[f32]>>,
+    delay_garbage: rtrb::Consumer<Box<crate::delay::DelayBank>>,
     /// Schreibzugang für MIDI-Eingänge (Keyboard).
     pub midi: MidiSender,
     /// Während der Aufnahme gespielte Noten (vom Audio-Thread).
@@ -166,6 +176,7 @@ impl EngineControl {
         while self.plugin_garbage.pop().is_ok() {}
         while self.monitor_garbage.pop().is_ok() {}
         while self.preview_garbage.pop().is_ok() {}
+        while self.delay_garbage.pop().is_ok() {}
     }
 
     pub fn frames(&self, pos: Position) -> u64 {
@@ -197,6 +208,11 @@ pub struct EngineCore {
     /// Vorhören: Samples und Leseposition in Samples.
     preview: Option<(Arc<[f32]>, usize)>,
     preview_garbage: rtrb::Producer<Arc<[f32]>>,
+    delay_garbage: rtrb::Producer<Box<crate::delay::DelayBank>>,
+    /// Latenzausgleich je Projektspur.
+    delays: Box<crate::delay::DelayBank>,
+    /// Puffer für verzögerte Sends.
+    send_tmp: Box<[f32]>,
     midi_in: rtrb::Consumer<MidiMsg>,
     midi_rec: rtrb::Producer<RecordedMidi>,
     midi_target: Option<usize>,
@@ -260,6 +276,7 @@ pub fn engine(sample_rate: u32, tempo: TempoMap) -> (EngineCore, EngineControl) 
     let (plugin_tx, plugin_rx) = rtrb::RingBuffer::new(64);
     let (monitor_tx, monitor_rx) = rtrb::RingBuffer::new(4);
     let (preview_tx, preview_rx) = rtrb::RingBuffer::new(16);
+    let (delay_tx, delay_rx) = rtrb::RingBuffer::new(16);
     let (midi_tx, midi_rx) = rtrb::RingBuffer::new(1024);
     let (rec_tx, rec_rx) = rtrb::RingBuffer::new(8192);
     let status = Arc::new(EngineStatus::default());
@@ -275,6 +292,9 @@ pub fn engine(sample_rate: u32, tempo: TempoMap) -> (EngineCore, EngineControl) 
         monitor: None,
         preview: None,
         preview_garbage: preview_tx,
+        delay_garbage: delay_tx,
+        delays: Box::default(),
+        send_tmp: vec![0.0; SCRATCH_FRAMES * 2].into_boxed_slice(),
         midi_in: midi_rx,
         midi_rec: rec_tx,
         midi_target: None,
@@ -325,6 +345,7 @@ pub fn engine(sample_rate: u32, tempo: TempoMap) -> (EngineCore, EngineControl) 
         plugin_garbage: plugin_rx,
         monitor_garbage: monitor_rx,
         preview_garbage: preview_rx,
+        delay_garbage: delay_rx,
         midi: std::sync::Arc::new(std::sync::Mutex::new(midi_tx)),
         recorded_midi: rec_rx,
         status,
@@ -446,6 +467,12 @@ impl EngineCore {
                     // Volle Queue: dann bleibt nur das Freigeben hier (praktisch nie).
                     let _ = self.monitor_garbage.push(old);
                 }
+            }
+            Command::SetDelays(bank, total) => {
+                let old = std::mem::replace(&mut self.delays, bank);
+                // Volle Queue: dann bleibt nur das Freigeben hier (praktisch nie).
+                let _ = self.delay_garbage.push(old);
+                self.status.latency.store(total, Ordering::Relaxed);
             }
             Command::Preview(samples) => {
                 let next = samples.map(|s| (s, 0));
@@ -796,26 +823,44 @@ impl EngineCore {
                 {
                     crate::eq::process(&track.eq, state, tmp);
                 }
+                // Latenzausgleich: gemeinsamer Teil für alle Wege der Spur.
+                let lines = self.delays.tracks.get_mut(track.slot);
+                let mut lines = lines;
+                if let Some(d) = lines.as_deref_mut().and_then(|l| l.common.as_mut()) {
+                    d.process(tmp);
+                }
                 // Sends vor dem Fader.
-                for send in track.sends.iter().filter(|s| s.pre_fader) {
+                for (si, send) in track.sends.iter().enumerate().filter(|(_, s)| s.pre_fader) {
                     let sg = &mut self.send_gain[..frames];
                     let automated = running
                         && track
                             .auto
                             .as_deref()
                             .is_some_and(|a| a.fill_send_gain(send.model, pos, sg));
-                    let bus = &mut self.bus_bufs[send.bus][..n];
+                    let st = &mut self.send_tmp[..n];
                     if automated {
                         for (i, (o, t)) in
-                            bus.chunks_exact_mut(2).zip(tmp.chunks_exact(2)).enumerate()
+                            st.chunks_exact_mut(2).zip(tmp.chunks_exact(2)).enumerate()
                         {
-                            o[0] += t[0] * sg[i];
-                            o[1] += t[1] * sg[i];
+                            o[0] = t[0] * sg[i];
+                            o[1] = t[1] * sg[i];
                         }
                     } else {
-                        for (o, t) in bus.iter_mut().zip(tmp.iter()) {
-                            *o += t * send.gain;
+                        for (o, t) in st.iter_mut().zip(tmp.iter()) {
+                            *o = t * send.gain;
                         }
+                    }
+                    // Latenzausgleich: zusätzlich für diesen Send.
+                    if let Some(d) = lines
+                        .as_deref_mut()
+                        .and_then(|l| l.sends.get_mut(si))
+                        .and_then(Option::as_mut)
+                    {
+                        d.process(st);
+                    }
+                    let bus = &mut self.bus_bufs[send.bus][..n];
+                    for (o, t) in bus.iter_mut().zip(st.iter()) {
+                        *o += t;
                     }
                 }
                 // Fader und Panorama an Ort und Stelle; Pegel messen.
@@ -840,26 +885,42 @@ impl EngineCore {
                 }
                 self.meters.feed_track(track.slot, pl, pr);
                 // Sends nach dem Fader.
-                for send in track.sends.iter().filter(|s| !s.pre_fader) {
+                for (si, send) in track.sends.iter().enumerate().filter(|(_, s)| !s.pre_fader) {
                     let sg = &mut self.send_gain[..frames];
                     let automated = running
                         && track
                             .auto
                             .as_deref()
                             .is_some_and(|a| a.fill_send_gain(send.model, pos, sg));
-                    let bus = &mut self.bus_bufs[send.bus][..n];
+                    let st = &mut self.send_tmp[..n];
                     if automated {
                         for (i, (o, t)) in
-                            bus.chunks_exact_mut(2).zip(tmp.chunks_exact(2)).enumerate()
+                            st.chunks_exact_mut(2).zip(tmp.chunks_exact(2)).enumerate()
                         {
-                            o[0] += t[0] * sg[i];
-                            o[1] += t[1] * sg[i];
+                            o[0] = t[0] * sg[i];
+                            o[1] = t[1] * sg[i];
                         }
                     } else {
-                        for (o, t) in bus.iter_mut().zip(tmp.iter()) {
-                            *o += t * send.gain;
+                        for (o, t) in st.iter_mut().zip(tmp.iter()) {
+                            *o = t * send.gain;
                         }
                     }
+                    // Latenzausgleich: zusätzlich für diesen Send.
+                    if let Some(d) = lines
+                        .as_deref_mut()
+                        .and_then(|l| l.sends.get_mut(si))
+                        .and_then(Option::as_mut)
+                    {
+                        d.process(st);
+                    }
+                    let bus = &mut self.bus_bufs[send.bus][..n];
+                    for (o, t) in bus.iter_mut().zip(st.iter()) {
+                        *o += t;
+                    }
+                }
+                // Latenzausgleich: zusätzlich für den Ausgang.
+                if let Some(d) = lines.and_then(|l| l.direct.as_mut()) {
+                    d.process(tmp);
                 }
                 // Ausgang.
                 let target: Option<&mut [f32]> = match track.output {
@@ -1501,6 +1562,47 @@ mod tests {
         // Without accent the downbeat sounds like the other beats.
         assert_eq!(crossings(&flat[..480]), crossings(&flat[24_000..24_480]));
         assert!(crossings(&base[..480]) > crossings(&base[24_000..24_480]));
+    }
+
+    #[test]
+    fn delay_compensation_shifts_a_track_without_latency() {
+        use crate::delay::{Compensation, DelayBank};
+        use crate::song::{PlayEvent, PlayTrack};
+        use std::sync::Arc;
+        // Two tracks with an impulse at frame 0; track 1 "has" 100 frames of plugin latency,
+        // so track 0 must come 100 frames later. (Without a plugin track 1 itself is on time.)
+        let mut imp = vec![0.0f32; 2 * 400];
+        imp[0] = 1.0;
+        imp[1] = 1.0;
+        let samples: Arc<[f32]> = imp.into();
+        let t = |slot| PlayTrack {
+            gain_l: 1.0,
+            gain_r: 1.0,
+            slot,
+            events: vec![PlayEvent::new(0, 400, 0, samples.clone())],
+            ..PlayTrack::default()
+        };
+        let song = Song {
+            tracks: vec![t(0), t(1)],
+            master: 1.0,
+            ..Song::default()
+        };
+        let comp = Compensation::compute(&song, &[0, 100], 2);
+        assert_eq!(comp.total, 100);
+        let (mut core, mut ctl) = engine(48_000, TempoMap::default());
+        ctl.send(Command::SetSong(Arc::new(song)));
+        ctl.send(Command::SetDelays(
+            Box::new(DelayBank::new(&comp)),
+            comp.total,
+        ));
+        ctl.send(Command::Play);
+        let mut out = vec![0.0f32; 2 * 300];
+        core.process(&mut out);
+        let left: Vec<f32> = out.chunks(2).map(|f| f[0]).collect();
+        assert_eq!(left[0], 1.0, "track 1 on time");
+        assert_eq!(left[100], 1.0, "track 0 delayed by 100 frames");
+        assert_eq!(left.iter().filter(|v| v.abs() > 0.0).count(), 2);
+        assert_eq!(ctl.status.latency(), 100);
     }
 
     /// Projekt mit einer Audio-Spur, deren Clip konstant 1,0 liefert, plus Bussen.
