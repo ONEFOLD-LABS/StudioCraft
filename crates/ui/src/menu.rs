@@ -55,6 +55,11 @@ impl ProjectWindow {
                     if ui.add(b).clicked() {
                         self.request(ui, action);
                     }
+                    if action == Action::ExportMixdown && ui.button("Stems exportieren …").clicked()
+                    {
+                        self.open_stem_dialog();
+                        ui.close();
+                    }
                 }
             });
             ui.menu_button("Bearbeiten", |ui| {

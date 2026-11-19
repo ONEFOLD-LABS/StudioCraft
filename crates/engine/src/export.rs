@@ -82,6 +82,46 @@ pub fn render_file(
     Ok(peak)
 }
 
+/// Schreibt fertiges verschachteltes Stereo wie der Mixdown: Format nach Dateiendung
+/// (`.wav`, `.flac`, `.aif`/`.aiff`, je 24 Bit), Werte über 0 dBFS begrenzt. Gibt die Spitze
+/// (linear) zurück.
+pub fn write_audio(samples: &[f32], rate: u32, path: &Path) -> Result<f32, String> {
+    let peak = samples.iter().fold(0.0f32, |m, s| m.max(s.abs()));
+    let ext = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(str::to_ascii_lowercase);
+    let format = match ext.as_deref() {
+        Some("flac") => Some(craft_audio::EncodeFormat::Flac),
+        Some("aif" | "aiff") => Some(craft_audio::EncodeFormat::Aiff),
+        _ => None,
+    };
+    let Some(format) = format else {
+        let spec = hound::WavSpec {
+            channels: 2,
+            sample_rate: rate,
+            bits_per_sample: 24,
+            sample_format: hound::SampleFormat::Int,
+        };
+        let err = |e: hound::Error| format!("{}: {e}", path.display());
+        let mut writer = hound::WavWriter::create(path, spec).map_err(err)?;
+        const MAX: f32 = 8_388_607.0;
+        for &s in samples {
+            writer
+                .write_sample((s.clamp(-1.0, 1.0) * MAX).round() as i32)
+                .map_err(err)?;
+        }
+        writer.finalize().map_err(err)?;
+        return Ok(peak);
+    };
+    let clamped: Vec<f32> = samples.iter().map(|s| s.clamp(-1.0, 1.0)).collect();
+    let buf = craft_audio::AudioBuffer::from_interleaved(rate, 2, &clamped);
+    let bytes = craft_audio::encode(&buf, &craft_audio::EncodeOptions::new(format))
+        .map_err(|e| format!("{}: {e}", path.display()))?;
+    std::fs::write(path, bytes).map_err(|e| format!("{}: {e}", path.display()))?;
+    Ok(peak)
+}
+
 /// Speichert verschachteltes Stereo als 32-Bit-Float-WAV (verlustfrei).
 pub fn write_wav_f32(samples: &[f32], rate: u32, path: &Path) -> Result<(), String> {
     write_wav_f32_channels(samples, 2, rate, path)

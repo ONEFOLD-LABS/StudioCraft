@@ -157,6 +157,10 @@ Snap ist global ein- und ausschaltbar (Taste J); wohin eingerastet wird, bestimm
 
 Bearbeiten → „An Ort und Stelle rendern“ verwandelt die gewählte Audio- oder Instrument-Spur in Audio: die Bereichsauswahl, sonst die gewählten Events, sonst alle Events der Spur. „Nur Instrument und Inserts“ rendert ohne Fader, Panorama und EQ, „Mit Kanaleinstellungen“ mit ihnen; Sends fehlen. Das Ergebnis (mit 2 s Nachklang) liegt als neuer Clip auf einer neuen Audio-Spur unter der Quelle und wird beim Speichern als WAV im Projektordner abgelegt. Gerendert wird offline mit eigenen Plugin-Instanzen, schneller als Echtzeit; die Wiedergabe läuft dabei weiter.
 
+**Stems exportieren**
+
+Datei → „Stems exportieren …“ schreibt je gewähltem Kanal eine Datei: Spuren, Gruppen und FX-Kanäle (samt allem, was in sie hineinläuft) und den Hauptmix. Alle Dateien decken denselben Bereich ab (zwischen den Locatoren, sonst das ganze Projekt, mit 2 s Nachklang) und sind sampelgenau gleich lang. „Mit Kanalbearbeitung“ nimmt Inserts, EQ, Fader und Panorama des Kanals mit, sonst nur, was hineinläuft. Dateiname nach Muster (`{projekt}`, `{kanal}`, `{nr}`), Format wie beim Mixdown (WAV, FLAC, AIFF mit 24 Bit, Projekt-Abtastrate).
+
 **Verschieben und Kopieren**
 
 | Aktion | Eingabe |

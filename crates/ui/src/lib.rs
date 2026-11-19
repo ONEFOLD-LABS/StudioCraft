@@ -52,6 +52,7 @@ mod session;
 pub mod settings;
 mod shortcuts;
 mod snap;
+mod stems;
 mod tempo_ui;
 pub mod theme;
 mod timeline;
@@ -209,6 +210,8 @@ pub struct ProjectWindow {
     lanes_rect: egui::Rect,
     /// Projektdatei, unter der zuletzt gespeichert oder geöffnet wurde.
     project_path: Option<PathBuf>,
+    /// Dialog „Stems exportieren“ (Issue #56).
+    stems: stems::StemDialog,
     /// Dialog „Audio-Anschlüsse“ offen, Stand vor einer laufenden Eingabe darin, Kanäle des
     /// Ausgabegeräts.
     io_dialog: bool,
@@ -366,6 +369,7 @@ impl ProjectWindow {
             drag_before: None,
             lanes_rect: egui::Rect::NOTHING,
             project_path: None,
+            stems: stems::StemDialog::default(),
             io_dialog: false,
             io_before: None,
             output_channels: 2,
@@ -1040,6 +1044,7 @@ impl ProjectWindow {
         self.tool_palette(ui.ctx());
         self.key_commands_dialog(ui.ctx());
         self.repeat_dialog(ui.ctx());
+        self.stem_dialog(ui.ctx());
         self.io_dialog(ui.ctx());
         self.recovery_dialog(ui.ctx());
         self.fade_editor_dialog(ui.ctx());
@@ -3303,11 +3308,7 @@ mod tests {
             (samples[48_000], samples.len(), *samples.last().unwrap())
         };
         // Without the channel: the plain take (fader ignored), plus 2 s of tail.
-        w.render_in_place(render::RenderSpec {
-            track: 0,
-            range,
-            with_channel: false,
-        });
+        w.render_in_place(render::RenderSpec::track(0, range, false));
         assert_eq!(w.project.tracks.len(), 2);
         assert_eq!(w.project.tracks[1].name, "Take (gerendert)");
         let (mid, len, last) = level(&w, 1);
@@ -3316,11 +3317,7 @@ mod tests {
         assert_eq!(last, 0.0);
         assert_eq!(w.project.tracks[1].events[0].start.0, range.0);
         // With the channel: the fader at -6 dB is in the audio.
-        w.render_in_place(render::RenderSpec {
-            track: 0,
-            range,
-            with_channel: true,
-        });
+        w.render_in_place(render::RenderSpec::track(0, range, true));
         let (mid, _, _) = level(&w, 1);
         assert!(
             (mid - 0.5 * studiocraft_project::db_to_gain(-6.0)).abs() < 1e-3,
@@ -3350,11 +3347,7 @@ mod tests {
         melody(&mut w, 0, 0);
         let range = w.render_range(0).unwrap();
         let audio = w
-            .render_offline(render::RenderSpec {
-                track: 0,
-                range,
-                with_channel: false,
-            })
+            .render_offline(render::RenderSpec::track(0, range, false))
             .unwrap();
         let seconds = w
             .project
@@ -3411,11 +3404,7 @@ mod tests {
                 state: None,
             });
         let range = w.render_range(0).unwrap();
-        w.render_in_place(render::RenderSpec {
-            track: 0,
-            range,
-            with_channel: false,
-        });
+        w.render_in_place(render::RenderSpec::track(0, range, false));
         assert_eq!(w.project.tracks.len(), 2, "{:?}", w.message);
         let ev = &w.project.tracks[1].events[0];
         let samples = &w.clip(ev.clip.unwrap()).unwrap().samples;
@@ -3569,6 +3558,23 @@ mod tests {
             w.view.scroll_ticks = 8.0 * 3840.0;
             w.view.scroll_y = 200.0;
         });
+    }
+
+    #[test]
+    fn the_file_menu_opens_the_stem_export_with_all_channels() {
+        let (w, _) = one_event_window();
+        let mut h = window_harness(w);
+        h.get_by_label("Datei").click();
+        h.run_steps(2);
+        h.get_by_label("Stems exportieren …").click();
+        h.run_steps(2);
+        assert!(h.state().stems.open);
+        assert_eq!(h.state().stems.chosen.len(), 1, "every channel chosen");
+        h.get_by_label("Stereo Out").click();
+        h.run_steps(2);
+        assert!(h.state().stems.chosen.contains(&None), "main mix added");
+        h.get_by_label("Mit Kanalbearbeitung");
+        h.get_by_label("Exportieren");
     }
 
     #[test]
