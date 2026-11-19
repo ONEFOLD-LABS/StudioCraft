@@ -39,6 +39,10 @@ pub struct Tokens {
     pub text_on_accent: Color32,
     // accent and controls
     pub accent: Color32,
+    /// App-Zeichen (Scheibe mit ausklingender Welle): Verlauf von hell nach dunkel, in beiden
+    /// Themes gleich (wie das App-Icon).
+    pub brand_light: Color32,
+    pub brand_dark: Color32,
     pub accent_dark: Color32,
     pub button: Color32,
     pub button_hi: Color32,
@@ -99,6 +103,8 @@ impl Tokens {
         text_dim: rgb(0x9a9a9a),
         text_on_accent: rgb(0xffffff),
         accent: rgb(0xc8466a),
+        brand_light: rgb(0xd9587a),
+        brand_dark: rgb(0x8e1f3c),
         accent_dark: rgb(0x9e2343),
         button: rgb(0x3c3c3c),
         button_hi: rgb(0x4e4e4e),
@@ -152,6 +158,8 @@ impl Tokens {
         text_dim: rgb(0x484848),
         text_on_accent: rgb(0xffffff),
         accent: rgb(0x9e2343),
+        brand_light: rgb(0xd9587a),
+        brand_dark: rgb(0x8e1f3c),
         accent_dark: rgb(0x7c1a34),
         button: rgb(0xdddddd),
         button_hi: rgb(0xcbcbcb),
