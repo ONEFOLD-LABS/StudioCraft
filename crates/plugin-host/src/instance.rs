@@ -5,6 +5,7 @@ use crate::{
     clap::{ClapHandle, ClapInstance, ParamInfo},
     lv2::{Lv2Handle, Lv2Instance, Lv2Preset},
     scan::{PluginFormat, PluginInfo},
+    vst3::{Vst3Handle, Vst3Instance},
 };
 
 /// Eine laufende Plugin-Instanz. Erzeugen und Freigeben im Hauptthread, `process` im
@@ -12,6 +13,7 @@ use crate::{
 pub enum PluginInstance {
     Clap(ClapInstance),
     Lv2(Lv2Instance),
+    Vst3(Vst3Instance),
 }
 
 impl PluginInstance {
@@ -21,6 +23,7 @@ impl PluginInstance {
         match info.format {
             PluginFormat::Clap => ClapInstance::new(info, sample_rate, max_frames).map(Self::Clap),
             PluginFormat::Lv2 => Lv2Instance::new(info, sample_rate, max_frames).map(Self::Lv2),
+            PluginFormat::Vst3 => Vst3Instance::new(info, sample_rate, max_frames).map(Self::Vst3),
         }
     }
 
@@ -28,6 +31,7 @@ impl PluginInstance {
         match self {
             Self::Clap(i) => &i.info,
             Self::Lv2(i) => &i.info,
+            Self::Vst3(i) => &i.info,
         }
     }
 
@@ -36,6 +40,7 @@ impl PluginInstance {
         match self {
             Self::Clap(i) => &i.params,
             Self::Lv2(i) => &i.params,
+            Self::Vst3(i) => &i.params,
         }
     }
 
@@ -44,6 +49,7 @@ impl PluginInstance {
         match self {
             Self::Clap(i) => PluginHandle::Clap(i.handle()),
             Self::Lv2(i) => PluginHandle::Lv2(i.handle()),
+            Self::Vst3(i) => PluginHandle::Vst3(i.handle()),
         }
     }
 
@@ -52,6 +58,7 @@ impl PluginInstance {
         match self {
             Self::Clap(i) => i.value_text(id, value),
             Self::Lv2(_) => None,
+            Self::Vst3(_) => None,
         }
     }
 
@@ -59,6 +66,7 @@ impl PluginInstance {
         match self {
             Self::Clap(i) => i.set_param(id, value),
             Self::Lv2(i) => i.set_param(id, value),
+            Self::Vst3(i) => i.set_param(id, value),
         }
     }
 
@@ -67,6 +75,7 @@ impl PluginInstance {
         match self {
             Self::Clap(i) => i.set_param_at(time, id, value),
             Self::Lv2(i) => i.set_param_at(time, id, value),
+            Self::Vst3(i) => i.set_param_at(time, id, value),
         }
     }
 
@@ -74,6 +83,7 @@ impl PluginInstance {
         match self {
             Self::Clap(i) => i.midi(time, data),
             Self::Lv2(i) => i.midi(time, data),
+            Self::Vst3(i) => i.midi(time, data),
         }
     }
 
@@ -81,6 +91,7 @@ impl PluginInstance {
         match self {
             Self::Clap(i) => i.note(time, key, velocity, on),
             Self::Lv2(i) => i.note(time, key, velocity, on),
+            Self::Vst3(i) => i.note(time, key, velocity, on),
         }
     }
 
@@ -89,6 +100,7 @@ impl PluginInstance {
         match self {
             Self::Clap(i) => i.process(left, right),
             Self::Lv2(i) => i.process(left, right),
+            Self::Vst3(i) => i.process(left, right),
         }
     }
 
@@ -96,6 +108,7 @@ impl PluginInstance {
         match self {
             Self::Clap(i) => i.stop_processing(),
             Self::Lv2(i) => i.stop_processing(),
+            Self::Vst3(i) => i.stop_processing(),
         }
     }
 }
@@ -105,6 +118,7 @@ impl PluginInstance {
 pub enum PluginHandle {
     Clap(ClapHandle),
     Lv2(Lv2Handle),
+    Vst3(Vst3Handle),
 }
 
 impl PluginHandle {
@@ -112,6 +126,7 @@ impl PluginHandle {
         match self {
             Self::Clap(h) => h.save_state(),
             Self::Lv2(h) => h.save_state(),
+            Self::Vst3(_) => None,
         }
     }
 
@@ -119,6 +134,7 @@ impl PluginHandle {
         match self {
             Self::Clap(h) => h.load_state(data),
             Self::Lv2(h) => h.load_state(data),
+            Self::Vst3(_) => false,
         }
     }
 
@@ -127,6 +143,7 @@ impl PluginHandle {
         match self {
             Self::Clap(_) => Vec::new(),
             Self::Lv2(h) => h.presets(),
+            Self::Vst3(_) => Vec::new(),
         }
     }
 
@@ -135,6 +152,7 @@ impl PluginHandle {
         match self {
             Self::Clap(_) => Vec::new(),
             Self::Lv2(h) => h.preset_values(uri),
+            Self::Vst3(_) => Vec::new(),
         }
     }
 
@@ -142,6 +160,7 @@ impl PluginHandle {
         match self {
             Self::Clap(h) => h.latency(),
             Self::Lv2(h) => h.latency(),
+            Self::Vst3(h) => h.latency(),
         }
     }
 
@@ -149,6 +168,7 @@ impl PluginHandle {
         match self {
             Self::Clap(h) => h.take_latency_changed(),
             Self::Lv2(h) => h.take_latency_changed(),
+            Self::Vst3(h) => h.take_latency_changed(),
         }
     }
 
@@ -156,6 +176,7 @@ impl PluginHandle {
         match self {
             Self::Clap(h) => h.has_gui(),
             Self::Lv2(h) => h.has_gui(),
+            Self::Vst3(_) => false,
         }
     }
 
@@ -163,6 +184,7 @@ impl PluginHandle {
         match self {
             Self::Clap(h) => h.gui_open(),
             Self::Lv2(h) => h.gui_open(),
+            Self::Vst3(_) => false,
         }
     }
 
@@ -171,6 +193,7 @@ impl PluginHandle {
         match self {
             Self::Clap(h) => h.take_dirty(),
             Self::Lv2(_) => false,
+            Self::Vst3(_) => false,
         }
     }
 
@@ -178,6 +201,7 @@ impl PluginHandle {
         match self {
             Self::Clap(h) => h.open_gui(title),
             Self::Lv2(h) => h.open_gui(title),
+            Self::Vst3(_) => Err("VST3-Fenster folgen".into()),
         }
     }
 
@@ -185,6 +209,7 @@ impl PluginHandle {
         match self {
             Self::Clap(h) => h.close_gui(),
             Self::Lv2(h) => h.close_gui(),
+            Self::Vst3(_) => {}
         }
     }
 
@@ -193,6 +218,7 @@ impl PluginHandle {
         match self {
             Self::Clap(h) => h.idle(),
             Self::Lv2(h) => h.idle(),
+            Self::Vst3(_) => false,
         }
     }
 
@@ -202,6 +228,7 @@ impl PluginHandle {
         match self {
             Self::Clap(_) => Vec::new(),
             Self::Lv2(h) => h.take_param_changes(),
+            Self::Vst3(_) => Vec::new(),
         }
     }
 
@@ -210,6 +237,7 @@ impl PluginHandle {
         match self {
             Self::Clap(_) => {}
             Self::Lv2(h) => h.set_ui_value(id, value),
+            Self::Vst3(_) => {}
         }
     }
 }

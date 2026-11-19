@@ -158,7 +158,12 @@ fn parse_child(text: &str, path: &Path) -> Option<Outcome> {
             [DONE] => done = true,
             ["E", msg] => error = Some(unescape(msg)),
             ["P", id, name, vendor, version, features] => plugins.push(PluginInfo {
-                format: crate::scan::PluginFormat::Clap,
+                // Das Format folgt aus der Datei (alte Cache-Zeilen bleiben gültig).
+                format: if crate::vst3::is_vst3(path) {
+                    crate::scan::PluginFormat::Vst3
+                } else {
+                    crate::scan::PluginFormat::Clap
+                },
                 id: unescape(id),
                 name: unescape(name),
                 vendor: unescape(vendor),
