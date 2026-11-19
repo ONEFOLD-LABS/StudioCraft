@@ -3,7 +3,7 @@
 
 use std::{collections::HashMap, sync::Arc};
 
-use studiocraft_project::{ClipId, Project, TrackKind, db_to_gain};
+use studiocraft_project::{ClipId, FadeCurve, Project, TrackKind, db_to_gain};
 
 /// Ein Event, wie der Audio-Thread es braucht.
 #[derive(Debug, Clone)]
@@ -14,9 +14,13 @@ pub struct PlayEvent {
     pub offset: u64,
     /// Verschachtelte Stereo-Samples in Engine-Abtastrate.
     pub samples: Arc<[f32]>,
-    /// Fade-In und Fade-Out in Frames (linear), bezogen auf das ganze Event.
+    /// Fade-In und Fade-Out in Frames, bezogen auf das ganze Event, mit ihrer Kurvenform.
     pub fade_in: u64,
     pub fade_out: u64,
+    pub fade_in_curve: FadeCurve,
+    pub fade_out_curve: FadeCurve,
+    /// Lautstärke des Events als Faktor (Griff oben in der Mitte).
+    pub gain: f32,
     /// Ist dies nur ein sichtbarer Ausschnitt eines Events (weil ein darüber
     /// liegendes Event den Rest verdeckt): Abstand zum Anfang des ganzen Events
     /// und dessen Länge. Damit verlaufen die Fades wie beim ganzen Event.
@@ -33,22 +37,27 @@ impl PlayEvent {
             samples,
             fade_in: 0,
             fade_out: 0,
+            fade_in_curve: FadeCurve::Linear,
+            fade_out_curve: FadeCurve::Linear,
+            gain: 1.0,
             env_offset: 0,
             env_length: length,
         }
     }
 
-    /// Lautstärkefaktor aus den Fades an Frame `k` des Events.
+    /// Lautstärkefaktor aus Fades und Event-Lautstärke an Frame `k` des Events.
     #[inline]
     fn fade_gain(&self, k: u64) -> f32 {
-        let k = k + self.env_offset;
-        let mut g = 1.0;
+        let k = k.saturating_add(self.env_offset);
+        let mut g = self.gain;
         if k < self.fade_in {
-            g = k as f32 / self.fade_in as f32;
+            g *= self.fade_in_curve.shape(k as f32 / self.fade_in as f32);
         }
         let rest = self.env_length.saturating_sub(k);
         if rest < self.fade_out {
-            g *= rest as f32 / self.fade_out as f32;
+            g *= self
+                .fade_out_curve
+                .shape(rest as f32 / self.fade_out as f32);
         }
         g
     }
@@ -183,6 +192,9 @@ impl Song {
                         events.push(PlayEvent {
                             fade_in: tempo.frames(e.fade_in, rate),
                             fade_out: tempo.frames(e.fade_out, rate),
+                            fade_in_curve: e.fade_in_curve,
+                            fade_out_curve: e.fade_out_curve,
+                            gain: db_to_gain(e.gain_db),
                             env_offset,
                             env_length,
                             ..PlayEvent::new(fa, fb - fa, e.offset + env_offset, samples.clone())
@@ -375,8 +387,9 @@ impl PlayTrack {
             let dst_from = (from - pos) as usize * 2;
             let dst = &mut out[dst_from..dst_from + n];
             if ev.fade_in == 0 && ev.fade_out == 0 {
+                let g = ev.gain;
                 for (d, s) in dst.iter_mut().zip(&src[..n]) {
-                    *d += s;
+                    *d += s * g;
                 }
             } else {
                 let k0 = from - ev.start;
@@ -483,6 +496,54 @@ mod tests {
         song.mix(&mut out, 0, 8);
         let left: Vec<f32> = out.chunks(2).map(|c| c[0]).collect();
         assert_eq!(left, [0.0, 0.25, 0.5, 0.75, 1.0, 1.0, 1.0, 0.5]);
+    }
+
+    #[test]
+    fn fade_curves_and_event_gain_shape_the_mix() {
+        let ev = PlayEvent {
+            fade_in: 4,
+            fade_out: 4,
+            fade_in_curve: FadeCurve::Exponential,
+            fade_out_curve: FadeCurve::SCurve,
+            gain: 0.5,
+            ..PlayEvent::new(0, 8, 0, ones(8, 1.0))
+        };
+        let song = Song {
+            tracks: vec![track(1.0, 0, vec![ev])],
+            master: 1.0,
+            buses: 0,
+        };
+        let mut out = vec![0.0; 16];
+        song.mix(&mut out, 0, 8);
+        let left: Vec<f32> = out.chunks(2).map(|c| c[0]).collect();
+        // In: 0.5 * x², out: 0.5 * smoothstep(rest / 4).
+        let s = |x: f32| x * x * (3.0 - 2.0 * x);
+        let want = [
+            0.0,
+            0.5 * 0.0625,
+            0.5 * 0.25,
+            0.5 * 0.5625,
+            0.5 * s(1.0),
+            0.5 * s(0.75),
+            0.5 * s(0.5),
+            0.5 * s(0.25),
+        ];
+        for (a, b) in left.iter().zip(want) {
+            assert!((a - b).abs() < 1e-6, "{left:?}");
+        }
+        // Without fades only the gain applies.
+        let plain = PlayEvent {
+            gain: 0.25,
+            ..PlayEvent::new(0, 4, 0, ones(4, 1.0))
+        };
+        let song = Song {
+            tracks: vec![track(1.0, 0, vec![plain])],
+            master: 1.0,
+            buses: 0,
+        };
+        let mut out = vec![0.0; 8];
+        song.mix(&mut out, 0, 4);
+        assert!(out.iter().all(|&v| (v - 0.25).abs() < 1e-6), "{out:?}");
     }
 
     #[test]

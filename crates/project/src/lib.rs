@@ -31,8 +31,8 @@ pub use automation::{AutoParam, AutoPoint, AutomationLane};
 pub use eq::{BandKind, ChannelEq, EQ_FREQ, EQ_GAIN, EQ_Q, EqBand};
 pub use markers::{FIRST_MARKER_ID, Marker};
 pub use model::{
-    ClipId, Event, EventId, InsertSlot, MAX_DB, MIN_DB, Note, PoolClip, Project, SendSlot,
-    TRACK_COLORS, TimeBase, Track, TrackId, TrackInput, TrackKind, db_to_gain,
+    ClipId, EVENT_MAX_DB, Event, EventId, FadeCurve, InsertSlot, MAX_DB, MIN_DB, Note, PoolClip,
+    Project, SendSlot, TRACK_COLORS, TimeBase, Track, TrackId, TrackInput, TrackKind, db_to_gain,
 };
 pub use quantize::{Feel, NoteValue, Quantize, QuantizeValue};
 pub use time::{Position, TICKS_PER_QUARTER, TempoMap, TimeSignature};
