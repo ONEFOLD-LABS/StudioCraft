@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Template: package.sh substitutes @APP_ID@, @VERSION@ (full, e.g. 0.5.0-rc.1),
+     @SHORT_VERSION@ (numeric X.Y.Z) and @BUILD_SHA@. Adapted from SoundCraft
+     (storytold/soundcraft, Apache-2.0), see NOTICE. -->
+<plist version="1.0">
+<dict>
+  <key>CFBundleDevelopmentRegion</key>
+  <string>en</string>
+  <key>CFBundleDisplayName</key>
+  <string>StudioCraft</string>
+  <key>CFBundleName</key>
+  <string>StudioCraft</string>
+  <key>CFBundleExecutable</key>
+  <string>StudioCraft</string>
+  <key>CFBundleIdentifier</key>
+  <string>@APP_ID@</string>
+  <key>CFBundleInfoDictionaryVersion</key>
+  <string>6.0</string>
+  <key>CFBundlePackageType</key>
+  <string>APPL</string>
+  <key>CFBundleSignature</key>
+  <string>????</string>
+  <key>CFBundleShortVersionString</key>
+  <string>@SHORT_VERSION@</string>
+  <key>CFBundleVersion</key>
+  <string>@SHORT_VERSION@</string>
+  <key>StudioCraftVersion</key>
+  <string>@VERSION@</string>
+  <key>StudioCraftBuildCommit</key>
+  <string>@BUILD_SHA@</string>
+  <key>CFBundleIconFile</key>
+  <string>StudioCraft</string>
+  <key>LSApplicationCategoryType</key>
+  <string>public.app-category.music</string>
+  <!-- Must match MACOSX_DEPLOYMENT_TARGET in package.sh. -->
+  <key>LSMinimumSystemVersion</key>
+  <string>11.0</string>
+  <key>NSHighResolutionCapable</key>
+  <true/>
+  <key>NSSupportsAutomaticGraphicsSwitching</key>
+  <true/>
+  <key>NSRequiresAquaSystemAppearance</key>
+  <false/>
+  <!-- Shown by macOS the first time StudioCraft opens an input device (recording). -->
+  <key>NSMicrophoneUsageDescription</key>
+  <string>StudioCraft records audio from the inputs you choose.</string>
+  <key>NSHumanReadableCopyright</key>
+  <string>Copyright © StudioCraft contributors. MIT OR Apache-2.0.</string>
+  <!-- No CFBundleDocumentTypes yet: Finder hands documents over as an "open documents" event,
+       which the app does not handle yet (issue #117). -->
+</dict>
+</plist>
