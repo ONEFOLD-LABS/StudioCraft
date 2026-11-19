@@ -25,6 +25,7 @@ mod eq_ui;
 mod fades_ui;
 mod focus;
 mod folders_ui;
+mod freeze;
 mod icons;
 mod infoline;
 mod inserts;
@@ -534,6 +535,7 @@ impl ProjectWindow {
     pub(crate) fn checkpoint(&mut self, before: Project) {
         // Geteilte Kopien: geänderten Inhalt an die ganze Gruppe weitergeben.
         self.project.sync_shared(&before);
+        self.keep_frozen(&before);
         if before == self.project {
             return;
         }
@@ -3429,6 +3431,127 @@ mod tests {
         h.run_steps(3);
         assert_eq!(h.state().project.tracks.len(), 2);
         assert!(h.state().project.tracks[1].name.ends_with("(gerendert)"));
+    }
+
+    /// Audiospur mit konstantem Take (0.5, eine Sekunde) und einem Insert.
+    fn freezable_window(plugin_id: &str, name: &str) -> ProjectWindow {
+        let mut w = ProjectWindow::new(Project::default(), None, String::new());
+        let clip = AudioClip {
+            sample_rate: 48_000,
+            samples: vec![0.5f32; 2 * 48_000].into(),
+        };
+        w.import_clip("Take", None, clip, None).unwrap();
+        w.project.tracks[0]
+            .inserts
+            .push(studiocraft_project::InsertSlot {
+                plugin_id: plugin_id.into(),
+                name: name.into(),
+                bypass: false,
+                params: Vec::new(),
+                state: None,
+            });
+        w.selected_track = Some(0);
+        w
+    }
+
+    #[test]
+    fn freezing_plays_a_rendered_clip_locks_the_events_and_undoes() {
+        let mut w = freezable_window("test.nicht-installiert", "Fehlt");
+        w.project.tracks[0].volume_db = -6.0;
+        let pool = w.project.pool.len();
+        assert!(w.can_freeze(0));
+        w.freeze_track(0);
+        let f = w.project.tracks[0].frozen.expect("eingefroren");
+        assert_eq!(w.project.pool.len(), pool + 1);
+        assert_eq!(f.start, w.project.tracks[0].events[0].start.0);
+        // Ohne Kanal gerendert: der Fader wirkt erst beim Abspielen.
+        let samples = &w.clip(f.clip).unwrap().samples;
+        assert!((samples[48_000] - 0.5).abs() < 1e-3, "{}", samples[48_000]);
+        assert!(!w.can_freeze(0));
+
+        // Die Engine spielt nur noch den Clip.
+        let clips: HashMap<u32, Arc<[f32]>> = w
+            .clips
+            .iter()
+            .map(|(&id, c)| (id, c.samples.clone()))
+            .collect();
+        let song = Song::build(&w.project, &clips, 48_000);
+        assert_eq!(song.tracks[0].events.len(), 1);
+        assert_eq!(
+            song.tracks[0].events[0].samples.len(),
+            samples.len(),
+            "der eingefrorene Clip"
+        );
+
+        // Events sind gesperrt.
+        let before = w.project.clone();
+        w.project.tracks[0].events[0].start.0 += 960;
+        w.project.tracks[0].inserts.clear();
+        w.checkpoint(before.clone());
+        assert_eq!(w.project, before);
+        assert!(w.message.as_deref().unwrap_or("").contains("eingefroren"));
+
+        // Aufheben und rückgängig machen.
+        w.unfreeze_track(0);
+        assert_eq!(w.project.tracks[0].frozen, None);
+        w.undo();
+        assert_eq!(w.project.tracks[0].frozen, Some(f));
+        w.undo();
+        assert_eq!(w.project.tracks[0].frozen, None);
+        assert_eq!(w.project.pool.len(), pool);
+    }
+
+    #[test]
+    fn freezing_unloads_the_plugins_and_unfreezing_loads_them_again() {
+        let mut probe = ProjectWindow::new(Project::default(), None, String::new());
+        let Some(fx) = test_effect(&mut probe) else {
+            eprintln!("kein CLAP-Effekt installiert – übersprungen");
+            return;
+        };
+        let mut w = freezable_window(&fx.id, &fx.name);
+        w.sync_inserts();
+        assert_eq!(w.plugins.sent[0].handles.iter().flatten().count(), 1);
+        w.freeze_track(0);
+        assert!(w.project.tracks[0].frozen.is_some(), "{:?}", w.message);
+        w.sync_inserts();
+        assert!(w.plugins.sent[0].handles.is_empty(), "Plugin entladen");
+        assert!(
+            w.project.tracks[0].inserts[0].state.is_some(),
+            "Zustand gesichert"
+        );
+        w.unfreeze_track(0);
+        w.sync_inserts();
+        assert_eq!(w.plugins.sent[0].handles.iter().flatten().count(), 1);
+    }
+
+    #[test]
+    fn the_edit_menu_freezes_and_unfreezes_the_selected_track() {
+        let w = freezable_window("test.nicht-installiert", "Fehlt");
+        let mut h = window_harness(w);
+        h.get_by_label("Bearbeiten").click();
+        h.run_steps(2);
+        h.get_by_label("Spur einfrieren").click();
+        h.run_steps(3);
+        assert!(h.state().project.tracks[0].frozen.is_some());
+        // Der Inspector zeigt den Zustand und hebt ihn auf.
+        h.get_by_label("Einfrieren aufheben").click();
+        h.run_steps(3);
+        assert!(h.state().project.tracks[0].frozen.is_none());
+    }
+
+    #[test]
+    fn render_frozen_track() {
+        for (name, theme) in [
+            ("eingefroren", egui::ThemePreference::Dark),
+            ("eingefroren-hell", egui::ThemePreference::Light),
+        ] {
+            shot(name, |w| {
+                w.theme = theme;
+                w.project.tracks[3].frozen =
+                    Some(studiocraft_project::Frozen { clip: 0, start: 0 });
+                w.selected_track = Some(3);
+            });
+        }
     }
 
     #[test]

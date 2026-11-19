@@ -157,6 +157,10 @@ Snap ist global ein- und ausschaltbar (Taste J); wohin eingerastet wird, bestimm
 
 Bearbeiten → „An Ort und Stelle rendern“ verwandelt die gewählte Audio- oder Instrument-Spur in Audio: die Bereichsauswahl, sonst die gewählten Events, sonst alle Events der Spur. „Nur Instrument und Inserts“ rendert ohne Fader, Panorama und EQ, „Mit Kanaleinstellungen“ mit ihnen; Sends fehlen. Das Ergebnis (mit 2 s Nachklang) liegt als neuer Clip auf einer neuen Audio-Spur unter der Quelle und wird beim Speichern als WAV im Projektordner abgelegt. Gerendert wird offline mit eigenen Plugin-Instanzen, schneller als Echtzeit; die Wiedergabe läuft dabei weiter.
 
+**Einfrieren**
+
+Bearbeiten → „Spur einfrieren“ rendert eine Audio- oder Instrument-Spur mit Instrument, Eingang, Pre-Sektion und Inserts (ohne Fader, Panorama, EQ und Sends, ausgeglichen um die Plugin-Latenz) offline in einen Clip und entlädt danach ihre Plugins. Die Spur spielt nur noch diesen Clip durch ihren Kanal; Fader, Panorama, EQ, Sends und deren Automation bleiben live. Events, Inserts und Instrument sind gesperrt, die Spur ist in der Event-Anzeige abgedeckt und mit „Eingefroren“ beschriftet, der Inspector zeigt statt der Inserts „Einfrieren aufheben“. Aufheben lädt die Plugins mit ihrem gespeicherten Zustand neu; Einfrieren und Aufheben lassen sich rückgängig machen. Der Clip wird beim Speichern als WAV im Projektordner abgelegt.
+
 **Stems exportieren**
 
 Datei → „Stems exportieren …“ schreibt je gewähltem Kanal eine Datei: Spuren, Gruppen und FX-Kanäle (samt allem, was in sie hineinläuft) und den Hauptmix. Alle Dateien decken denselben Bereich ab (zwischen den Locatoren, sonst das ganze Projekt, mit 2 s Nachklang) und sind sampelgenau gleich lang. „Mit Kanalbearbeitung“ nimmt Inserts, EQ, Fader und Panorama des Kanals mit, sonst nur, was hineinläuft. Dateiname nach Muster (`{projekt}`, `{kanal}`, `{nr}`), Format wie beim Mixdown (WAV, FLAC, AIFF mit 24 Bit, Projekt-Abtastrate).
