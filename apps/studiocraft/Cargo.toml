@@ -14,3 +14,7 @@ eframe = { version = "0.37", default-features = false, features = ["default_font
 # Same winit as eframe: the app runs eframe on its own event loop to see where a key lies
 # (numeric keypad, Issue #3).
 winit = { version = "0.30", default-features = false }
+
+[build-dependencies]
+# Symbol und VERSIONINFO für studiocraft.exe; build.rs nutzt es nur für Windows-Ziele.
+winresource = "0.1"

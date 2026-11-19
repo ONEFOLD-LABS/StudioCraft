@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- StudioCraft MSI (WiX v5). Built by package.ps1; layout follows SoundCraft
+     (storytold/soundcraft, Apache-2.0), see NOTICE. -->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs" xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
+  <Package Name="StudioCraft" Manufacturer="StudioCraft contributors" Version="$(var.Version)" UpgradeCode="B7DD49D6-7724-42CB-90A0-897B86A4BF9C" Scope="perMachine" Compressed="yes" Language="1033">
+    <SummaryInformation Description="StudioCraft digital audio workstation" Manufacturer="StudioCraft contributors" />
+    <!-- MSI versions are numeric: pre-releases of one X.Y.Z replace each other. -->
+    <MajorUpgrade AllowSameVersionUpgrades="yes" DowngradeErrorMessage="A newer version of StudioCraft is already installed." />
+    <MediaTemplate EmbedCab="yes" CompressionLevel="high" />
+
+    <Icon Id="StudioCraftIcon.ico" SourceFile="$(var.IconPath)" />
+    <Property Id="ARPPRODUCTICON" Value="StudioCraftIcon.ico" />
+    <Property Id="ARPURLINFOABOUT" Value="https://github.com/xXCrusaderXx/StudioCraft" />
+
+    <StandardDirectory Id="ProgramFiles6432Folder">
+      <Directory Id="INSTALLFOLDER" Name="StudioCraft" />
+    </StandardDirectory>
+    <StandardDirectory Id="ProgramMenuFolder" />
+
+    <Feature Id="Main" Title="StudioCraft" Level="1">
+      <ComponentGroupRef Id="StudioCraftFiles" />
+    </Feature>
+    <ui:WixUI Id="WixUI_InstallDir" InstallDirectory="INSTALLFOLDER" />
+    <!-- Skip the licence page: the licences ship as files next to the program. -->
+    <UI>
+      <Publish Dialog="WelcomeDlg" Control="Next" Event="NewDialog" Value="InstallDirDlg" Order="2" Condition="NOT Installed" />
+      <Publish Dialog="InstallDirDlg" Control="Back" Event="NewDialog" Value="WelcomeDlg" Order="2" Condition="NOT Installed" />
+    </UI>
+  </Package>
+
+  <Fragment>
+    <ComponentGroup Id="StudioCraftFiles" Directory="INSTALLFOLDER">
+      <Component Id="Notice">
+        <File Id="NoticeFile" Source="$(var.BinDir)\NOTICE" KeyPath="yes" />
+      </Component>
+      <Component Id="LicenseMit">
+        <File Id="LicenseMitFile" Source="$(var.BinDir)\LICENSE-MIT" KeyPath="yes" />
+      </Component>
+      <Component Id="LicenseApache">
+        <File Id="LicenseApacheFile" Source="$(var.BinDir)\LICENSE-APACHE" KeyPath="yes" />
+      </Component>
+      <Component Id="App" Guid="0A62F5F3-0DD0-426F-973A-BD69609FB2B3">
+        <File Id="StudioCraftExe" Source="$(var.BinDir)\studiocraft.exe" KeyPath="yes">
+          <Shortcut Id="StartMenuShortcut" Directory="ProgramMenuFolder" Name="StudioCraft" Description="StudioCraft digital audio workstation" WorkingDirectory="INSTALLFOLDER" Advertise="yes" Icon="StudioCraftIcon.ico" IconIndex="0" />
+        </File>
+
+        <!-- .studiocraft: StudioCraft's project format; StudioCraft is its default app. -->
+        <ProgId Id="StudioCraft.Project" Description="StudioCraft Project" Icon="StudioCraftExe" IconIndex="0">
+          <Extension Id="studiocraft" ContentType="application/x-studiocraft-project">
+            <Verb Id="open" Command="Open" TargetFile="StudioCraftExe" Argument="&quot;%1&quot;" />
+          </Extension>
+        </ProgId>
+        <!-- Audio files: offered under "Open with" (imported as tracks), never the default. -->
+        <ProgId Id="StudioCraft.Audio" Description="Audio File" Icon="StudioCraftExe" IconIndex="0" />
+        <RegistryValue Root="HKLM" Key="Software\Classes\StudioCraft.Audio\shell\open\command" Value="&quot;[#StudioCraftExe]&quot; &quot;%1&quot;" Type="string" />
+        <RegistryValue Root="HKLM" Key="Software\Classes\.wav\OpenWithProgids" Name="StudioCraft.Audio" Value="" Type="string" />
+        <RegistryValue Root="HKLM" Key="Software\Classes\.flac\OpenWithProgids" Name="StudioCraft.Audio" Value="" Type="string" />
+        <RegistryValue Root="HKLM" Key="Software\Classes\.aif\OpenWithProgids" Name="StudioCraft.Audio" Value="" Type="string" />
+        <RegistryValue Root="HKLM" Key="Software\Classes\.aiff\OpenWithProgids" Name="StudioCraft.Audio" Value="" Type="string" />
+        <RegistryValue Root="HKLM" Key="Software\Classes\.mp3\OpenWithProgids" Name="StudioCraft.Audio" Value="" Type="string" />
+
+        <!-- "Open with" list and the Run dialog (Win+R "studiocraft"). -->
+        <RegistryValue Root="HKLM" Key="Software\Classes\Applications\studiocraft.exe" Name="FriendlyAppName" Value="StudioCraft" Type="string" />
+        <RegistryValue Root="HKLM" Key="Software\Classes\Applications\studiocraft.exe\SupportedTypes" Name=".studiocraft" Value="" Type="string" />
+        <RegistryValue Root="HKLM" Key="Software\Classes\Applications\studiocraft.exe\SupportedTypes" Name=".wav" Value="" Type="string" />
+        <RegistryValue Root="HKLM" Key="Software\Classes\Applications\studiocraft.exe\SupportedTypes" Name=".flac" Value="" Type="string" />
+        <RegistryValue Root="HKLM" Key="Software\Classes\Applications\studiocraft.exe\SupportedTypes" Name=".aif" Value="" Type="string" />
+        <RegistryValue Root="HKLM" Key="Software\Classes\Applications\studiocraft.exe\SupportedTypes" Name=".aiff" Value="" Type="string" />
+        <RegistryValue Root="HKLM" Key="Software\Classes\Applications\studiocraft.exe\SupportedTypes" Name=".mp3" Value="" Type="string" />
+        <RegistryValue Root="HKLM" Key="Software\Microsoft\Windows\CurrentVersion\App Paths\studiocraft.exe" Value="[#StudioCraftExe]" Type="string" />
+      </Component>
+      <Component Id="Cli" Guid="123544E0-9679-4C66-9897-B6623607612C">
+        <File Id="StudioCraftCliExe" Source="$(var.BinDir)\studiocraft-cli.exe" KeyPath="yes" />
+      </Component>
+    </ComponentGroup>
+  </Fragment>
+</Wix>
