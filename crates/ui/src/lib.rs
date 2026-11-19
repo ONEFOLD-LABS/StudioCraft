@@ -2160,6 +2160,29 @@ mod tests {
     }
 
     #[test]
+    fn renders_info_line_for_several_events() {
+        shot("info-mehrfach", |w| {
+            let ids: Vec<EventId> = w.project.tracks[0]
+                .events
+                .iter()
+                .take(3)
+                .map(|e| e.id)
+                .collect();
+            w.selection = ids;
+        });
+        shot("info-mehrfach-hell", |w| {
+            let ids: Vec<EventId> = w.project.tracks[0]
+                .events
+                .iter()
+                .take(3)
+                .map(|e| e.id)
+                .collect();
+            w.selection = ids;
+            w.theme = egui::ThemePreference::Light;
+        });
+    }
+
+    #[test]
     fn status_line_shows_device_and_load_and_can_be_hidden() {
         let (mut w, _) = one_event_window();
         w.audio_status = "pipewire · default_output · 48000 Hz".into();

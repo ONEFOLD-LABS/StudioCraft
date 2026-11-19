@@ -20,7 +20,7 @@ Status: ✅ umgesetzt · 🟡 teilweise · ⬜ offen
 |---|---|---|---|
 | 1 | Titelleiste | App-Symbol, Menü (Datei, Bearbeiten, Projekt, Ansicht), Projekt-Titel, Fensterknöpfe; `craft-window` entscheidet pro Desktop, ob die App sie zeichnet | ✅ |
 | 2 | Werkzeugzeile | Zonen-Schalter links, Transport-Kurzform, Werkzeuge, Snap/Raster, Zonen-Schalter rechts | ✅ |
-| 3 | Info-Zeile | Werte des gewählten Events, direkt editierbar; ein-/ausblendbar | ✅ (Mehrfachauswahl relativ: offen) |
+| 3 | Info-Zeile | Werte des gewählten Events, direkt editierbar; ein-/ausblendbar; Mehrfachauswahl relativ | ✅ |
 | 4 | Mitte | linke Zone · Spurliste · Lineal/Event-Anzeige · rechte Zone | ✅ |
 | 5 | Untere Zone | Reiter (Mixer, Editor, …) am unteren Rand der Zone | ✅ |
 | 6 | Transportleiste | fest am unteren Fensterrand, F2 blendet aus | ✅ |
@@ -48,7 +48,8 @@ Eine Zeile, Gruppen durch schmale Trenner getrennt, Knöpfe quadratisch mit Symb
 Direkt unter der Werkzeugzeile, eine Zeile mit beschrifteten Feldern. Ohne Auswahl ein grauer
 Hinweis „Keine Auswahl“. Bei einem Event: Name, Anfang, Ende, Länge, Versatz, Lautstärke,
 Fade-In, Fade-Out, Stumm. Zeitwerte im Format des Lineals (Takt.Zählzeit.Sechzehntel.Ticks).
-Bei Mehrfachauswahl gelb hervorgehobene Felder, Änderungen relativ (später).
+Bei Mehrfachauswahl: Werte des frühesten Events, Beschriftungen gelb, davor die Anzahl; Zeitwerte
+ändern alle relativ, Name und Stumm gelten für alle; ein Rückgängig-Schritt je Änderung.
 
 ## Spurliste
 
@@ -120,7 +121,7 @@ Die Positionsanzeige hat einen dunklen Hintergrund (`counter_bg`) mit heller Sch
 ## Reihenfolge der Umsetzung
 
 1. ✅ Werkzeugzeile mit eigenen Symbolen und Zonen-Schaltern (#62)
-2. ✅ Info-Zeile (#63)
+2. ✅ Info-Zeile (#63), Mehrfachauswahl mit relativen Änderungen
 3. ✅ Spurköpfe: Aufnahme-Punkt und neutrale Auswahl (#64), Monitor und R/W (#73), Zeitbasis
    und Lanes (#75)
 4. ✅ Transportleiste (#64) und Reiter der unteren Zone (#65)
@@ -143,5 +144,5 @@ Die Positionsanzeige hat einen dunklen Hintergrund (`counter_bg`) mit heller Sch
 18. ✅ Farben: Klick auf die Farbleiste im Spurkopf öffnet die Palette; Events folgen der Spurfarbe,
     über Bearbeiten → Event-Farbe bekommen sie eine eigene (Issue #19)
 
-**Als Nächstes:** Mehrfachauswahl in der Info-Zeile (Änderungen relativ), eigene Statuszeile,
-Automation-Modi Overwrite und Trim (Spec: später).
+**Als Nächstes:** Aus dieser Liste ist nichts mehr offen; die Automationsmodi Overwrite und Trim
+kommen mit #91. Weitere Angleichungen ergeben sich aus `docs/spec.md`.
