@@ -179,6 +179,7 @@ pub(crate) fn show(w: &mut ProjectWindow, ui: &mut Ui) {
                                 selected,
                                 volume_db: &mut t.volume_db,
                                 pan: Some(&mut t.pan),
+                                pan_mode: Some(&mut t.pan_mode),
                                 mute: Some(&mut t.mute),
                                 solo: Some(&mut t.solo),
                                 solo_defeat: Some(&mut t.solo_defeat),
@@ -214,6 +215,7 @@ pub(crate) fn show(w: &mut ProjectWindow, ui: &mut Ui) {
             selected: false,
             volume_db: &mut w.project.master_db,
             pan: None,
+            pan_mode: None,
             mute: None,
             solo: None,
             solo_defeat: None,
@@ -320,6 +322,7 @@ pub(crate) fn channel_column(w: &mut ProjectWindow, ui: &mut Ui) {
         selected: false,
         volume_db: &mut track.volume_db,
         pan: Some(&mut track.pan),
+        pan_mode: Some(&mut track.pan_mode),
         mute: Some(&mut track.mute),
         solo: Some(&mut track.solo),
         solo_defeat: Some(&mut track.solo_defeat),
@@ -374,6 +377,8 @@ struct Strip<'a> {
     selected: bool,
     volume_db: &'a mut f32,
     pan: Option<&'a mut f32>,
+    /// Pan-Modus (Rechtsklick auf den Pan-Regler).
+    pan_mode: Option<&'a mut studiocraft_project::PanMode>,
     mute: Option<&'a mut bool>,
     solo: Option<&'a mut bool>,
     /// Solo-Defeat (Strg+Klick auf Solo).
@@ -428,7 +433,22 @@ impl Strip<'_> {
             ui.with_layout(Layout::top_down(Align::Center), |ui| {
                 ui.spacing_mut().item_spacing.y = 4.0;
                 if let Some(pan) = self.pan {
-                    changed |= pan_control(ui, self.id, pan);
+                    let (c, resp) = pan_control(ui, self.id, pan);
+                    changed |= c;
+                    if let Some(mode) = self.pan_mode {
+                        resp.context_menu(|ui| {
+                            for m in [
+                                studiocraft_project::PanMode::Balance,
+                                studiocraft_project::PanMode::Combined,
+                            ] {
+                                if ui.radio(*mode == m, m.label()).clicked() {
+                                    *mode = m;
+                                    changed = true;
+                                    ui.close();
+                                }
+                            }
+                        });
+                    }
                 } else {
                     ui.add_space(18.0);
                 }
@@ -568,9 +588,9 @@ struct Meter<'a> {
     clipped: Option<&'a mut bool>,
 }
 
-fn pan_control(ui: &mut Ui, id: usize, pan: &mut f32) -> bool {
+fn pan_control(ui: &mut Ui, id: usize, pan: &mut f32) -> (bool, Response) {
     let (rect, resp) = ui.allocate_exact_size(vec2(STRIP_W - 12.0, 16.0), Sense::click_and_drag());
-    let resp = resp.on_hover_text("Panorama – Strg + Klick: Mitte");
+    let resp = resp.on_hover_text("Panorama – Strg + Klick: Mitte, Rechtsklick: Pan-Modus");
     let mut changed = false;
     let command = ui.input(|i| i.modifiers.command);
     if resp.clicked() && command {
@@ -604,7 +624,7 @@ fn pan_control(ui: &mut Ui, id: usize, pan: &mut f32) -> bool {
     );
     let value = f64::from(*pan);
     resp.widget_info(|| WidgetInfo::slider(true, value, format!("Panorama Kanal {id}")));
-    changed
+    (changed, resp)
 }
 
 /// Fader mit Pegelanzeige daneben. Strg + Klick: 0 dB, Umschalt + Ziehen: fein.

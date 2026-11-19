@@ -65,9 +65,12 @@ impl PlayEvent {
 
 #[derive(Debug, Clone, Default)]
 pub struct PlayTrack {
-    /// Faktor links und rechts (Fader und Panorama).
+    /// Faktor links und rechts (Fader und Panorama, Stereo-Balance).
     pub gain_l: f32,
     pub gain_r: f32,
+    /// Pan-Modus „Stereo kombiniert“: beide Kanäle mischen über die Matrix
+    /// `[ll, lr, rl, rr]` (samt Lautstärke) statt über `gain_l`/`gain_r`.
+    pub pan_mix: Option<[f32; 4]>,
     /// Index der Projektspur, für die Pegelanzeige.
     pub slot: usize,
     /// Nach `start` sortiert.
@@ -283,6 +286,8 @@ impl Song {
                     ctrls.sort_by_key(|c| c.at);
                 }
                 let (gain_l, gain_r) = t.gains();
+                let pan_mix =
+                    (t.pan_mode == studiocraft_project::PanMode::Combined).then(|| t.mix_matrix());
                 let monitor = (t.monitor && t.kind == TrackKind::Audio)
                     .then_some((t.input.first, t.input.stereo));
                 let auto = crate::automation::TrackAuto::build(t, tempo, rate);
@@ -305,6 +310,7 @@ impl Song {
                     PlayTrack {
                         gain_l,
                         gain_r,
+                        pan_mix,
                         slot,
                         events,
                         notes,

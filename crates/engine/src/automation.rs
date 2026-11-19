@@ -123,26 +123,28 @@ impl TrackAuto {
         self.volume.is_some() || self.pan.is_some() || self.mute.is_some()
     }
 
-    /// Faktoren links und rechts für `frames` Frames ab `pos`. Echtzeitsicher.
+    /// Lautstärke als Faktor (0, wenn stumm) und Pan bei Frame `f`. Echtzeitsicher.
+    pub fn level_at(&self, f: u64) -> (f32, f32) {
+        if self.mute.as_ref().is_some_and(|m| m.value_at(f) >= 0.5) {
+            return (0.0, 0.0);
+        }
+        let db = self
+            .volume
+            .as_ref()
+            .map_or(self.volume_db, |v| v.value_at(f) as f32);
+        let pan = self
+            .pan
+            .as_ref()
+            .map_or(self.pan_static, |p| p.value_at(f) as f32)
+            .clamp(-1.0, 1.0);
+        (db_to_gain(db), pan)
+    }
+
+    /// Faktoren links und rechts (Stereo-Balance) für `frames` Frames ab `pos`.
+    /// Echtzeitsicher.
     pub fn fill_gains(&self, pos: u64, left: &mut [f32], right: &mut [f32]) {
         for (i, (l, r)) in left.iter_mut().zip(right.iter_mut()).enumerate() {
-            let f = pos + i as u64;
-            let muted = self.mute.as_ref().is_some_and(|m| m.value_at(f) >= 0.5);
-            if muted {
-                *l = 0.0;
-                *r = 0.0;
-                continue;
-            }
-            let db = self
-                .volume
-                .as_ref()
-                .map_or(self.volume_db, |v| v.value_at(f) as f32);
-            let pan = self
-                .pan
-                .as_ref()
-                .map_or(self.pan_static, |p| p.value_at(f) as f32)
-                .clamp(-1.0, 1.0);
-            let g = db_to_gain(db);
+            let (g, pan) = self.level_at(pos + i as u64);
             *l = g * if pan > 0.0 { 1.0 - pan } else { 1.0 };
             *r = g * if pan < 0.0 { 1.0 + pan } else { 1.0 };
         }
