@@ -121,6 +121,17 @@ pub(crate) enum Drag {
         row: usize,
         start: u64,
     },
+    /// Spur am Spurkopf ziehen: umsortieren, in einen Ordner hinein oder heraus.
+    TrackMove {
+        row: usize,
+    },
+    /// Ordnerzeile ziehen: alle Events der enthaltenen Spuren zeitlich verschieben;
+    /// `start` ist die Greifposition, `applied` die schon angewandte Verschiebung.
+    FolderShift {
+        row: usize,
+        start: u64,
+        applied: i64,
+    },
     /// Lautstärkeregler im Spurkopf ziehen.
     Volume {
         row: usize,
@@ -973,6 +984,22 @@ fn live_drag(w: &mut ProjectWindow, g: &Geo, d: Drag, p: Pos2, mods: egui::Modif
             w.locate(snapped);
             return;
         }
+        Drag::TrackMove { .. } => return,
+        Drag::FolderShift {
+            row,
+            start,
+            applied,
+        } => {
+            let want = snapped as i64 - start as i64 - applied;
+            let inside = w.project.tracks_inside(row);
+            let got = w.project.shift_tracks(&inside, want);
+            w.drag = Some(Drag::FolderShift {
+                row,
+                start,
+                applied: applied + got,
+            });
+            return;
+        }
         Drag::Stroke { .. } => {
             w.drag = Some(stroke(w, g, d, p));
             return;
@@ -1063,8 +1090,16 @@ fn start_drag(w: &mut ProjectWindow, g: &Geo, p: Pos2, mods: egui::Modifiers) ->
     if g.header.contains(p) {
         let row = g.row_at(p.y)?;
         let kind = w.project.tracks.get(row)?.kind;
-        return (crate::mixer::has_channel(kind) && g.header_volume(row).contains(p))
-            .then_some(Drag::Volume { row });
+        if crate::mixer::has_channel(kind) && g.header_volume(row).contains(p) {
+            return Some(Drag::Volume { row });
+        }
+        // Spur verschieben: im Kopf der Spur, aber nicht auf Farbleiste, Pfeil oder
+        // Schaltern (deren Klicks bleiben, wie sie sind).
+        let in_head = p.y < g.row_top(row) + g.view.row_h;
+        let on_control = p.x < g.header.left() + STRIP_W
+            || automation::arrow_rect(g, row).expand(3.0).contains(p)
+            || g.header_buttons(row).iter().any(|b| b.contains(p));
+        return (in_head && !on_control).then_some(Drag::TrackMove { row });
     }
     if !g.lanes.contains(p) {
         return None;
@@ -1089,6 +1124,18 @@ fn start_drag(w: &mut ProjectWindow, g: &Geo, p: Pos2, mods: egui::Modifiers) ->
     }
     let row = g.row_at(p.y)?;
     let ticks = g.ticks(p.x);
+    // Ordnerzeile mit der Objektauswahl: den ganzen Ordnerbereich verschieben.
+    if w.tool == Tool::Select && w.project.tracks[row].kind == TrackKind::Folder {
+        return Some(Drag::FolderShift {
+            row,
+            start: if alt {
+                ticks.max(0.0) as u64
+            } else {
+                w.snap_ticks(ticks)
+            },
+            applied: 0,
+        });
+    }
     match w.tool {
         Tool::Select => {
             let (id, row, zone) = smart_zone(w, g, p)?;
@@ -1291,10 +1338,52 @@ fn zoom_to_rect(w: &mut ProjectWindow, g: &Geo, a: Pos2, b: Pos2) {
     }
 }
 
+/// Ziel beim Ziehen einer Spur: (vor welcher Spur, in welchen Ordner). Die mittlere Hälfte
+/// eines Ordnerkopfs legt die Spur in diesen Ordner (ans Ende); die obere Hälfte einer Zeile
+/// setzt davor, die untere dahinter, jeweils in den Ordner der Nachbarspur. Unter der
+/// letzten Spur: ans Ende der obersten Ebene. `None`, wenn sich nichts ändern würde.
+fn track_drop(
+    w: &ProjectWindow,
+    g: &Geo,
+    row: usize,
+    p: Pos2,
+) -> Option<(Option<usize>, Option<usize>)> {
+    let y = p.y.max(g.lanes.top());
+    let Some(target) = g.row_at(y) else {
+        return Some((None, None));
+    };
+    if target == row {
+        return None;
+    }
+    let frac = (y - g.row_top(target)) / g.view.row_h;
+    let project = &w.project;
+    if project.tracks[target].kind == TrackKind::Folder && (0.25..0.75).contains(&frac) {
+        return Some((None, Some(target)));
+    }
+    if frac < 0.5 {
+        return Some((Some(target), project.parent_of(target)));
+    }
+    // Dahinter: vor die nächste angezeigte Spur (bei offenem Ordner: sein erstes Kind).
+    let next = g
+        .display_pos(target)
+        .and_then(|d| g.order.get(d + 1..))
+        .and_then(|rest| rest.iter().copied().find(|&t| t != row));
+    match next {
+        Some(n) => Some((Some(n), project.parent_of(n))),
+        None => Some((None, project.parent_of(target))),
+    }
+}
+
 fn finish_drag(w: &mut ProjectWindow, g: &Geo, d: Drag, p: Pos2, mods: egui::Modifiers) {
     match d {
         Drag::Ruler { .. } => w.send_locators(),
         Drag::Scrub => {}
+        Drag::FolderShift { .. } => {}
+        Drag::TrackMove { row } => {
+            if let Some((before, folder)) = track_drop(w, g, row, p) {
+                w.project.move_track(row, before, folder);
+            }
+        }
         Drag::Volume { .. } => {}
         Drag::Stroke { .. } => {}
         Drag::ZoomRect { start } => zoom_to_rect(w, g, start, p),
@@ -2295,6 +2384,39 @@ fn paint_headers(w: &ProjectWindow, painter: &Painter, g: &Geo) {
             rect.bottom(),
             Stroke::new(1.0, visuals.faint_bg_color),
         );
+    }
+    paint_track_drop(w, painter, g);
+}
+
+/// Während eine Spur gezogen wird: Einfügelinie bzw. Rahmen um den Zielordner.
+fn paint_track_drop(w: &ProjectWindow, painter: &Painter, g: &Geo) {
+    let Some(Drag::TrackMove { row }) = w.drag else {
+        return;
+    };
+    let Some(p) = painter.ctx().pointer_interact_pos() else {
+        return;
+    };
+    let Some((before, folder)) = track_drop(w, g, row, p) else {
+        return;
+    };
+    let accent = crate::theme::tokens(painter.ctx()).accent;
+    let x = g.header.x_range();
+    match (before, folder) {
+        (None, Some(f)) => {
+            let r = Rect::from_x_y_ranges(x, g.row_top(f)..=g.row_top(f) + g.view.row_h);
+            painter.rect_stroke(
+                r.shrink(1.0),
+                2.0,
+                Stroke::new(2.0, accent),
+                StrokeKind::Inside,
+            );
+        }
+        (Some(b), _) => {
+            painter.hline(x, g.row_top(b), Stroke::new(2.0, accent));
+        }
+        (None, None) => {
+            painter.hline(x, g.content_bottom(), Stroke::new(2.0, accent));
+        }
     }
 }
 
