@@ -27,6 +27,7 @@ mod infoline;
 mod inserts;
 mod keyeditor;
 mod keymap;
+mod macros;
 mod markers_ui;
 mod menu;
 mod mixer;
@@ -2336,6 +2337,66 @@ mod tests {
         assert!(h.query_by_label("Last –").is_none());
         // Without the status line, messages show in the transport bar.
         h.get_by_label("Datei fehlt");
+    }
+
+    #[test]
+    fn a_macro_built_in_the_dialog_runs_its_commands_from_key_and_menu() {
+        use keymap::Cmd;
+        let (w, _) = one_event_window();
+        let mut h = window_harness(w);
+        h.get_by_label("Bearbeiten").click();
+        h.run_steps(2);
+        h.get_by_label("Tastaturbefehle …").click();
+        h.run_steps(2);
+        // The section header (the command list also has a "Makros" category).
+        h.get_all_by_label("Makros").next().unwrap().click();
+        h.run_steps(2);
+        h.get_by_label("Name von Makro 1").click();
+        h.run_steps(1);
+        h.get_by_label("Name von Makro 1")
+            .type_text("Zoom und Snap");
+        h.run_steps(1);
+        for (category, step) in [
+            ("Navigation", "Horizontal einzoomen"),
+            ("Bearbeitung", "Snap an/aus"),
+        ] {
+            h.get_by_label("Befehl an Makro 1 anhängen").click();
+            h.run_steps(2);
+            // The last match is the entry in the open macro menu (the toolbar has buttons
+            // with the same names).
+            h.get_all_by_role_and_label(egui::accesskit::Role::Button, category)
+                .last()
+                .unwrap()
+                .click();
+            h.run_steps(2);
+            h.get_all_by_role_and_label(egui::accesskit::Role::Button, step)
+                .last()
+                .unwrap()
+                .click();
+            h.run_steps(2);
+        }
+        let m = h.state().keymap.macro_slot(1).cloned().unwrap();
+        assert_eq!(m.name, "Zoom und Snap");
+        assert_eq!(m.steps, [Cmd::ZoomIn, Cmd::Snap]);
+        // Bind F9 (a capture in the dialog is covered by the test below).
+        let f9 = egui::KeyboardShortcut::new(egui::Modifiers::NONE, Key::F9);
+        h.state_mut().keymap.assign(Cmd::Macro(1), f9);
+        h.state_mut().key_dialog.open = false;
+        h.run_steps(1);
+        let (zoom, snap) = (h.state().view.px_per_quarter, h.state().snap);
+        h.key_press(Key::F9);
+        h.run_steps(1);
+        assert!(h.state().view.px_per_quarter > zoom);
+        assert_eq!(h.state().snap, !snap);
+        // The Edit menu lists it under its name and runs it too.
+        h.get_by_label("Bearbeiten").click();
+        h.run_steps(2);
+        h.get_by_label("Makros").click();
+        h.run_steps(2);
+        // Menu items carry their key in the label.
+        h.get_by_label("Makro 1: Zoom und Snap F9").click();
+        h.run_steps(2);
+        assert_eq!(h.state().snap, snap);
     }
 
     #[test]

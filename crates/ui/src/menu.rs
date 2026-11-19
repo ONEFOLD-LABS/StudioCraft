@@ -96,6 +96,7 @@ impl ProjectWindow {
                     self.delete_selection();
                 }
                 ui.separator();
+                self.macros_menu(ui);
                 if ui.button("Tastaturbefehle …").clicked() {
                     self.key_dialog.open = true;
                     ui.close();

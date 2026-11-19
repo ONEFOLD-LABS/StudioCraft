@@ -295,7 +295,7 @@ Jeder Parameter eines Kanals oder Plugins kann automatisiert werden; die Kurve l
 
 ## Tastaturkonzept
 
-Alle Befehle laufen über eine zentrale Befehlsliste mit frei belegbaren Tasten; die Standardbelegung unten entspricht dem gewohnten Workflow. Belegungen sind als Preset exportierbar, und Makros reihen mehrere Befehle aneinander.
+Alle Befehle laufen über eine zentrale Befehlsliste mit frei belegbaren Tasten; die Standardbelegung unten entspricht dem gewohnten Workflow. Belegungen sind als Preset exportierbar, und Makros reihen mehrere Befehle aneinander. Acht Makroplätze werden im Dialog „Tastaturbefehle“ benannt und mit Befehlen gefüllt, bekommen eine Taste wie jeder Befehl und stehen unter Bearbeiten → Makros; Presets enthalten sie mit.
 
 **Modifier-Logik (gilt überall)**
 

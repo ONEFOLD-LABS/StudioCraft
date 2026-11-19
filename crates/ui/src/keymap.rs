@@ -3,7 +3,8 @@
 //! Jeder Befehl hat eine feste Kennung, einen Namen, eine Kategorie und seine Standardtasten.
 //! Eigene Belegungen liegen als Textdatei `keys.txt` im Einstellungsordner, eine Zeile je
 //! geändertem Befehl (`kennung = Strg+Umschalt+S, Strg+Y`; leer = keine Taste). Dasselbe Format
-//! dient als Preset zum Exportieren und Importieren.
+//! dient als Preset zum Exportieren und Importieren, zusammen mit den Makros
+//! (`macro.1.name = …`, `macro.1.steps = edit.duplicate, nav.nudge_right`).
 
 use std::collections::HashMap;
 
@@ -40,6 +41,28 @@ pub(crate) enum Cmd {
     CycleMarkerFromLocators,
     /// Zu Positionsmarker mit dieser Nummer (3–9).
     GotoMarker(u32),
+    /// Makro in diesem Platz (1–[`MACROS`]): mehrere Befehle nacheinander.
+    Macro(u8),
+}
+
+/// Anzahl der Makroplätze.
+pub(crate) const MACROS: usize = 8;
+/// Höchstens so viele Befehle je Makro (auch beim Lesen fremder Dateien).
+pub(crate) const MAX_STEPS: usize = 64;
+/// Höchstens so viele Zeichen im Namen eines Makros.
+pub(crate) const MAX_NAME: usize = 64;
+
+/// Ein Makro: Name und die Befehle, die es nacheinander ausführt (keine Makros darin).
+#[derive(Debug, Clone, PartialEq, Default)]
+pub(crate) struct Macro {
+    pub name: String,
+    pub steps: Vec<Cmd>,
+}
+
+impl Macro {
+    pub fn is_empty(&self) -> bool {
+        self.name.is_empty() && self.steps.is_empty()
+    }
 }
 
 /// Beschreibung eines Befehls.
@@ -541,6 +564,14 @@ pub(crate) const COMMANDS: &[CommandInfo] = &[
         "Marker",
         []
     ),
+    cmd!(Cmd::Macro(1), "macro.1", "Makro 1", "Makros", []),
+    cmd!(Cmd::Macro(2), "macro.2", "Makro 2", "Makros", []),
+    cmd!(Cmd::Macro(3), "macro.3", "Makro 3", "Makros", []),
+    cmd!(Cmd::Macro(4), "macro.4", "Makro 4", "Makros", []),
+    cmd!(Cmd::Macro(5), "macro.5", "Makro 5", "Makros", []),
+    cmd!(Cmd::Macro(6), "macro.6", "Makro 6", "Makros", []),
+    cmd!(Cmd::Macro(7), "macro.7", "Makro 7", "Makros", []),
+    cmd!(Cmd::Macro(8), "macro.8", "Makro 8", "Makros", []),
 ];
 
 pub(crate) fn info(cmd: Cmd) -> Option<&'static CommandInfo> {
@@ -552,6 +583,8 @@ pub(crate) fn info(cmd: Cmd) -> Option<&'static CommandInfo> {
 pub(crate) struct Keymap {
     /// Nur Befehle, deren Tasten vom Standard abweichen.
     overrides: HashMap<Cmd, Vec<KeyboardShortcut>>,
+    /// Makroplätze 1–[`MACROS`] (Index 0 = Makro 1).
+    pub macros: [Macro; MACROS],
 }
 
 impl Keymap {
@@ -606,7 +639,24 @@ impl Keymap {
     }
 
     pub fn is_default(&self) -> bool {
-        self.overrides.is_empty()
+        self.overrides.is_empty() && self.macros.iter().all(Macro::is_empty)
+    }
+
+    /// Makro im Platz `slot` (1–[`MACROS`]).
+    pub fn macro_slot(&self, slot: u8) -> Option<&Macro> {
+        self.macros.get(usize::from(slot).checked_sub(1)?)
+    }
+
+    pub fn macro_slot_mut(&mut self, slot: u8) -> Option<&mut Macro> {
+        self.macros.get_mut(usize::from(slot).checked_sub(1)?)
+    }
+
+    /// Name für Menüs und Dialog: „Makro 2: Aufräumen“, ohne eigenen Namen „Makro 2“.
+    pub fn macro_label(&self, slot: u8) -> String {
+        match self.macro_slot(slot).map(|m| m.name.as_str()) {
+            Some(name) if !name.is_empty() => format!("Makro {slot}: {name}"),
+            _ => format!("Makro {slot}"),
+        }
     }
 
     /// Als Text (nur Abweichungen vom Standard, eine Zeile je Befehl).
@@ -618,7 +668,60 @@ impl Keymap {
                 out.push_str(&format!("{} = {}\n", c.id, keys.join(", ")));
             }
         }
+        for (i, m) in self.macros.iter().enumerate() {
+            let n = i + 1;
+            if !m.name.is_empty() {
+                // Zeilenumbrüche würden das Format brechen.
+                let name = m.name.replace(['\n', '\r'], " ");
+                out.push_str(&format!("macro.{n}.name = {}\n", name.trim()));
+            }
+            if !m.steps.is_empty() {
+                let steps: Vec<&str> = m
+                    .steps
+                    .iter()
+                    .filter_map(|c| info(*c).map(|i| i.id))
+                    .collect();
+                out.push_str(&format!("macro.{n}.steps = {}\n", steps.join(", ")));
+            }
+        }
         out
+    }
+
+    /// Liest eine Makrozeile (`macro.N.name` oder `macro.N.steps`); `None`, wenn es keine ist.
+    fn macro_line(
+        &mut self,
+        id: &str,
+        value: &str,
+        line: usize,
+        problems: &mut Vec<String>,
+    ) -> Option<()> {
+        let rest = id.strip_prefix("macro.")?;
+        let (slot, field) = rest.split_once('.')?;
+        let Some(m) = slot.parse::<u8>().ok().and_then(|s| self.macro_slot_mut(s)) else {
+            problems.push(format!("Zeile {line}: unbekanntes Makro {slot}"));
+            return Some(());
+        };
+        match field {
+            "name" => m.name = value.chars().take(MAX_NAME).collect(),
+            "steps" => {
+                m.steps.clear();
+                for step in value.split(',').map(str::trim).filter(|s| !s.is_empty()) {
+                    match COMMANDS.iter().find(|c| c.id == step) {
+                        Some(c) if matches!(c.cmd, Cmd::Macro(_)) => {
+                            problems.push(format!("Zeile {line}: Makro im Makro ({step})"));
+                        }
+                        Some(_) if m.steps.len() >= MAX_STEPS => {
+                            problems.push(format!("Zeile {line}: mehr als {MAX_STEPS} Befehle"));
+                            break;
+                        }
+                        Some(c) => m.steps.push(c.cmd),
+                        None => problems.push(format!("Zeile {line}: unbekannter Befehl {step}")),
+                    }
+                }
+            }
+            _ => problems.push(format!("Zeile {line}: unbekanntes Feld {field}")),
+        }
+        Some(())
     }
 
     /// Liest eine Belegung; unbekannte Zeilen und Tasten werden übersprungen und gemeldet.
@@ -634,6 +737,12 @@ impl Keymap {
                 problems.push(format!("Zeile {}: kein „=“", n + 1));
                 continue;
             };
+            if map
+                .macro_line(id.trim(), keys.trim(), n + 1, &mut problems)
+                .is_some()
+            {
+                continue;
+            }
             let Some(c) = COMMANDS.iter().find(|c| c.id == id.trim()) else {
                 problems.push(format!("Zeile {}: unbekannter Befehl {}", n + 1, id.trim()));
                 continue;
@@ -837,10 +946,25 @@ impl crate::ProjectWindow {
             Cmd::InsertMarker => self.insert_marker(),
             Cmd::CycleMarkerFromLocators => self.cycle_marker_from_locators(),
             Cmd::GotoMarker(id) => self.locate_marker(id),
+            Cmd::Macro(slot) => self.run_macro(ui, slot),
         }
     }
 
-    fn keymap_changed(&mut self) {
+    /// Führt die Befehle eines Makros nacheinander aus; Makros darin werden übersprungen.
+    pub(crate) fn run_macro(&mut self, ui: &egui::Ui, slot: u8) {
+        let steps = self
+            .keymap
+            .macro_slot(slot)
+            .map(|m| m.steps.clone())
+            .unwrap_or_default();
+        for step in steps {
+            if !matches!(step, Cmd::Macro(_)) {
+                self.run_cmd(ui, step);
+            }
+        }
+    }
+
+    pub(crate) fn keymap_changed(&mut self) {
         if !self.key_dialog.persist {
             return;
         }
@@ -975,6 +1099,7 @@ impl crate::ProjectWindow {
         if let Some(m) = &self.key_dialog.message {
             ui.colored_label(ui.visuals().warn_fg_color, m);
         }
+        self.macros_ui(ui);
         ui.separator();
         let filter = self.key_dialog.filter.to_lowercase();
         let mut action: Option<(Cmd, u8)> = None;
@@ -1001,7 +1126,10 @@ impl crate::ProjectWindow {
                             ui.strong(category);
                             ui.end_row();
                         }
-                        ui.label(c.name);
+                        match c.cmd {
+                            Cmd::Macro(slot) => ui.label(self.keymap.macro_label(slot)),
+                            _ => ui.label(c.name),
+                        };
                         let text = if shown.is_empty() {
                             "–".to_owned()
                         } else {
@@ -1070,6 +1198,40 @@ mod tests {
                 assert!(a != b, "{} is bound to {ca:?} and {cb:?}", format_key(*a));
             }
         }
+    }
+
+    #[test]
+    fn macros_round_trip_and_hostile_lines_are_reported() {
+        let mut map = Keymap::default();
+        map.assign(Cmd::Macro(2), k(CA, Key::M));
+        let m = map.macro_slot_mut(2).unwrap();
+        m.name = "Kopieren und schieben".into();
+        m.steps = vec![Cmd::Edit(EditCommand::Duplicate), Cmd::ZoomIn];
+        assert!(!map.is_default());
+        let text = map.to_text();
+        assert!(text.contains("macro.2 = Strg+Alt+M"), "{text}");
+        assert!(text.contains("macro.2.name = Kopieren und schieben"));
+        assert!(
+            text.contains("macro.2.steps = edit.duplicate, nav.zoom_in"),
+            "{text}"
+        );
+        let (back, problems) = Keymap::from_text(&text);
+        assert!(problems.is_empty(), "{problems:?}");
+        assert_eq!(back, map);
+        assert_eq!(back.macro_label(2), "Makro 2: Kopieren und schieben");
+        assert_eq!(back.macro_label(3), "Makro 3");
+
+        let many = vec!["nav.zoom_in"; MAX_STEPS + 5].join(", ");
+        let hostile = format!(
+            "macro.0.name = x\nmacro.200.steps = nav.zoom_in\nmacro.1.steps = macro.2, nope, {many}\nmacro.1.color = rot\nmacro.3.name = {}\n",
+            "a".repeat(500)
+        );
+        let (map, problems) = Keymap::from_text(&hostile);
+        assert_eq!(map.macro_slot(1).unwrap().steps.len(), MAX_STEPS);
+        assert_eq!(map.macro_slot(3).unwrap().name.chars().count(), MAX_NAME);
+        assert!(map.macro_slot(0).is_none() && map.macro_slot(9).is_none());
+        // Slot 0, slot 200, nested macro, unknown command, too many steps, unknown field.
+        assert_eq!(problems.len(), 6, "{problems:?}");
     }
 
     #[test]
