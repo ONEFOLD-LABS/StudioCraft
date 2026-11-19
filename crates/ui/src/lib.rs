@@ -11,6 +11,7 @@ mod keyeditor;
 mod menu;
 mod mixer;
 mod recording;
+mod rightzone;
 mod routing;
 mod session;
 pub mod settings;
@@ -52,6 +53,9 @@ pub struct ProjectWindow {
     show_inspector: bool,
     /// Info-Zeile unter der Werkzeugzeile sichtbar.
     show_info: bool,
+    /// Rechte Zone (Medien, Plugins) sichtbar.
+    show_right: bool,
+    right: rightzone::RightZone,
     view: timeline::View,
     selected_track: Option<usize>,
     selection: Vec<EventId>,
@@ -144,6 +148,8 @@ impl ProjectWindow {
             grid: Grid::Beat,
             show_inspector: true,
             show_info: true,
+            show_right: false,
+            right: rightzone::RightZone::default(),
             view: timeline::View::default(),
             selected_track: Some(0),
             selection: Vec::new(),
@@ -542,6 +548,7 @@ impl ProjectWindow {
                 Key::P,
                 Key::Z,
                 Key::Y,
+                Key::R,
             ] {
                 if i.key_pressed(k) {
                     pressed.push(k);
@@ -593,6 +600,7 @@ impl ProjectWindow {
                 }
                 Key::Home | Key::Comma => self.locate(0),
                 Key::I if alt => self.show_inspector = !self.show_inspector,
+                Key::R if alt => self.show_right = !self.show_right,
                 Key::I => self.punch_in = !self.punch_in,
                 Key::O => self.punch_out = !self.punch_out,
                 Key::C => self.toggle_metronome(),
@@ -663,6 +671,12 @@ impl ProjectWindow {
                         });
                     });
                 });
+        }
+        if self.show_right {
+            egui::Panel::right("rechte-zone")
+                .resizable(true)
+                .default_size(240.0)
+                .show(ui, |ui| rightzone::show(self, ui));
         }
         if self.show_inspector {
             egui::Panel::left("inspector")
@@ -781,6 +795,19 @@ impl ProjectWindow {
                 })
                 .response
                 .on_hover_text("Raster");
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if icon_button(
+                    ui,
+                    Icon::ZoneRight,
+                    self.show_right,
+                    Some(t.accent),
+                    "Rechte Zone (Alt+R)",
+                )
+                .clicked()
+                {
+                    self.show_right = !self.show_right;
+                }
+            });
         });
     }
 
@@ -2341,6 +2368,30 @@ mod tests {
             w.cursor = 3 * TICKS_PER_QUARTER;
             w.meter_levels = vec![[0.8, 0.7], [0.0, 0.0]];
         });
+    }
+
+    #[test]
+    fn renders_right_zone_with_pool() {
+        shot("rechte-zone", |w| {
+            w.project = Project::default();
+            w.import_clip("Bass", None, tone_clip(8.0, 55.0), None)
+                .unwrap();
+            w.import_clip("Gitarre", None, tone_clip(6.0, 196.0), None)
+                .unwrap();
+            w.show_right = true;
+        });
+    }
+
+    #[test]
+    fn alt_r_toggles_the_right_zone() {
+        let (w, _) = one_event_window();
+        let mut h = window_harness(w);
+        h.key_press_modifiers(egui::Modifiers::ALT, Key::R);
+        h.run_steps(2);
+        assert!(h.state().show_right);
+        h.get_by_label("Rechte Zone (Alt+R)").click();
+        h.run_steps(2);
+        assert!(!h.state().show_right);
     }
 
     #[test]

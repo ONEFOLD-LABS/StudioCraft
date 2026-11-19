@@ -129,6 +129,7 @@ impl ProjectWindow {
             ui.menu_button("Ansicht", |ui| {
                 ui.checkbox(&mut self.show_inspector, "Inspector (Alt+I)");
                 ui.checkbox(&mut self.show_info, "Info-Zeile");
+                ui.checkbox(&mut self.show_right, "Rechte Zone (Alt+R)");
                 if ui
                     .selectable_label(
                         self.show_lower && self.lower == crate::LowerZone::Mixer,
@@ -236,7 +237,7 @@ impl ProjectWindow {
         Ok(true)
     }
 
-    fn import_dialog(&mut self) {
+    pub(crate) fn import_dialog(&mut self) {
         let Some(files) = dialog()
             .add_filter("Audiodateien", studiocraft_engine::AudioClip::extensions())
             .pick_files()

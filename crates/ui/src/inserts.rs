@@ -506,6 +506,22 @@ impl ProjectWindow {
         }
     }
 
+    /// Hängt `p` als neuen Insert an die Spur `track` (ein Undo-Schritt).
+    pub(crate) fn add_insert(&mut self, track: usize, p: &PluginInfo) {
+        let before = self.project.clone();
+        let Some(t) = self.project.tracks.get_mut(track) else {
+            return;
+        };
+        t.inserts.push(InsertSlot {
+            plugin_id: p.id.clone(),
+            name: p.name.clone(),
+            bypass: false,
+            params: Vec::new(),
+            state: None,
+        });
+        self.checkpoint(before);
+    }
+
     fn plugin_menu(&mut self, ui: &mut Ui, track: usize) {
         let effects: Vec<PluginInfo> = self
             .plugin_list()
@@ -537,15 +553,7 @@ impl ProjectWindow {
                     .show(ui, |ui| {
                         for p in list {
                             if ui.button(&p.name).clicked() {
-                                let before = self.project.clone();
-                                self.project.tracks[track].inserts.push(InsertSlot {
-                                    plugin_id: p.id.clone(),
-                                    name: p.name.clone(),
-                                    bypass: false,
-                                    params: Vec::new(),
-                                    state: None,
-                                });
-                                self.checkpoint(before);
+                                self.add_insert(track, &p);
                                 ui.close();
                             }
                         }
