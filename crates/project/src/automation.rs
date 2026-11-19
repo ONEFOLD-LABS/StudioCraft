@@ -5,7 +5,7 @@
 //! Parameter im Wertebereich des Plugins. Zwischen zwei Punkten wird linear interpoliert; vor
 //! dem ersten und nach dem letzten Punkt gilt dessen Wert.
 
-use crate::{MAX_DB, MIN_DB, Track};
+use crate::{InsertSlot, MAX_DB, MIN_DB, Track};
 
 /// Welcher Parameter automatisiert wird.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
@@ -249,6 +249,38 @@ impl Track {
         }
     }
 
+    /// Entfernt Insert `k` samt der Automation seiner Parameter; die Automation späterer
+    /// Inserts rückt nach.
+    pub fn remove_insert(&mut self, k: usize) {
+        if k >= self.inserts.len() {
+            return;
+        }
+        self.inserts.remove(k);
+        let k = k as u32;
+        self.automation
+            .retain(|l| !matches!(l.param, AutoParam::Plugin { slot, .. } if slot == k));
+        for l in &mut self.automation {
+            if let AutoParam::Plugin { slot, .. } = &mut l.param
+                && *slot != u32::MAX
+                && *slot > k
+            {
+                *slot -= 1;
+            }
+        }
+    }
+
+    /// Setzt das Instrument. Ist es ein anderes Plugin (oder keins mehr), fällt die Automation
+    /// der Parameter des alten weg.
+    pub fn set_instrument(&mut self, slot: Option<InsertSlot>) {
+        let old = self.instrument.as_ref().map(|i| i.plugin_id.as_str());
+        let new = slot.as_ref().map(|i| i.plugin_id.as_str());
+        if old != new {
+            self.automation
+                .retain(|l| !matches!(l.param, AutoParam::Plugin { slot: u32::MAX, .. }));
+        }
+        self.instrument = slot;
+    }
+
     /// Die Automationsspur für `param`, falls vorhanden.
     pub fn automation_lane(&self, param: AutoParam) -> Option<&AutomationLane> {
         self.automation.iter().find(|l| l.param == param)
@@ -373,6 +405,75 @@ mod tests {
             Some(-18.0)
         );
         assert_eq!(AutoParam::Send { index: 1 }.label(), "Send 2");
+    }
+
+    fn slot(id: &str) -> InsertSlot {
+        InsertSlot {
+            plugin_id: id.into(),
+            name: id.into(),
+            bypass: false,
+            params: Vec::new(),
+            state: None,
+        }
+    }
+
+    #[test]
+    fn removing_an_insert_takes_its_automation_along() {
+        let mut p = Project::default();
+        let t = p.add_track(TrackKind::Instrument, "Synth");
+        let track = &mut p.tracks[t];
+        track.inserts = vec![slot("eq"), slot("comp"), slot("hall")];
+        track.instrument = Some(slot("synth"));
+        for (s, id) in [(0, 1), (1, 2), (2, 3), (u32::MAX, 4)] {
+            track
+                .automation_lane_mut(AutoParam::Plugin { slot: s, id })
+                .set_point(0, 0.5);
+        }
+        track
+            .automation_lane_mut(AutoParam::Volume)
+            .set_point(0, -3.0);
+        track.remove_insert(1);
+        let names: Vec<&str> = track.inserts.iter().map(|i| i.plugin_id.as_str()).collect();
+        assert_eq!(names, ["eq", "hall"]);
+        let params: Vec<AutoParam> = track.automation.iter().map(|l| l.param).collect();
+        assert_eq!(
+            params,
+            [
+                AutoParam::Plugin { slot: 0, id: 1 },
+                AutoParam::Plugin { slot: 1, id: 3 },
+                AutoParam::Plugin {
+                    slot: u32::MAX,
+                    id: 4
+                },
+                AutoParam::Volume,
+            ],
+            "the hall's curve moves to slot 1, the instrument's stays"
+        );
+        track.remove_insert(7);
+        assert_eq!(track.inserts.len(), 2);
+    }
+
+    #[test]
+    fn a_new_instrument_drops_the_old_ones_automation() {
+        let mut p = Project::default();
+        let t = p.add_track(TrackKind::Instrument, "Synth");
+        let track = &mut p.tracks[t];
+        track.instrument = Some(slot("synth"));
+        track
+            .automation_lane_mut(AutoParam::Plugin {
+                slot: u32::MAX,
+                id: 4,
+            })
+            .set_point(0, 0.5);
+        track.automation_lane_mut(AutoParam::Plugin { slot: 0, id: 1 });
+        // Same plugin again (e.g. state reload): automation stays.
+        track.set_instrument(Some(slot("synth")));
+        assert_eq!(track.automation.len(), 2);
+        track.set_instrument(Some(slot("piano")));
+        let params: Vec<AutoParam> = track.automation.iter().map(|l| l.param).collect();
+        assert_eq!(params, [AutoParam::Plugin { slot: 0, id: 1 }]);
+        track.set_instrument(None);
+        assert!(track.instrument.is_none());
     }
 
     #[test]

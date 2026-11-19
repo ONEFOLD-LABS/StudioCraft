@@ -357,20 +357,14 @@ impl ProjectWindow {
         else {
             return;
         };
-        t.instrument = Some(InsertSlot {
+        // Automation des alten Instruments passt nicht zum neuen und fällt weg.
+        t.set_instrument(Some(InsertSlot {
             plugin_id: p.id.clone(),
             name: p.name.clone(),
             bypass: false,
             params: Vec::new(),
             state: None,
-        });
-        // Automation des alten Instruments passt nicht mehr zum neuen.
-        t.automation.retain(|l| {
-            !matches!(
-                l.param,
-                studiocraft_project::AutoParam::Plugin { slot: u32::MAX, .. }
-            )
-        });
+        }));
         self.selected_track = Some(track);
         self.checkpoint(before);
     }
@@ -413,13 +407,13 @@ impl ProjectWindow {
 
     fn set_instrument(&mut self, track: usize, info: Option<PluginInfo>) {
         let before = self.project.clone();
-        self.project.tracks[track].instrument = info.map(|p| InsertSlot {
+        self.project.tracks[track].set_instrument(info.map(|p| InsertSlot {
             plugin_id: p.id,
             name: p.name,
             bypass: false,
             params: Vec::new(),
             state: None,
-        });
+        }));
         self.checkpoint(before);
     }
 
@@ -529,7 +523,7 @@ impl ProjectWindow {
         }
         if let Some(k) = remove {
             let before = self.project.clone();
-            self.project.tracks[track].inserts.remove(k);
+            self.project.tracks[track].remove_insert(k);
             self.checkpoint(before);
         }
         if count < MAX_INSERTS {
