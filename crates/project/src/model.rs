@@ -60,9 +60,17 @@ pub struct Event {
     pub clip: Option<ClipId>,
     /// Audio-Events: Startpunkt im Clip in Frames des Clips.
     pub offset: u64,
-    /// Fade-In und Fade-Out in Ticks (nicht-destruktiv, linear).
+    /// Fade-In und Fade-Out in Ticks (nicht-destruktiv).
     pub fade_in: u64,
     pub fade_out: u64,
+    /// Kurvenform der Fades (Kurveneditor per Doppelklick auf den Fade).
+    #[serde(default, skip_serializing_if = "FadeCurve::is_linear")]
+    pub fade_in_curve: FadeCurve,
+    #[serde(default, skip_serializing_if = "FadeCurve::is_linear")]
+    pub fade_out_curve: FadeCurve,
+    /// Lautstärke des Events in dB (Griff oben in der Mitte), nicht-destruktiv.
+    #[serde(default, skip_serializing_if = "is_zero_db")]
+    pub gain_db: f32,
     /// MIDI-Parts: Noten, Position relativ zum Part-Anfang.
     #[serde(default)]
     pub notes: Vec<Note>,
@@ -83,6 +91,55 @@ pub struct Event {
 
 fn is_zero(v: &u32) -> bool {
     *v == 0
+}
+
+fn is_zero_db(v: &f32) -> bool {
+    *v == 0.0
+}
+
+/// Höchste Lautstärke eines Events in dB (darunter bis [`MIN_DB`], dort stumm).
+pub const EVENT_MAX_DB: f32 = 6.0;
+
+/// Kurvenform eines Fades.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FadeCurve {
+    #[default]
+    Linear,
+    /// Langsamer Anfang, schneller Schluss (quadratisch).
+    Exponential,
+    /// Weicher Anfang und Schluss.
+    SCurve,
+}
+
+impl FadeCurve {
+    pub const ALL: [FadeCurve; 3] = [Self::Linear, Self::Exponential, Self::SCurve];
+
+    pub fn is_linear(&self) -> bool {
+        *self == Self::Linear
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Linear => "Linear",
+            Self::Exponential => "Exponentiell",
+            Self::SCurve => "S-Kurve",
+        }
+    }
+
+    /// Verstärkung bei `x` (0 = stumm, 1 = voll) für den Fortschritt `x` in 0..=1.
+    pub fn shape(self, x: f32) -> f32 {
+        let x = if x.is_finite() {
+            x.clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
+        match self {
+            Self::Linear => x,
+            Self::Exponential => x * x,
+            Self::SCurve => x * x * (3.0 - 2.0 * x),
+        }
+    }
 }
 
 /// Eine MIDI-Note in einem Part (Spec „MIDI-Part“: Noten relativ zum Part-Start).
@@ -588,6 +645,9 @@ impl Project {
                         comp: 0,
                         color: None,
                         shared: None,
+                        gain_db: 0.0,
+                        fade_in_curve: FadeCurve::Linear,
+                        fade_out_curve: FadeCurve::Linear,
                     });
                     at += len + ((i as u64 + 2 * k) % 3) * bar;
                     k += 1;
@@ -749,6 +809,9 @@ impl Project {
                 comp: 0,
                 color: None,
                 shared: None,
+                gain_db: 0.0,
+                fade_in_curve: FadeCurve::Linear,
+                fade_out_curve: FadeCurve::Linear,
             },
         );
         Some(id)
@@ -1012,6 +1075,9 @@ impl Project {
                 comp: 0,
                 color: None,
                 shared: None,
+                gain_db: 0.0,
+                fade_in_curve: FadeCurve::Linear,
+                fade_out_curve: FadeCurve::Linear,
             },
         );
         Some(id)
@@ -1069,6 +1135,9 @@ impl Project {
             comp: 0,
             color: None,
             shared: None,
+            gain_db: 0.0,
+            fade_in_curve: FadeCurve::Linear,
+            fade_out_curve: FadeCurve::Linear,
         });
         Some(id)
     }
