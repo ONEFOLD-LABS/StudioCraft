@@ -5,6 +5,7 @@
 //! Lineal, Event-Anzeige und Transportleiste.
 
 mod automation_panel;
+mod automation_write;
 mod focus;
 mod icons;
 mod infoline;
@@ -63,6 +64,8 @@ pub struct ProjectWindow {
     grid_zoom: bool,
     /// Globaler Quantisierungswert mit Swing und Stärke (Taste Q).
     quantize: studiocraft_project::Quantize,
+    /// Automation schreiben: Modus, Ausdünnen, laufende Durchgänge.
+    auto_writer: automation_write::AutomationWriter,
     /// Quantisierungs-Panel offen.
     show_quantize: bool,
     show_inspector: bool,
@@ -173,6 +176,7 @@ impl ProjectWindow {
             grid: Grid::Beat,
             grid_zoom: false,
             quantize: studiocraft_project::Quantize::default(),
+            auto_writer: automation_write::AutomationWriter::default(),
             show_quantize: false,
             show_inspector: true,
             show_info: true,
@@ -728,6 +732,8 @@ impl ProjectWindow {
         quantize::panel(self, ui.ctx());
 
         self.sync_tempo();
+        let playing = self.is_playing();
+        self.automation_write(ui.ctx(), playing);
         if self.dirty {
             self.dirty = false;
             self.sync_monitor_input();
@@ -1128,6 +1134,22 @@ impl ProjectWindow {
             }
             icons::group_gap(ui);
             ui.spacing_mut().item_spacing.x = 6.0;
+            // Automationsmodus für Spuren mit W; rot, solange geschrieben wird.
+            let writing = self.writing_automation();
+            let label = RichText::new("Auto");
+            let l = ui.label(if writing { label.color(t.rec) } else { label });
+            egui::ComboBox::from_id_salt("automationsmodus")
+                .selected_text(self.auto_writer.mode.label())
+                .width(84.0)
+                .show_ui(ui, |ui| {
+                    for m in automation_write::WriteMode::ALL {
+                        ui.selectable_value(&mut self.auto_writer.mode, m, m.label());
+                    }
+                })
+                .response
+                .labelled_by(l.id)
+                .on_hover_text("Automation schreiben bei W: Touch oder Auto-Latch");
+            icons::group_gap(ui);
             self.tempo_controls(ui);
 
             // Status rechts: nimmt nur den freien Platz und wird sonst gekürzt (voller Text

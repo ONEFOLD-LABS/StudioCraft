@@ -10,6 +10,7 @@ use crate::icons::Icon;
 use crate::{ProjectWindow, TPQ, Tool};
 
 mod automation;
+pub(crate) use automation::range as param_range;
 
 const HEADER_W: f32 = 290.0;
 /// Anzahl der Schalter im Spurkopf.

@@ -79,6 +79,10 @@ pub struct AutomationLane {
     /// Unter der Spur aufgeklappt.
     #[serde(default)]
     pub visible: bool,
+    /// Wird gerade geschrieben (W): beim Abspielen gilt dann der Wert des Bedienelements,
+    /// nicht die Kurve. Wird nicht gespeichert.
+    #[serde(skip)]
+    pub writing: bool,
 }
 
 impl AutomationLane {
@@ -88,6 +92,7 @@ impl AutomationLane {
             points: Vec::new(),
             muted: false,
             visible: true,
+            writing: false,
         }
     }
 
@@ -155,7 +160,64 @@ impl AutomationLane {
 
     /// Ob die Kurve beim Abspielen wirkt.
     pub fn active(&self) -> bool {
-        !self.muted && !self.points.is_empty()
+        !self.muted && !self.writing && !self.points.is_empty()
+    }
+
+    /// Ersetzt alle Punkte in `from..=to` durch einen Punkt bei `to` mit `value`
+    /// (Schreiben: was der Cursor überstreicht, wird überschrieben).
+    pub fn overwrite(&mut self, from: u64, to: u64, value: f64) {
+        let (a, b) = (from.min(to), from.max(to));
+        self.points.retain(|p| p.tick < a || p.tick > b);
+        self.set_point(to, value);
+    }
+
+    /// Dünnt die Punkte in `from..=to` aus (Ramer-Douglas-Peucker): Punkte, die weniger als
+    /// `tolerance` (in Einheiten des Parameters) von der Linie ihrer Nachbarn abweichen, fallen
+    /// weg. Der erste und letzte Punkt des Bereichs bleiben.
+    pub fn reduce(&mut self, from: u64, to: u64, tolerance: f64) {
+        if tolerance.is_nan() || tolerance <= 0.0 {
+            return;
+        }
+        let lo = self.points.partition_point(|p| p.tick < from);
+        let hi = self.points.partition_point(|p| p.tick <= to);
+        if hi.saturating_sub(lo) < 3 {
+            return;
+        }
+        let seg = &self.points[lo..hi];
+        let mut keep = vec![false; seg.len()];
+        keep[0] = true;
+        keep[seg.len() - 1] = true;
+        let mut stack = vec![(0usize, seg.len() - 1)];
+        while let Some((a, b)) = stack.pop() {
+            if b <= a + 1 {
+                continue;
+            }
+            let (pa, pb) = (seg[a], seg[b]);
+            let span = (pb.tick - pa.tick) as f64;
+            let mut worst = (0.0f64, a);
+            for (i, p) in seg.iter().enumerate().take(b).skip(a + 1) {
+                let f = if span > 0.0 {
+                    (p.tick - pa.tick) as f64 / span
+                } else {
+                    0.0
+                };
+                let d = (p.value - (pa.value + (pb.value - pa.value) * f)).abs();
+                if d > worst.0 {
+                    worst = (d, i);
+                }
+            }
+            if worst.0 > tolerance {
+                keep[worst.1] = true;
+                stack.push((a, worst.1));
+                stack.push((worst.1, b));
+            }
+        }
+        let mut i = 0;
+        self.points.retain(|_| {
+            let k = i < lo || i >= hi || keep[i - lo];
+            i += 1;
+            k
+        });
     }
 }
 
@@ -214,6 +276,41 @@ mod tests {
         assert_eq!(l.points[1].tick, 959);
         assert!(l.remove_point(1));
         assert!(!l.remove_point(9));
+    }
+
+    #[test]
+    fn overwrite_replaces_what_the_cursor_passed() {
+        let mut l = lane();
+        l.set_point(480, -3.0);
+        l.overwrite(100, 600, -1.0);
+        let ticks: Vec<u64> = l.points.iter().map(|p| p.tick).collect();
+        assert_eq!(ticks, [0, 600, 960]);
+        assert!(
+            !AutomationLane {
+                writing: true,
+                ..lane()
+            }
+            .active()
+        );
+    }
+
+    #[test]
+    fn reduce_keeps_corners_and_drops_straight_runs() {
+        let mut l = AutomationLane::new(AutoParam::Volume);
+        // A ramp from 0 to -10 dB over ticks 0..100, then flat at -10 until 200.
+        for k in 0..=20u64 {
+            let t = k * 10;
+            let v = if t <= 100 { -(t as f64) / 10.0 } else { -10.0 };
+            l.set_point(t, v);
+        }
+        l.set_point(500, 3.0);
+        l.reduce(0, 200, 0.05);
+        let ticks: Vec<u64> = l.points.iter().map(|p| p.tick).collect();
+        assert_eq!(ticks, [0, 100, 200, 500]);
+        // Zero tolerance changes nothing.
+        let before = l.points.clone();
+        l.reduce(0, 500, 0.0);
+        assert_eq!(l.points, before);
     }
 
     #[test]

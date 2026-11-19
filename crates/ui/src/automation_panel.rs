@@ -50,6 +50,12 @@ impl ProjectWindow {
             self.project.tracks[idx].automation.remove(i);
             changed = true;
         }
+        ui.horizontal(|ui| {
+            let l = ui.label("Ausdünnen");
+            ui.add(egui::Slider::new(&mut self.auto_writer.reduction, 0..=100).suffix(" %"))
+                .labelled_by(l.id)
+                .on_hover_text("Wie stark geschriebene Punkte beim Stopp ausgedünnt werden");
+        });
         let mut add = None;
         ui.menu_button("+ Parameter", |ui| {
             for p in [AutoParam::Volume, AutoParam::Pan, AutoParam::Mute] {

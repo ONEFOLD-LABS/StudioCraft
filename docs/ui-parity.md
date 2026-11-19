@@ -121,4 +121,6 @@ Die Positionsanzeige hat einen dunklen Hintergrund (`counter_bg`) mit heller Sch
 14. ✅ Titelleiste wie in den Craft-Apps: Symbol, Menü, Titel und Fensterknöpfe in einer Zeile
     (craft-window entscheidet pro Desktop)
 
-**Als Nächstes:** Automation schreiben (Touch, Auto-Latch, #34), Comping in den Lanes.
+15. ✅ Automation: Kurven abspielen (R), bearbeiten und schreiben (W, Touch und Auto-Latch, #34)
+
+**Als Nächstes:** Comping in den Lanes, Automation der Sends.
