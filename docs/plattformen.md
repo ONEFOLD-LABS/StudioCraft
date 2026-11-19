@@ -39,7 +39,7 @@ apps/studiocraft-cli    Kommandozeile        (vorhanden)
 apps/studiocraft-web    WASM-Build           (geplant)
 crates/*                Bibliotheken         (vorhanden)
 xtask/                  cargo xtask ci, version, layers  (geplant)
-packaging/{linux,windows} vorhanden; {macos,freebsd,web} geplant
+packaging/{linux,windows,macos} vorhanden; {freebsd,web} geplant
 .github/workflows/      ci.yml, release.yml über storytold/craft-common-actions  (geplant)
 ```
 
@@ -63,3 +63,7 @@ SoundCraft und StudioCraft haben jeweils ein eigenes Bedienkonzept. Gemeinsame B
 ## Windows-Pakete
 
 `packaging/windows/package.ps1 -Arch x64|arm64` baut mit statischer C-Laufzeit (kein VC++-Redistributable) und erzeugt das MSI (WiX v5, Installation für alle Benutzer) und ein portables zip. Das MSI legt einen Startmenü-Eintrag an, macht StudioCraft zur Standard-App für `.studiocraft` und bietet sich für WAV, FLAC, AIFF und MP3 unter „Öffnen mit“ an. `studiocraft.exe` ist ein GUI-Programm ohne Konsolenfenster (Symbol und Versionsangaben über `apps/studiocraft/build.rs`); Ausgaben auf der Kommandozeile liefert `studiocraft-cli.exe`. Signiert wird nur, wenn das Secret `WINDOWS_CERTIFICATE` gesetzt ist.
+
+## macOS-Pakete
+
+`packaging/macos/package.sh [--arch universal|aarch64|x86_64]` baut ein Universal-Binary (Intel und Apple Silicon, ab macOS 11), legt `StudioCraft.app` an (Info.plist mit Mikrofon-Hinweis, Symbol, gehärtete Laufzeit) und erzeugt ein DMG zum Ziehen in „Programme“ sowie die Kommandozeile als zip. Die Berechtigungen erlauben den Audio-Eingang und das Laden fremd signierter Plugins (`disable-library-validation`). Ohne Zertifikat wird ad hoc signiert; mit den Secrets `APPLE_CERTIFICATE` (Developer ID) und `APPLE_ID`, `APPLE_PASSWORD`, `APPLE_TEAM_ID` signiert und notarisiert das Skript. `.studiocraft`-Dateien sind noch nicht mit der App verknüpft: Der Finder übergibt Dokumente als Ereignis, nicht als Startparameter, und das wertet die App noch nicht aus (Issue #117).
