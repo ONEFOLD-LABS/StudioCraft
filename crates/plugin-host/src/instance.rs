@@ -126,7 +126,7 @@ impl PluginHandle {
         match self {
             Self::Clap(h) => h.save_state(),
             Self::Lv2(h) => h.save_state(),
-            Self::Vst3(_) => None,
+            Self::Vst3(h) => h.save_state(),
         }
     }
 
@@ -134,7 +134,7 @@ impl PluginHandle {
         match self {
             Self::Clap(h) => h.load_state(data),
             Self::Lv2(h) => h.load_state(data),
-            Self::Vst3(_) => false,
+            Self::Vst3(h) => h.load_state(data),
         }
     }
 
