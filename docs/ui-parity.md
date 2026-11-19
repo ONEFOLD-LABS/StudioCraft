@@ -21,7 +21,7 @@ Status: ✅ umgesetzt · 🟡 teilweise · ⬜ offen
 | 1 | Menüzeile | Datei, Bearbeiten, Projekt, Ansicht, … | ✅ |
 | 2 | Werkzeugzeile | Zonen-Schalter links, Transport-Kurzform, Werkzeuge, Snap/Raster, Zonen-Schalter rechts | ✅ |
 | 3 | Info-Zeile | Werte des gewählten Events, direkt editierbar; ein-/ausblendbar | ✅ (Mehrfachauswahl relativ: offen) |
-| 4 | Mitte | linke Zone · Spurliste · Lineal/Event-Anzeige · rechte Zone | ✅ (Spurköpfe: Lanes, Zeitbasis offen) |
+| 4 | Mitte | linke Zone · Spurliste · Lineal/Event-Anzeige · rechte Zone | ✅ |
 | 5 | Untere Zone | Reiter (Mixer, Editor, …) am unteren Rand der Zone | ✅ |
 | 6 | Transportleiste | fest am unteren Fensterrand, F2 blendet aus | ✅ |
 | 7 | Statuszeile | Audio-Gerät, Abtastrate, Last, Meldungen | 🟡 (in Transportleiste) |
@@ -104,8 +104,8 @@ Die Positionsanzeige hat einen dunklen Hintergrund (`counter_bg`) mit heller Sch
 
 1. ✅ Werkzeugzeile mit eigenen Symbolen und Zonen-Schaltern (#62)
 2. ✅ Info-Zeile (#63)
-3. 🟡 Spurköpfe: Aufnahme-Punkt und neutrale Auswahl (#64), Monitor und R/W (Punkt 10);
-   Lanes und Zeitbasis folgen (Issue #19), R/W wirken mit der Automation (#34)
+3. ✅ Spurköpfe: Aufnahme-Punkt und neutrale Auswahl (#64), Monitor und R/W (Punkt 10),
+   Zeitbasis und Lanes (Punkt 12); R/W wirken mit der Automation (#34)
 4. ✅ Transportleiste (#64) und Reiter der unteren Zone (#65)
 5. ✅ Farben: neutrale Grautöne, Akzent sparsamer (#65)
 6. 🟡 Rechte Zone: Medien und Plugins (#67); Dateibrowser und Vorhören folgen (Issue #27)
@@ -114,6 +114,6 @@ Die Positionsanzeige hat einen dunklen Hintergrund (`counter_bg`) mit heller Sch
 9. ✅ Snap-Modi, Raster-Typen Sekunden/Frames/Samples, „An Zoom anpassen“ (#12)
 10. ✅ Spurkopf und Inspector: Monitor (Eingang mithören) und Automation R/W (#19)
 11. ✅ Fokusrahmen: Klick gibt einer Zone den Fokus, schmaler Rahmen in Akzentfarbe
+12. ✅ Zeitbasis (musikalisch/linear) und Lanes ein/aus in Spurkopf und Inspector (#19)
 
-**Als Nächstes:** Lanes und Zeitbasis im Spurkopf (#19), Rasterlinien für feinere Raster,
-Automation (#34).
+**Als Nächstes:** Rasterlinien für feinere Raster, Automation (#34), Comping in den Lanes.

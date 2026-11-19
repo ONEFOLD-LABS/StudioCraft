@@ -27,6 +27,13 @@ pub enum Icon {
     Snap,
     /// Quantisierungs-Panel: Schieberegler.
     QuantizePanel,
+    // track header
+    /// Zeitbasis musikalisch: Achtelnote.
+    TimeMusical,
+    /// Zeitbasis linear: Uhr.
+    TimeLinear,
+    /// Lanes ein/aus: drei gestapelte Balken.
+    Lanes,
     // zones
     ZoneLeft,
     ZoneLower,
@@ -45,7 +52,7 @@ pub enum Icon {
 }
 
 impl Icon {
-    pub const ALL: [Icon; 25] = [
+    pub const ALL: [Icon; 28] = [
         Icon::Select,
         Icon::Range,
         Icon::Split,
@@ -58,6 +65,9 @@ impl Icon {
         Icon::TimeWarp,
         Icon::Snap,
         Icon::QuantizePanel,
+        Icon::TimeMusical,
+        Icon::TimeLinear,
+        Icon::Lanes,
         Icon::ZoneLeft,
         Icon::ZoneLower,
         Icon::ZoneRight,
@@ -306,6 +316,35 @@ pub fn shapes(rect: Rect, icon: Icon, color: Color32) -> Vec<Shape> {
             for (y, x) in [(4.0, 10.0), (8.0, 5.0), (12.0, 8.5)] {
                 out.push(line(vec![g.p(2.0, y), g.p(14.0, y)]));
                 out.push(Shape::circle_filled(g.p(x, y), g.len(2.0), color));
+            }
+        }
+        Icon::TimeMusical => {
+            // eighth note: head, stem, flag
+            out.push(Shape::convex_polygon(
+                (0..12)
+                    .map(|i| {
+                        let a = std::f32::consts::TAU * i as f32 / 12.0;
+                        g.p(6.0 + 2.6 * a.cos(), 12.0 + 1.9 * a.sin())
+                    })
+                    .collect(),
+                color,
+                Stroke::NONE,
+            ));
+            out.push(line(vec![g.p(8.4, 12.0), g.p(8.4, 2.5)]));
+            out.push(line(vec![g.p(8.4, 2.5), g.p(12.0, 5.5), g.p(11.5, 8.0)]));
+        }
+        Icon::TimeLinear => {
+            out.push(Shape::circle_stroke(g.p(8.0, 8.0), g.len(6.0), s));
+            out.push(line(vec![g.p(8.0, 4.0), g.p(8.0, 8.0), g.p(11.0, 9.5)]));
+        }
+        Icon::Lanes => {
+            for y in [3.0, 7.0, 11.0] {
+                out.push(fill(vec![
+                    g.p(2.0, y),
+                    g.p(14.0, y),
+                    g.p(14.0, y + 2.5),
+                    g.p(2.0, y + 2.5),
+                ]));
             }
         }
         Icon::PunchIn | Icon::PunchOut => {

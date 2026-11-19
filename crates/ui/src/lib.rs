@@ -926,6 +926,28 @@ impl ProjectWindow {
                     .on_hover_text("Automation schreiben (wirkt mit der Automation, #34)");
             }
         });
+        if track.kind.holds_events() {
+            ui.horizontal(|ui| {
+                use studiocraft_project::TimeBase;
+                let l = ui.label("Zeitbasis");
+                let mut base = track.time_base();
+                egui::ComboBox::from_id_salt("zeitbasis")
+                    .selected_text(match base {
+                        TimeBase::Musical => "Musikalisch",
+                        TimeBase::Linear => "Linear",
+                    })
+                    .show_ui(ui, |ui| {
+                        ui.selectable_value(&mut base, TimeBase::Musical, "Musikalisch");
+                        ui.selectable_value(&mut base, TimeBase::Linear, "Linear");
+                    })
+                    .response
+                    .labelled_by(l.id);
+                if base != track.time_base() {
+                    track.time_base = Some(base);
+                }
+                ui.checkbox(&mut track.show_lanes, "Lanes");
+            });
+        }
         ui.horizontal(|ui| {
             let r = ui.add(
                 egui::Slider::new(
@@ -1393,8 +1415,8 @@ mod tests {
             let w = h.state();
             let lanes = w.lanes_rect;
             let mid = lanes.top() + w.view.row_h / 2.0;
-            // Buttons sit right-aligned in the header, 21 px apart, six of them.
-            let x = lanes.left() - 6.0 - (6 - i) as f32 * 21.0 + 9.0;
+            // Buttons sit right-aligned in the header, 21 px apart, eight of them.
+            let x = lanes.left() - 6.0 - (8 - i) as f32 * 21.0 + 9.0;
             let pos = egui::pos2(x, mid);
             h.event(egui::Event::PointerMoved(pos));
             h.run_steps(1);
@@ -1469,6 +1491,58 @@ mod tests {
     fn renders_focus_frame_on_the_lower_zone() {
         shot("fokus-untere-zone", |w| {
             w.focus = focus::Zone::Lower;
+        });
+    }
+
+    #[test]
+    fn lanes_show_overlapping_takes_and_clicks_pick_the_lane() {
+        let mut p = Project::default();
+        let t = p.add_track(TrackKind::Audio, "Gesang");
+        p.add_track(TrackKind::Audio, "Bass");
+        let mut w = ProjectWindow::new(p, None, String::new());
+        let bar = w.bar_ticks();
+        let first = w.project.create_event(t, 0, 2 * bar).unwrap();
+        let take = w.project.create_event(t, bar / 2, bar).unwrap();
+        w.view.scroll_ticks = 0.0;
+        let mut h = window_harness(w);
+        let click_at = |h: &mut Harness<'_, ProjectWindow>, ticks: u64, y: f32| {
+            let w = h.state();
+            let r = w.lanes_rect;
+            let x = r.left() + (ticks as f64 / TPQ) as f32 * w.view.px_per_quarter;
+            let pos = egui::pos2(x, r.top() + y * w.view.row_h);
+            h.event(egui::Event::PointerMoved(pos));
+            h.run_steps(1);
+            for pressed in [true, false] {
+                h.event(egui::Event::PointerButton {
+                    pos,
+                    button: egui::PointerButton::Primary,
+                    pressed,
+                    modifiers: egui::Modifiers::NONE,
+                });
+            }
+            h.run_steps(2);
+        };
+        // Folded: the later take covers the first event.
+        click_at(&mut h, bar, 0.8);
+        assert_eq!(h.state().selection, vec![take]);
+        h.state_mut().project.tracks[t].show_lanes = true;
+        h.run_steps(1);
+        click_at(&mut h, bar, 0.8);
+        assert_eq!(h.state().selection, vec![first]);
+        click_at(&mut h, bar, 1.8);
+        assert_eq!(h.state().selection, vec![take]);
+        // The next track starts below both lanes.
+        click_at(&mut h, bar, 2.5);
+        assert_eq!(h.state().selected_track, Some(1));
+    }
+
+    #[test]
+    fn renders_lanes_and_time_base() {
+        shot("lanes-zeitbasis", |w| {
+            w.project.tracks[0].show_lanes = true;
+            let bar = w.bar_ticks();
+            w.project.create_event(0, bar / 2, 2 * bar);
+            w.project.tracks[3].time_base = Some(studiocraft_project::TimeBase::Linear);
         });
     }
 

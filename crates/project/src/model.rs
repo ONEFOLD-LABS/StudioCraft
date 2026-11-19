@@ -111,6 +111,12 @@ pub struct Track {
     pub read: bool,
     #[serde(default)]
     pub write: bool,
+    /// Zeitbasis; `None` = Standard des Spurtyps ([`Track::time_base`]).
+    #[serde(default)]
+    pub time_base: Option<TimeBase>,
+    /// Lanes aufgeklappt: überlappende Events (Takes) liegen untereinander.
+    #[serde(default)]
+    pub show_lanes: bool,
     /// Fader in dB; [`MIN_DB`] und darunter gilt als −∞.
     pub volume_db: f32,
     /// Panorama: −1 links, 0 Mitte, +1 rechts (Stereo-Balance).
@@ -131,6 +137,46 @@ pub struct Track {
     #[serde(default)]
     pub sends: Vec<SendSlot>,
     pub events: Vec<Event>,
+}
+
+/// Zeitbasis einer Spur (Spec „Zeitbasis“): Musikalische Events hängen an Takten und wandern
+/// bei Tempoänderungen mit, lineare hängen an Sekunden.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum TimeBase {
+    Musical,
+    Linear,
+}
+
+impl Track {
+    /// Wirksame Zeitbasis: Standard ist linear für Audio, sonst musikalisch.
+    pub fn time_base(&self) -> TimeBase {
+        self.time_base.unwrap_or(if self.kind == TrackKind::Audio {
+            TimeBase::Linear
+        } else {
+            TimeBase::Musical
+        })
+    }
+
+    /// Lane je Event (gleiche Reihenfolge wie `events`) und Zahl der Lanes, mindestens 1.
+    /// Jedes Event kommt in die oberste Lane, in der es nichts Früheres überlappt; spätere
+    /// Takes landen so darunter.
+    pub fn lanes(&self) -> (Vec<usize>, usize) {
+        let mut ends: Vec<Vec<(u64, u64)>> = Vec::new();
+        let mut out = Vec::with_capacity(self.events.len());
+        for e in &self.events {
+            let span = (e.start.0, e.end());
+            let lane = ends
+                .iter()
+                .position(|l| l.iter().all(|&(a, b)| span.1 <= a || span.0 >= b))
+                .unwrap_or(ends.len());
+            if lane == ends.len() {
+                ends.push(Vec::new());
+            }
+            ends[lane].push(span);
+            out.push(lane);
+        }
+        (out, ends.len().max(1))
+    }
 }
 
 /// Kennung einer Spur.
@@ -361,6 +407,8 @@ impl Project {
                 monitor: false,
                 read: false,
                 write: false,
+                time_base: None,
+                show_lanes: false,
                 volume_db: 0.0,
                 pan: 0.0,
                 input: TrackInput::default(),
@@ -668,6 +716,8 @@ impl Project {
             monitor: false,
             read: false,
             write: false,
+            time_base: None,
+            show_lanes: false,
             volume_db: 0.0,
             pan: 0.0,
             input: TrackInput::default(),
@@ -860,13 +910,18 @@ impl Project {
         for t in self
             .tracks
             .iter_mut()
-            .filter(|t| t.kind == TrackKind::Audio)
+            .filter(|t| t.time_base() == TimeBase::Linear)
         {
             for e in &mut t.events {
                 e.start = Position(scale(e.start.0));
                 e.length = scale(e.length).max(1);
                 e.fade_in = scale(e.fade_in).min(e.length);
                 e.fade_out = scale(e.fade_out).min(e.length - e.fade_in);
+                // Noten linearer Parts behalten ihre Zeit in Sekunden.
+                for n in &mut e.notes {
+                    n.start = (n.start as f64 * f).round() as i64;
+                    n.length = scale(n.length).max(1);
+                }
             }
         }
         self.tempo.bpm = bpm;
@@ -894,6 +949,47 @@ impl Project {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn time_base_decides_what_follows_a_tempo_change() {
+        let mut p = Project::default();
+        let a = p.add_track(TrackKind::Audio, "A");
+        let m = p.add_track(TrackKind::Instrument, "I");
+        assert_eq!(p.tracks[a].time_base(), TimeBase::Linear);
+        assert_eq!(p.tracks[m].time_base(), TimeBase::Musical);
+        let ea = p.create_event(a, 960, 960).expect("audio");
+        let em = p.create_event(m, 960, 960).expect("part");
+        p.event_mut(em).expect("part").notes.push(Note {
+            pitch: 60,
+            velocity: 100,
+            start: 480,
+            length: 240,
+        });
+        // Swap: audio musical, instrument linear.
+        p.tracks[a].time_base = Some(TimeBase::Musical);
+        p.tracks[m].time_base = Some(TimeBase::Linear);
+        p.set_tempo(240.0);
+        assert_eq!(p.event(ea).expect("audio").start.0, 960);
+        let part = p.event(em).expect("part");
+        assert_eq!((part.start.0, part.length), (1920, 1920));
+        assert_eq!((part.notes[0].start, part.notes[0].length), (960, 480));
+    }
+
+    #[test]
+    fn overlapping_takes_get_their_own_lanes() {
+        let mut p = Project::default();
+        let t = p.add_track(TrackKind::Audio, "A");
+        p.create_event(t, 0, 960);
+        p.create_event(t, 960, 960);
+        p.create_event(t, 480, 960);
+        p.create_event(t, 600, 100);
+        let (lanes, n) = p.tracks[t].lanes();
+        // create_event keeps the list sorted by start.
+        let starts: Vec<u64> = p.tracks[t].events.iter().map(|e| e.start.0).collect();
+        assert_eq!(starts, [0, 480, 600, 960]);
+        assert_eq!(lanes, [0, 1, 2, 0]);
+        assert_eq!(n, 3);
+    }
 
     #[test]
     fn shuffle_swaps_neighbours_without_gaps() {

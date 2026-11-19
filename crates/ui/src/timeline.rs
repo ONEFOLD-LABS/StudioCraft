@@ -4,14 +4,14 @@
 use egui::{
     Align2, Color32, FontId, Painter, Pos2, Rect, Sense, Stroke, StrokeKind, Ui, pos2, vec2,
 };
-use studiocraft_project::{Event, EventId, Track, TrackKind};
+use studiocraft_project::{Event, EventId, TimeBase, Track, TrackKind};
 
 use crate::icons::Icon;
 use crate::{ProjectWindow, TPQ, Tool};
 
-const HEADER_W: f32 = 250.0;
+const HEADER_W: f32 = 290.0;
 /// Anzahl der Schalter im Spurkopf.
-const HEADER_BUTTONS: usize = 6;
+const HEADER_BUTTONS: usize = 8;
 const RULER_H: f32 = 30.0;
 
 #[derive(Debug, Clone, Copy)]
@@ -106,15 +106,14 @@ fn smart_zone(w: &ProjectWindow, g: &Geo, p: Pos2) -> Option<(EventId, usize, Zo
     let px = |dx: f32| f64::from(dx / g.view.px_per_quarter) * TPQ;
     // Etwas Toleranz, damit man den Rand auch knapp außerhalb trifft.
     let t = g.ticks(p.x);
-    let id = w
-        .project
-        .event_at(row, t.max(0.0) as u64)
-        .or_else(|| w.project.event_at(row, (t - px(EDGE)).max(0.0) as u64))
-        .or_else(|| w.project.event_at(row, (t + px(EDGE)).max(0.0) as u64))?;
+    let id = hit_event(w, g, row, p.y, t.max(0.0) as u64)
+        .or_else(|| hit_event(w, g, row, p.y, (t - px(EDGE)).max(0.0) as u64))
+        .or_else(|| hit_event(w, g, row, p.y, (t + px(EDGE)).max(0.0) as u64))?;
     let ev = w.project.event(id)?;
+    let lane_top = g.row_top(row) + lane_of(&w.project.tracks[row], id) as f32 * g.view.row_h;
     let x0 = g.x(ev.start.0 as f64);
     let x1 = g.x(ev.end() as f64);
-    let upper = p.y < g.row_top(row) + g.view.row_h * 0.5;
+    let upper = p.y < lane_top + g.view.row_h * 0.5;
     let fin = g.x((ev.start.0 + ev.fade_in) as f64);
     let fout = g.x((ev.end() - ev.fade_out) as f64);
     let zone = if upper && (p.x - fin).abs() <= EDGE && (p.x - fin).abs() <= (p.x - fout).abs() {
@@ -139,6 +138,54 @@ struct Geo {
     lanes: Rect,
     view: View,
     rows: usize,
+    /// Oberkante jeder Spur ab Inhaltsanfang, dazu die Gesamthöhe (Länge `rows + 1`).
+    /// Spuren mit aufgeklappten Lanes sind so hoch wie alle ihre Lanes.
+    tops: Vec<f32>,
+}
+
+/// Oberkanten aller Spuren und Gesamthöhe (siehe [`Geo::tops`]).
+fn row_tops(w: &ProjectWindow) -> Vec<f32> {
+    let mut tops = Vec::with_capacity(w.project.tracks.len() + 1);
+    let mut y = 0.0;
+    tops.push(y);
+    for t in &w.project.tracks {
+        let lanes = if t.show_lanes { t.lanes().1 } else { 1 };
+        y += w.view.row_h * lanes as f32;
+        tops.push(y);
+    }
+    tops
+}
+
+/// Lane eines Events in seiner Spur (0 ohne aufgeklappte Lanes).
+fn lane_of(track: &Track, id: EventId) -> usize {
+    if !track.show_lanes {
+        return 0;
+    }
+    let (lanes, _) = track.lanes();
+    track
+        .events
+        .iter()
+        .position(|e| e.id == id)
+        .and_then(|i| lanes.get(i).copied())
+        .unwrap_or(0)
+}
+
+/// Das Event unter (`y`, `ticks`) in Spur `row`; bei aufgeklappten Lanes nur in der Lane
+/// unter `y`, sonst das oberste (klingende).
+fn hit_event(w: &ProjectWindow, g: &Geo, row: usize, y: f32, ticks: u64) -> Option<EventId> {
+    let track = w.project.tracks.get(row)?;
+    if !track.show_lanes {
+        return w.project.event_at(row, ticks);
+    }
+    let lane = ((y - g.row_top(row)) / g.view.row_h).floor().max(0.0) as usize;
+    let (lanes, _) = track.lanes();
+    track
+        .events
+        .iter()
+        .zip(lanes)
+        .rev()
+        .find(|(e, l)| *l == lane && e.contains(ticks))
+        .map(|(e, _)| e.id)
 }
 
 impl Geo {
@@ -150,20 +197,35 @@ impl Geo {
         self.view.scroll_ticks + f64::from((x - self.lanes.left()) / self.view.px_per_quarter) * TPQ
     }
     fn row_top(&self, row: usize) -> f32 {
-        self.lanes.top() + row as f32 * self.view.row_h - self.view.scroll_y
+        let y = self.tops.get(row).copied().unwrap_or(0.0);
+        self.lanes.top() + y - self.view.scroll_y
+    }
+    fn row_height(&self, row: usize) -> f32 {
+        match (self.tops.get(row), self.tops.get(row + 1)) {
+            (Some(a), Some(b)) => b - a,
+            _ => self.view.row_h,
+        }
+    }
+    /// Spur, deren Oberkante als letzte bei oder über `content_y` liegt.
+    fn row_index(&self, content_y: f32) -> usize {
+        self.tops
+            .partition_point(|&t| t <= content_y)
+            .saturating_sub(1)
     }
     fn row_at(&self, y: f32) -> Option<usize> {
-        let r = ((y - self.lanes.top() + self.view.scroll_y) / self.view.row_h).floor();
-        (r >= 0.0 && (r as usize) < self.rows).then_some(r as usize)
+        let c = y - self.lanes.top() + self.view.scroll_y;
+        let total = self.tops.last().copied().unwrap_or(0.0);
+        (c >= 0.0 && c < total).then(|| self.row_index(c))
     }
     fn visible_rows(&self) -> std::ops::Range<usize> {
-        let first = (self.view.scroll_y / self.view.row_h).floor().max(0.0) as usize;
-        let count = (self.lanes.height() / self.view.row_h).ceil() as usize + 1;
-        first.min(self.rows)..(first + count).min(self.rows)
+        let first = self.row_index(self.view.scroll_y.max(0.0));
+        let last = self.row_index(self.view.scroll_y + self.lanes.height()) + 1;
+        first.min(self.rows)..last.min(self.rows)
     }
     /// Rechtecke der Knöpfe M, S, R im Spurkopf.
     /// Schalter im Spurkopf, von links: Mute, Solo, Aufnahme bereit, Monitor,
-    /// Automation lesen, Automation schreiben (Spec „Spurkopf in der Spurliste“).
+    /// Automation lesen, Automation schreiben, Zeitbasis, Lanes
+    /// (Spec „Spurkopf in der Spurliste“).
     fn header_buttons(&self, row: usize) -> [Rect; HEADER_BUTTONS] {
         let top = self.row_top(row) + (self.view.row_h - 18.0) / 2.0;
         let right = self.header.right() - 6.0;
@@ -189,7 +251,8 @@ pub(crate) fn show(w: &mut ProjectWindow, ui: &mut Ui) {
     let rows = w.project.tracks.len();
     w.lanes_rect = lanes;
 
-    scroll_and_zoom(w, ui, &resp, lanes, rows);
+    let tops = row_tops(w);
+    scroll_and_zoom(w, ui, &resp, lanes, tops.last().copied().unwrap_or(0.0));
     follow_cursor(w, lanes);
     let geo = Geo {
         header,
@@ -197,6 +260,7 @@ pub(crate) fn show(w: &mut ProjectWindow, ui: &mut Ui) {
         lanes,
         view: w.view,
         rows,
+        tops,
     };
 
     interact(w, ui, &resp, &geo);
@@ -292,7 +356,7 @@ fn scroll_and_zoom(
     ui: &Ui,
     resp: &egui::Response,
     lanes: Rect,
-    rows: usize,
+    content_h: f32,
 ) {
     if resp.hovered() {
         let (delta, zoom, mods, hover) = ui.input(|i| {
@@ -313,7 +377,7 @@ fn scroll_and_zoom(
             w.view.scroll_ticks -= f64::from(delta.x / w.view.px_per_quarter) * TPQ;
         }
     }
-    let max_y = (rows as f32 * w.view.row_h - lanes.height() + w.view.row_h).max(0.0);
+    let max_y = (content_h - lanes.height() + w.view.row_h).max(0.0);
     w.view.scroll_y = w.view.scroll_y.clamp(0.0, max_y);
     w.view.scroll_ticks = w.view.scroll_ticks.max(0.0);
 }
@@ -350,7 +414,7 @@ fn interact(w: &mut ProjectWindow, ui: &Ui, resp: &egui::Response, g: &Geo) {
             w.project.tracks[row].kind,
             TrackKind::Instrument | TrackKind::Midi
         )
-        && let Some(id) = w.project.event_at(row, g.ticks(p.x).max(0.0) as u64)
+        && let Some(id) = hit_event(w, g, row, p.y, g.ticks(p.x).max(0.0) as u64)
     {
         w.open_key_editor(id);
         return;
@@ -608,7 +672,7 @@ fn click(w: &mut ProjectWindow, g: &Geo, p: Pos2, mods: egui::Modifiers) {
     }
     if g.header.contains(p) {
         if let Some(row) = g.row_at(p.y) {
-            let [m, s, r, mon, read, write] = g.header_buttons(row);
+            let [m, s, r, mon, read, write, base, lanes] = g.header_buttons(row);
             let track = &mut w.project.tracks[row];
             let kind = track.kind;
             if m.contains(p) {
@@ -624,6 +688,13 @@ fn click(w: &mut ProjectWindow, g: &Geo, p: Pos2, mods: egui::Modifiers) {
                 track.read = !track.read;
             } else if write.contains(p) && crate::mixer::has_channel(kind) {
                 track.write = !track.write;
+            } else if base.contains(p) && kind.holds_events() {
+                track.time_base = Some(match track.time_base() {
+                    TimeBase::Musical => TimeBase::Linear,
+                    TimeBase::Linear => TimeBase::Musical,
+                });
+            } else if lanes.contains(p) && kind.holds_events() {
+                track.show_lanes = !track.show_lanes;
             } else {
                 w.selected_track = Some(row);
             }
@@ -635,7 +706,7 @@ fn click(w: &mut ProjectWindow, g: &Geo, p: Pos2, mods: egui::Modifiers) {
     }
     let Some(row) = g.row_at(p.y) else { return };
     let ticks = g.ticks(p.x).max(0.0);
-    let hit = w.project.event_at(row, ticks as u64);
+    let hit = hit_event(w, g, row, p.y, ticks as u64);
     w.selected_track = Some(row);
     match (w.tool, hit) {
         (Tool::Select, Some(id)) => {
@@ -767,10 +838,19 @@ fn paint_lanes(w: &ProjectWindow, painter: &Painter, g: &Geo) {
         let top = g.row_top(row);
         let rect = Rect::from_min_size(
             pos2(g.lanes.left(), top),
-            vec2(g.lanes.width(), g.view.row_h),
+            vec2(g.lanes.width(), g.row_height(row)),
         );
         if row % 2 == 1 {
             painter.rect_filled(rect, 0.0, visuals.faint_bg_color.gamma_multiply(0.5));
+        }
+        // Aufgeklappte Lanes: dünne Linien zwischen den Lanes.
+        let lanes = (g.row_height(row) / g.view.row_h).round() as usize;
+        for k in 1..lanes {
+            painter.hline(
+                rect.x_range(),
+                top + k as f32 * g.view.row_h,
+                Stroke::new(1.0, visuals.faint_bg_color.gamma_multiply(0.6)),
+            );
         }
         painter.hline(
             rect.x_range(),
@@ -798,13 +878,14 @@ fn paint_lanes(w: &ProjectWindow, painter: &Painter, g: &Geo) {
     let t1 = g.ticks(g.lanes.right()).max(0.0) as u64;
     for row in g.visible_rows() {
         let track = &w.project.tracks[row];
-        let top = g.row_top(row) + 2.0;
         let h = g.view.row_h - 4.0;
-        for ev in track
-            .events
-            .iter()
-            .filter(|e| e.end() >= t0 && e.start.0 <= t1)
-        {
+        let lanes = track.show_lanes.then(|| track.lanes().0);
+        for (i, ev) in track.events.iter().enumerate() {
+            if ev.end() < t0 || ev.start.0 > t1 {
+                continue;
+            }
+            let lane = lanes.as_ref().and_then(|l| l.get(i).copied()).unwrap_or(0);
+            let top = g.row_top(row) + lane as f32 * g.view.row_h + 2.0;
             let rect = Rect::from_min_max(
                 pos2(g.x(ev.start.0 as f64), top),
                 pos2(g.x(ev.end() as f64), top + h),
@@ -818,7 +899,7 @@ fn paint_lanes(w: &ProjectWindow, painter: &Painter, g: &Geo) {
             pos2(g.x(a as f64), g.row_top(r0)),
             pos2(
                 g.x(b as f64).max(g.x(a as f64) + 1.0),
-                g.row_top(r1) + g.view.row_h,
+                g.row_top(r1) + g.row_height(r1),
             ),
         );
         painter.rect_filled(rect, 0.0, crate::theme::tokens(painter.ctx()).selection);
@@ -1136,8 +1217,10 @@ fn paint_headers(w: &ProjectWindow, painter: &Painter, g: &Geo) {
         let top = g.row_top(row);
         let rect = Rect::from_min_size(
             pos2(g.header.left(), top),
-            vec2(g.header.width(), g.view.row_h),
+            vec2(g.header.width(), g.row_height(row)),
         );
+        // Name und Schalter stehen in der obersten Lane.
+        let head = Rect::from_min_size(rect.min, vec2(rect.width(), g.view.row_h));
         if w.selected_track == Some(row) {
             // Gewählte Spur: heller hinterlegt, nicht vollflächig in Akzentfarbe (ui-parity.md).
             painter.rect_filled(rect, 0.0, crate::theme::tokens(painter.ctx()).row_selected);
@@ -1153,14 +1236,14 @@ fn paint_headers(w: &ProjectWindow, painter: &Painter, g: &Geo) {
             pos2(g.header_buttons(row)[0].left() - 4.0, rect.max.y),
         );
         painter.with_clip_rect(name_clip.intersect(g.header)).text(
-            rect.left_center() + vec2(12.0, -6.0),
+            head.left_center() + vec2(12.0, -6.0),
             Align2::LEFT_CENTER,
             &track.name,
             FontId::proportional(13.0),
             crate::theme::tokens(painter.ctx()).text,
         );
         painter.text(
-            rect.left_center() + vec2(12.0, 8.0),
+            head.left_center() + vec2(12.0, 8.0),
             Align2::LEFT_CENTER,
             track.kind.label(),
             FontId::proportional(10.0),
@@ -1185,6 +1268,21 @@ fn paint_headers(w: &ProjectWindow, painter: &Painter, g: &Geo) {
             ),
             (Flag::Text("R"), track.read, t.monitor, channel),
             (Flag::Text("W"), track.write, t.rec, channel),
+            (
+                Flag::Icon(match track.time_base() {
+                    TimeBase::Musical => Icon::TimeMusical,
+                    TimeBase::Linear => Icon::TimeLinear,
+                }),
+                false,
+                t.accent,
+                track.kind.holds_events(),
+            ),
+            (
+                Flag::Icon(Icon::Lanes),
+                track.show_lanes,
+                t.accent,
+                track.kind.holds_events(),
+            ),
         ];
         for (b, (flag, on, color, shown)) in g.header_buttons(row).into_iter().zip(flags) {
             if !shown {
