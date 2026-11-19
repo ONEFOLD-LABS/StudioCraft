@@ -15,6 +15,8 @@ pub const MAX_FRAMES: u64 = 384_000 * 60 * 60 * 24;
 pub const MAX_LANE: u32 = 255;
 /// Tempo-Grenzen in BPM.
 pub const BPM: (f64, f64) = (10.0, 999.0);
+/// Höchstens so viele Tempowechsel.
+pub const MAX_TEMPO_EVENTS: usize = 10_000;
 /// Abtastraten-Grenzen eines Pool-Clips.
 pub const SAMPLE_RATE: (u32, u32) = (1_000, 768_000);
 
@@ -71,6 +73,31 @@ impl Project {
             self.master_db,
             finite_f32(self.master_db, (MIN_DB, MAX_DB), 0.0)
         );
+
+        // Tempospur: gültige Werte, sortiert, jeder Tick einmal, begrenzte Anzahl.
+        let before = self.tempo.events.clone();
+        let ev = &mut self.tempo.events;
+        ev.truncate(MAX_TEMPO_EVENTS);
+        ev.retain(|e| e.tick > 0 && e.bpm.is_finite());
+        for e in ev.iter_mut() {
+            e.tick = e.tick.min(MAX_TICKS);
+            e.bpm = e.bpm.clamp(BPM.0, BPM.1);
+        }
+        ev.sort_by_key(|e| e.tick);
+        ev.dedup_by_key(|e| e.tick);
+        fix(*ev != before);
+        let before = self.tempo.signatures.clone();
+        let sigs = &mut self.tempo.signatures;
+        sigs.truncate(MAX_TEMPO_EVENTS);
+        sigs.retain(|e| e.bar >= 2 && e.bar <= MAX_TICKS / crate::TICKS_PER_QUARTER);
+        for e in sigs.iter_mut() {
+            let sane = e.signature().sane();
+            e.numerator = sane.numerator;
+            e.denominator = sane.denominator;
+        }
+        sigs.sort_by_key(|e| e.bar);
+        sigs.dedup_by_key(|e| e.bar);
+        fix(*sigs != before);
 
         for c in &mut self.pool {
             clamp!(

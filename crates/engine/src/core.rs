@@ -29,8 +29,6 @@ pub enum Command {
     /// Note live spielen (Anspielen im Editor, MIDI-Keyboard): Spur, Taste,
     /// Anschlag 0–127, an/aus. Klingt am Anfang des nächsten Blocks.
     LiveNote(usize, u8, u8, bool),
-    /// Tempo und Taktart (für das Metronom).
-    SetTempo(TempoMap),
     /// Metronom ein/aus.
     SetMetronome(bool),
     /// Ziel für das MIDI-Keyboard (Projektspur), `None`: niemand.
@@ -156,8 +154,12 @@ impl EngineControl {
 
     pub fn position(&self, frames: u64) -> Position {
         let seconds = frames as f64 / f64::from(self.sample_rate);
-        let ticks = seconds * self.tempo.bpm / 60.0 * studiocraft_project::TICKS_PER_QUARTER as f64;
-        Position(ticks as u64)
+        let ticks = self.tempo.ticks_at_seconds(seconds);
+        Position(if ticks.is_finite() && ticks > 0.0 {
+            ticks as u64
+        } else {
+            0
+        })
     }
 }
 
@@ -182,8 +184,6 @@ pub struct EngineCore {
     bus_bufs: Vec<Box<[f32]>>,
     /// Metronom: Frames pro Zählzeit, Zählzeiten pro Takt, ein/aus, Klänge
     /// (0 = Takt-Eins, 1 = übrige Zählzeiten) und der gerade klingende Klick.
-    beat_frames: f64,
-    beats_per_bar: u64,
     metronome: bool,
     clicks: [Box<[f32]>; 2],
     click: Option<(usize, usize)>,
@@ -253,9 +253,6 @@ pub fn engine(sample_rate: u32, tempo: TempoMap) -> (EngineCore, EngineControl) 
         bus_bufs: (0..crate::song::MAX_BUSES)
             .map(|_| vec![0.0; SCRATCH_FRAMES * 2].into_boxed_slice())
             .collect(),
-        beat_frames: f64::from(sample_rate) * 60.0 / tempo.bpm * 4.0
-            / f64::from(tempo.signature.denominator),
-        beats_per_bar: u64::from(tempo.signature.numerator.max(1)),
         metronome: false,
         clicks: [
             click_sound(sample_rate, 1500.0),
@@ -367,12 +364,6 @@ impl EngineCore {
                     }
                 }
             }
-            Command::SetTempo(tempo) => {
-                let rate = f64::from(self.sample_rate);
-                self.beat_frames =
-                    rate * 60.0 / tempo.bpm * 4.0 / f64::from(tempo.signature.denominator.max(1));
-                self.beats_per_bar = u64::from(tempo.signature.numerator.max(1));
-            }
             Command::SetMetronome(on) => {
                 self.metronome = on;
                 if !on {
@@ -409,19 +400,33 @@ impl EngineCore {
         }
     }
 
-    /// Metronom-Klicks auf die Zählzeiten in `pos..pos + frames` legen (addiert).
+    /// Metronom-Klicks auf die Zählzeiten in `pos..pos + frames` legen (addiert). Die
+    /// Zählzeiten folgen der Tempo-Map des Songs (auch Tempowechsel); keine Allokation.
     fn render_click(&mut self, dst: &mut [f32], pos: u64, frames: usize) {
-        if !self.metronome || self.beat_frames <= 0.0 {
+        if !self.metronome {
             self.click = None;
             return;
         }
         const LEVEL: f32 = 0.5;
-        let fpb = self.beat_frames;
-        let mut next = (pos as f64 / fpb).ceil() as u64;
+        let rate = self.sample_rate.max(1);
+        let tempo = &self.song.tempo;
+        // Erste Zählzeit ab `pos` (in Ticks), dann jede weitere bis zum Blockende; Taktart
+        // und Takt-Eins folgen den Taktwechseln.
+        let tick = tempo.ticks_at_seconds(pos as f64 / f64::from(rate)).ceil();
+        let tick = if tick.is_finite() && tick > 0.0 {
+            tick as u64
+        } else {
+            0
+        };
+        let (mut next, mut downbeat) = tempo.next_beat(tick);
+        if tempo.frames(next, rate) < pos {
+            (next, downbeat) = tempo.next_beat(next + 1);
+        }
         let mut i = 0usize;
+        let end = pos + frames as u64;
         loop {
-            let beat_at = (next as f64 * fpb).round() as u64;
-            let until = if beat_at >= pos + frames as u64 {
+            let beat_at = tempo.frames(next, rate);
+            let until = if beat_at >= end {
                 frames
             } else {
                 (beat_at.max(pos) - pos) as usize
@@ -439,9 +444,9 @@ impl EngineCore {
             if until >= frames {
                 break;
             }
-            let which = usize::from(next % self.beats_per_bar != 0);
+            let which = usize::from(!downbeat);
             self.click = Some((which, 0));
-            next += 1;
+            (next, downbeat) = tempo.next_beat(next + 1);
             i = until;
         }
     }
@@ -892,6 +897,7 @@ mod tests {
             tracks: vec![track],
             master: 1.0,
             buses: 0,
+            tempo: TempoMap::default(),
         };
         ctl.send(Command::SetSong(Arc::new(song)));
         crate::monitor::push_frames(&mut tx, 2, [0.1, 0.8, 0.2, 0.6].into_iter());
@@ -903,6 +909,7 @@ mod tests {
             tracks: vec![crate::PlayTrack::default()],
             master: 1.0,
             buses: 0,
+            tempo: TempoMap::default(),
         };
         ctl.send(Command::SetSong(Arc::new(song)));
         crate::monitor::push_frames(&mut tx, 2, [0.1, 0.8].into_iter());
@@ -1202,6 +1209,36 @@ mod tests {
         let mut quiet = vec![0.0f32; 2 * 30_000];
         core.process(&mut quiet);
         assert!(quiet.iter().all(|v| *v == 0.0));
+    }
+
+    #[test]
+    fn metronome_follows_a_tempo_jump() {
+        use std::sync::Arc;
+        // 120 BPM for one bar (beats every 24 000 frames), then 60 BPM (every 48 000).
+        let mut tempo = TempoMap {
+            use_track: true,
+            ..TempoMap::default()
+        };
+        tempo.set_event(tempo.signature.bar_ticks(), 60.0, false);
+        let (mut core, mut ctl) = engine(48_000, tempo.clone());
+        ctl.send(Command::SetSong(Arc::new(Song {
+            tempo,
+            ..Song::default()
+        })));
+        ctl.send(Command::SetMetronome(true));
+        ctl.send(Command::Play);
+        let mut out = vec![0.0f32; 2 * 250_000];
+        for block in out.chunks_mut(2 * 1000) {
+            core.process(block);
+        }
+        let left: Vec<f32> = out.chunks(2).map(|f| f[0]).collect();
+        let energy = |at: usize| left[at..at + 100].iter().map(|v| v.abs()).sum::<f32>();
+        // Bar 1: 0, 24k, 48k, 72k; bar 2 starts at 96k, then every 48k.
+        for at in [0, 24_000, 48_000, 72_000, 96_000, 144_000, 192_000, 240_000] {
+            assert!(energy(at) > 1.0, "click at {at}");
+        }
+        // No click where the old tempo would have put one.
+        assert!(energy(120_000) < 1e-6, "no click at 120 000 after the jump");
     }
 
     /// Projekt mit einer Audio-Spur, deren Clip konstant 1,0 liefert, plus Bussen.
