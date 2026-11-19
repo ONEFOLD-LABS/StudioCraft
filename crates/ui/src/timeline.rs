@@ -112,6 +112,18 @@ pub(crate) enum Drag {
     },
     /// Cursor im Lineal ziehen (untere Hälfte).
     Scrub,
+    /// Löschen bzw. Stummschalten über Events streichen; `mute_to` ist der Zustand, den das
+    /// erste getroffene Event bekommen hat (alle weiteren folgen ihm); `last` die letzte
+    /// Mausposition, damit schnelle Bewegungen keine Events überspringen.
+    Stroke {
+        erase: bool,
+        mute_to: Option<bool>,
+        last: Pos2,
+    },
+    /// Zoom-Werkzeug: Rechteck aufziehen, beim Loslassen auf diesen Zeitbereich zoomen.
+    ZoomRect {
+        start: Pos2,
+    },
     /// Bereichsauswahl aufziehen (Werkzeug 2).
     Range {
         row: usize,
@@ -730,6 +742,14 @@ fn interact(w: &mut ProjectWindow, ui: &Ui, resp: &egui::Response, g: &Geo) {
     if resp.clicked() || resp.drag_started() {
         w.key_editor.focused = false;
     }
+    // Rechtsklick in die Event-Anzeige: Werkzeugpalette am Mauszeiger (Spec „Werkzeuge“).
+    if resp.secondary_clicked()
+        && let Some(p) = resp.interact_pointer_pos()
+        && g.lanes.contains(p)
+    {
+        w.open_tool_palette(p);
+        return;
+    }
     // Doppelklick auf einen Fade-Griff öffnet den Kurveneditor.
     let fade_hit = resp
         .double_clicked()
@@ -844,6 +864,11 @@ fn live_drag(w: &mut ProjectWindow, g: &Geo, d: Drag, p: Pos2, mods: egui::Modif
             w.locate(snapped);
             return;
         }
+        Drag::Stroke { .. } => {
+            w.drag = Some(stroke(w, g, d, p));
+            return;
+        }
+        Drag::ZoomRect { .. } => return,
         Drag::TrimStart { id } => {
             w.project.trim_start(id, snapped);
         }
@@ -978,9 +1003,34 @@ fn start_drag(w: &mut ProjectWindow, g: &Geo, p: Pos2, mods: egui::Modifiers) ->
         }
         Tool::Range => {
             let t = w.snap_ticks(ticks);
+            // Umschalt: die bestehende Auswahl vom gegenüberliegenden Ende aus erweitern.
+            if mods.shift
+                && let Some((r0, r1, a, b)) = w.range
+            {
+                let (anchor_row, anchor) = range_anchor((r0, r1, a, b), row, t);
+                w.range = Some((
+                    anchor_row.min(row),
+                    anchor_row.max(row),
+                    anchor.min(t),
+                    anchor.max(t),
+                ));
+                return Some(Drag::Range {
+                    row: anchor_row,
+                    start: anchor,
+                });
+            }
             w.range = Some((row, row, t, t));
             Some(Drag::Range { row, start: t })
         }
+        Tool::Erase | Tool::Mute => {
+            let d = Drag::Stroke {
+                erase: w.tool == Tool::Erase,
+                mute_to: None,
+                last: p,
+            };
+            Some(stroke(w, g, d, p))
+        }
+        Tool::Zoom => Some(Drag::ZoomRect { start: p }),
         Tool::Draw if w.project.tracks[row].kind.holds_events() => Some(Drag::Draw {
             row,
             start: w.snap_ticks(ticks),
@@ -1050,11 +1100,85 @@ fn set_header_volume(w: &mut ProjectWindow, g: &Geo, row: usize, x: f32) {
     }
 }
 
+/// Gegenüberliegende Ecke der Bereichsauswahl `r` zur Mausposition (`row`, `t`): von dort
+/// aus wird beim Erweitern mit Umschalt aufgezogen.
+fn range_anchor(r: (usize, usize, u64, u64), row: usize, t: u64) -> (usize, u64) {
+    let (r0, r1, a, b) = r;
+    let anchor = if t.saturating_mul(2) < a.saturating_add(b) {
+        b
+    } else {
+        a
+    };
+    let anchor_row = if row.saturating_mul(2) < r0 + r1 {
+        r1
+    } else {
+        r0
+    };
+    (anchor_row, anchor)
+}
+
+/// Löschen bzw. Stummschalten entlang der Strecke von der letzten Mausposition bis `p`
+/// (alle 3 px ein Treffertest). Gibt den aktualisierten Zustand zurück.
+fn stroke(w: &mut ProjectWindow, g: &Geo, d: Drag, p: Pos2) -> Drag {
+    let Drag::Stroke {
+        erase,
+        mut mute_to,
+        last,
+    } = d
+    else {
+        return d;
+    };
+    let steps = ((p - last).length() / 3.0).ceil().clamp(1.0, 2000.0) as usize;
+    for k in 0..=steps {
+        let q = last + (p - last) * (k as f32 / steps as f32);
+        if !g.lanes.contains(q) {
+            continue;
+        }
+        let Some(row) = g.row_at(q.y) else { continue };
+        let Some(id) = hit_event(w, g, row, q.y, g.ticks(q.x).max(0.0) as u64) else {
+            continue;
+        };
+        if erase {
+            w.project.delete(id);
+            w.selection.retain(|&s| s != id);
+        } else if let Some(ev) = w.project.event_mut(id) {
+            let to = *mute_to.get_or_insert(!ev.muted);
+            ev.muted = to;
+        }
+    }
+    Drag::Stroke {
+        erase,
+        mute_to,
+        last: p,
+    }
+}
+
+/// Zoom-Rechteck von `a` nach `b`: der Zeitbereich füllt danach die Breite der
+/// Event-Anzeige, die oberste Spur des Rechtecks steht oben. Unter 6 px Breite wird wie bei
+/// einem Klick eingezoomt (Alt: ausgezoomt).
+fn zoom_to_rect(w: &mut ProjectWindow, g: &Geo, a: Pos2, b: Pos2) {
+    let (x0, x1) = (a.x.min(b.x), a.x.max(b.x));
+    if x1 - x0 < 6.0 {
+        return;
+    }
+    let t0 = g.ticks(x0).max(0.0);
+    let t1 = g.ticks(x1).max(t0 + 1.0);
+    let quarters = ((t1 - t0) / TPQ) as f32;
+    w.view.px_per_quarter = (g.lanes.width() / quarters.max(1e-3)).clamp(1.0, 2000.0);
+    w.view.scroll_ticks = t0;
+    let top = a.y.min(b.y);
+    if let Some(row) = g.row_at(top.max(g.lanes.top())) {
+        w.view.scroll_y = g.row_top(row) - g.lanes.top() + g.view.scroll_y;
+    }
+}
+
 fn finish_drag(w: &mut ProjectWindow, g: &Geo, d: Drag, p: Pos2, mods: egui::Modifiers) {
     match d {
         Drag::Ruler { .. } => w.send_locators(),
         Drag::Scrub => {}
         Drag::Volume { .. } => {}
+        Drag::Stroke { .. } => {}
+        Drag::ZoomRect { start } => zoom_to_rect(w, g, start, p),
         // Schon während des Ziehens angewendet.
         Drag::Range { .. } => {
             if w.range.is_some_and(|(_, _, a, b)| b <= a) {
@@ -1275,7 +1399,22 @@ fn click(w: &mut ProjectWindow, g: &Geo, p: Pos2, mods: egui::Modifiers) {
             w.selection.clear();
             w.range = None;
         }
-        (Tool::Range, _) => w.range = None,
+        (Tool::Range, _) => {
+            let t = w.snap_ticks(ticks);
+            w.range = match w.range {
+                // Umschalt+Klick: Auswahl bis hierher erweitern.
+                Some(r) if mods.shift => {
+                    let (anchor_row, anchor) = range_anchor(r, row, t);
+                    Some((
+                        anchor_row.min(row),
+                        anchor_row.max(row),
+                        anchor.min(t),
+                        anchor.max(t),
+                    ))
+                }
+                _ => None,
+            };
+        }
         (Tool::Comp, Some(id)) => comp(w, id, 0, 0),
         (Tool::Glue, Some(id)) => {
             // Alt: alle folgenden Events dieser Spur ankleben.
@@ -1290,12 +1429,19 @@ fn click(w: &mut ProjectWindow, g: &Geo, p: Pos2, mods: egui::Modifiers) {
             }
         }
         (Tool::Split, Some(id)) => {
-            let at = if mods.alt {
-                ticks as u64
+            let at = w.snap_ticks(ticks);
+            if mods.alt {
+                // Alt: das ganze Event in Stücke dieser Länge teilen (Spec „Werkzeuge“).
+                let ids = w.project.split_equal(id, at);
+                if ids.len() as u64 == studiocraft_project::Project::MAX_EQUAL_PIECES {
+                    w.message = Some(format!(
+                        "Höchstens {} Stücke; der Rest bleibt ein Event",
+                        studiocraft_project::Project::MAX_EQUAL_PIECES
+                    ));
+                }
             } else {
-                w.snap_ticks(ticks)
-            };
-            w.project.split(id, at);
+                w.project.split(id, at);
+            }
         }
         (Tool::Erase, Some(id)) => {
             w.project.delete(id);
@@ -1498,6 +1644,14 @@ fn paint_lanes(w: &ProjectWindow, painter: &Painter, g: &Geo) {
             Stroke::new(1.0, crate::theme::tokens(painter.ctx()).accent),
             StrokeKind::Inside,
         );
+    }
+    if let Some(Drag::ZoomRect { start }) = w.drag
+        && let Some(now) = painter.ctx().pointer_interact_pos()
+    {
+        let t = crate::theme::tokens(painter.ctx());
+        let rect = Rect::from_two_pos(start, now);
+        painter.rect_filled(rect, 0.0, t.selection);
+        painter.rect_stroke(rect, 0.0, Stroke::new(1.0, t.accent), StrokeKind::Inside);
     }
     paint_drag_preview(w, painter, g);
 }

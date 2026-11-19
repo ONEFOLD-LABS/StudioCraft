@@ -87,6 +87,10 @@ pub struct ProjectWindow {
     /// Offene Farbpalette (Klick auf die Farbleiste im Spurkopf) und ihr Alter in Bildern.
     color_popup: Option<(colors::Target, egui::Pos2)>,
     color_popup_age: u8,
+    /// Werkzeugpalette am Mauszeiger (Rechtsklick in die Event-Anzeige) und ihr Alter in
+    /// Bildern, damit der öffnende Klick sie nicht gleich wieder schließt.
+    tool_palette: Option<egui::Pos2>,
+    tool_palette_age: u8,
     /// Tastaturbelegung (Standard plus eigene Änderungen) und der Dialog dazu.
     keymap: keymap::Keymap,
     key_dialog: keymap::KeyDialog,
@@ -228,6 +232,8 @@ impl ProjectWindow {
             grid_zoom: false,
             color_popup: None,
             color_popup_age: 0,
+            tool_palette: None,
+            tool_palette_age: 0,
             keymap: keymap::Keymap::default(),
             key_dialog: keymap::KeyDialog::default(),
             keypad: None,
@@ -776,6 +782,7 @@ impl ProjectWindow {
         self.update_focus(ui.ctx(), zones);
         quantize::panel(self, ui.ctx());
         self.color_popup(ui.ctx());
+        self.tool_palette(ui.ctx());
         self.key_commands_dialog(ui.ctx());
         self.repeat_dialog(ui.ctx());
         self.fade_editor_dialog(ui.ctx());
@@ -3380,6 +3387,175 @@ mod tests {
             "{split:?}"
         );
         assert!(right.right() > 1350.0, "{right:?}");
+    }
+
+    /// Bildschirmposition für `ticks` und `rows` Zeilenhöhen unter dem Lineal.
+    fn lane_pos(h: &Harness<'_, ProjectWindow>, ticks: u64, rows: f32) -> egui::Pos2 {
+        let w = h.state();
+        let r = w.lanes_rect;
+        let x =
+            r.left() + ((ticks as f64 - w.view.scroll_ticks) / TPQ) as f32 * w.view.px_per_quarter;
+        egui::pos2(x, r.top() + rows * w.view.row_h)
+    }
+
+    /// Klick mit Maustaste `button` und gehaltenen `mods` an `pos`.
+    fn click_with(
+        h: &mut Harness<'_, ProjectWindow>,
+        pos: egui::Pos2,
+        mods: egui::Modifiers,
+        button: egui::PointerButton,
+    ) {
+        h.event(egui::Event::ModifiersChanged(mods));
+        h.event(egui::Event::PointerMoved(pos));
+        h.run_steps(1);
+        for pressed in [true, false] {
+            h.event(egui::Event::PointerButton {
+                pos,
+                button,
+                pressed,
+                modifiers: mods,
+            });
+        }
+        h.run_steps(2);
+        h.event(egui::Event::ModifiersChanged(egui::Modifiers::NONE));
+        h.run_steps(1);
+    }
+
+    #[test]
+    fn split_tool_with_alt_cuts_equal_pieces() {
+        let (mut w, id) = one_event_window();
+        w.tool = Tool::Split;
+        let start = w.project.event(id).map(|e| e.start.0).unwrap_or(0);
+        let len = w.project.event(id).map(|e| e.length).unwrap_or(0);
+        let bar = w.bar_ticks();
+        let mut h = window_harness(w);
+        let p = lane_pos(&h, start + bar, 0.5);
+        click_with(
+            &mut h,
+            p,
+            egui::Modifiers::ALT,
+            egui::PointerButton::Primary,
+        );
+        let events = &h.state().project.tracks[0].events;
+        assert_eq!(events.len() as u64, len.div_ceil(bar));
+        assert!(
+            events
+                .iter()
+                .take(events.len() - 1)
+                .all(|e| e.length == bar)
+        );
+    }
+
+    #[test]
+    fn erase_and_mute_tools_work_as_strokes() {
+        let (mut w, id) = one_event_window();
+        let bar = w.bar_ticks();
+        let start = w.project.event(id).map(|e| e.start.0).unwrap_or(0);
+        w.project.split_equal(id, start + bar);
+        assert!(w.project.tracks[0].events.len() >= 3);
+        w.project.tracks[0].events[1].muted = true;
+        w.tool = Tool::Mute;
+        let mut h = window_harness(w);
+        // Mute stroke over the first three events: the first one decides (it becomes muted),
+        // the others follow, so the already muted second one stays muted.
+        let (a, b) = (
+            lane_pos(&h, start + bar / 2, 0.5),
+            lane_pos(&h, start + 5 * bar / 2, 0.5),
+        );
+        drag_with(&mut h, a, b, egui::Modifiers::NONE, egui::Modifiers::NONE);
+        let muted: Vec<bool> = h.state().project.tracks[0]
+            .events
+            .iter()
+            .map(|e| e.muted)
+            .collect();
+        assert_eq!(&muted[..3], &[true, true, true]);
+        h.state_mut().undo();
+        assert!(
+            !h.state().project.tracks[0].events[0].muted,
+            "one stroke is one undo step"
+        );
+        // Erase stroke over the first two events.
+        h.state_mut().tool = Tool::Erase;
+        let before = h.state().project.tracks[0].events.len();
+        let b = lane_pos(&h, start + 3 * bar / 2, 0.5);
+        drag_with(&mut h, a, b, egui::Modifiers::NONE, egui::Modifiers::NONE);
+        assert_eq!(h.state().project.tracks[0].events.len(), before - 2);
+    }
+
+    #[test]
+    fn zoom_tool_rectangle_fills_the_view() {
+        let (mut w, _) = one_event_window();
+        w.tool = Tool::Zoom;
+        let bar = w.bar_ticks();
+        let mut h = window_harness(w);
+        let width = h.state().lanes_rect.width();
+        let (a, b) = (lane_pos(&h, 2 * bar, 0.2), lane_pos(&h, 4 * bar, 0.8));
+        drag_with(&mut h, a, b, egui::Modifiers::NONE, egui::Modifiers::NONE);
+        let v = h.state().view;
+        assert!(
+            (v.scroll_ticks - (2 * bar) as f64).abs() < TPQ / 4.0,
+            "{}",
+            v.scroll_ticks
+        );
+        let quarters = (2 * bar) as f32 / TPQ as f32;
+        assert!(
+            (v.px_per_quarter - width / quarters).abs() < 2.0,
+            "{}",
+            v.px_per_quarter
+        );
+    }
+
+    #[test]
+    fn range_tool_shift_click_extends_the_range() {
+        let (mut w, _) = one_event_window();
+        w.tool = Tool::Range;
+        let bar = w.bar_ticks();
+        w.range = Some((0, 0, bar, 2 * bar));
+        let mut h = window_harness(w);
+        let p = lane_pos(&h, 4 * bar, 0.5);
+        click_with(
+            &mut h,
+            p,
+            egui::Modifiers::SHIFT,
+            egui::PointerButton::Primary,
+        );
+        assert_eq!(h.state().range, Some((0, 0, bar, 4 * bar)));
+        // Without Shift a click clears it.
+        click_with(
+            &mut h,
+            p,
+            egui::Modifiers::NONE,
+            egui::PointerButton::Primary,
+        );
+        assert_eq!(h.state().range, None);
+    }
+
+    #[test]
+    fn renders_tool_palette() {
+        shot("werkzeugpalette", |w| {
+            w.tool_palette = Some(egui::pos2(700.0, 300.0));
+            w.tool = Tool::Split;
+        });
+    }
+
+    #[test]
+    fn right_click_opens_the_tool_palette() {
+        let (w, _) = one_event_window();
+        let mut h = window_harness(w);
+        let p = lane_pos(&h, 0, 2.0);
+        click_with(
+            &mut h,
+            p,
+            egui::Modifiers::NONE,
+            egui::PointerButton::Secondary,
+        );
+        h.get_by_label("Trennen (Palette)").click();
+        h.run_steps(2);
+        assert_eq!(h.state().tool, Tool::Split);
+        assert!(
+            h.query_by_label("Trennen (Palette)").is_none(),
+            "palette closes"
+        );
     }
 
     #[test]
