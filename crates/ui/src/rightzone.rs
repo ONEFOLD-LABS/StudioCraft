@@ -523,9 +523,9 @@ fn plugins(w: &mut ProjectWindow, ui: &mut Ui) {
                             "Auf eine Spur ziehen oder erst eine Spur mit Mixer-Kanal wählen"
                         };
                         let label = if p.vendor.is_empty() {
-                            p.name.clone()
+                            p.display_name()
                         } else {
-                            format!("{}  ·  {}", p.name, p.vendor)
+                            format!("{}  ·  {}", p.display_name(), p.vendor)
                         };
                         let r = ui
                             .selectable_label(false, label)

@@ -12,6 +12,7 @@ use crate::clap::Library;
 pub enum PluginFormat {
     #[default]
     Clap,
+    Lv2,
 }
 
 /// Beschreibung eines gefundenen Plugins.
@@ -29,6 +30,15 @@ pub struct PluginInfo {
 }
 
 impl PluginInfo {
+    /// Name für Listen; LV2-Plugins mit Formatkennung (gleiche Plugins gibt es oft in
+    /// mehreren Formaten).
+    pub fn display_name(&self) -> String {
+        match self.format {
+            PluginFormat::Clap => self.name.clone(),
+            PluginFormat::Lv2 => format!("{} (LV2)", self.name),
+        }
+    }
+
     pub fn is_instrument(&self) -> bool {
         self.features.iter().any(|f| f == "instrument")
     }
@@ -134,6 +144,7 @@ pub fn scan(paths: &[PathBuf]) -> (Vec<PluginInfo>, Vec<String>) {
             Err(e) => errors.push(format!("{}: {e}", b.display())),
         }
     }
+    found.extend(crate::lv2::scan());
     sort_plugins(&mut found);
     (found, errors)
 }

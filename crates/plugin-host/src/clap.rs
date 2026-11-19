@@ -906,7 +906,12 @@ mod tests {
 
     /// Testet gegen echte, auf dem System installierte Plugins (falls vorhanden).
     fn installed() -> Vec<PluginInfo> {
-        scan(&default_paths()).0
+        // Nur CLAP: dieselben Plugins gibt es oft auch als LV2 mit gleichem Namen.
+        scan(&default_paths())
+            .0
+            .into_iter()
+            .filter(|p| p.format == crate::scan::PluginFormat::Clap)
+            .collect()
     }
 
     #[test]

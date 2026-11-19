@@ -37,6 +37,8 @@ pub struct ScanOptions {
     pub timeout: Duration,
     /// Höchstzahl gleichzeitiger Kindprozesse.
     pub parallel: usize,
+    /// Auch LV2-Plugins aufnehmen (lilv findet sie über seine eigenen Pfade).
+    pub lv2: bool,
 }
 
 impl ScanOptions {
@@ -48,6 +50,7 @@ impl ScanOptions {
             parallel: std::thread::available_parallelism()
                 .map_or(2, |n| n.get())
                 .clamp(1, 8),
+            lv2: true,
         }
     }
 }
@@ -374,6 +377,10 @@ pub fn scan_isolated(paths: &[PathBuf], opts: &ScanOptions) -> ScanReport {
         save_cache(path, &cache);
     }
     let mut report = ScanReport::default();
+    // LV2: lilv liest nur Beschreibungen (kein Plugin-Code), daher im eigenen Prozess.
+    if opts.lv2 {
+        report.plugins.extend(crate::lv2::scan());
+    }
     for (f, outcome) in results {
         match outcome {
             Outcome::Plugins(list) => report.plugins.extend(list),
