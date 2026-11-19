@@ -14,6 +14,7 @@ mod icons;
 mod infoline;
 mod inserts;
 mod keyeditor;
+mod keymap;
 mod menu;
 mod mixer;
 mod quantize;
@@ -36,7 +37,7 @@ use std::{
     sync::Arc,
 };
 
-use egui::{Color32, Key, Rect, RichText, Ui};
+use egui::{Color32, Rect, RichText, Ui};
 use studiocraft_engine::{AudioClip, Command, EngineControl, Song, TransportState};
 use studiocraft_project::{
     ClipId, EventId, PoolClip, Position, Project, TICKS_PER_QUARTER, TrackKind,
@@ -68,6 +69,9 @@ pub struct ProjectWindow {
     /// Offene Farbpalette (Klick auf die Farbleiste im Spurkopf) und ihr Alter in Bildern.
     color_popup: Option<(colors::Target, egui::Pos2)>,
     color_popup_age: u8,
+    /// Tastaturbelegung (Standard plus eigene Änderungen) und der Dialog dazu.
+    keymap: keymap::Keymap,
+    key_dialog: keymap::KeyDialog,
     /// Globaler Quantisierungswert mit Swing und Stärke (Taste Q).
     quantize: studiocraft_project::Quantize,
     /// Automation schreiben: Modus, Ausdünnen, laufende Durchgänge.
@@ -185,6 +189,8 @@ impl ProjectWindow {
             grid_zoom: false,
             color_popup: None,
             color_popup_age: 0,
+            keymap: keymap::Keymap::default(),
+            key_dialog: keymap::KeyDialog::default(),
             quantize: studiocraft_project::Quantize::default(),
             auto_writer: automation_write::AutomationWriter::default(),
             show_quantize: false,
@@ -558,95 +564,7 @@ impl ProjectWindow {
         if star {
             self.toggle_record();
         }
-        let (keys, mods) = ui.input(|i| {
-            let mut pressed = Vec::new();
-            for k in [
-                Key::Num1,
-                Key::Num2,
-                Key::Num3,
-                Key::Num4,
-                Key::Num5,
-                Key::Num6,
-                Key::Num7,
-                Key::Num8,
-                Key::Num9,
-                Key::Num0,
-                Key::J,
-                Key::H,
-                Key::G,
-                Key::Space,
-                Key::Delete,
-                Key::Backspace,
-                Key::Home,
-                Key::I,
-                Key::Comma,
-                Key::Slash,
-                Key::F3,
-                Key::O,
-                Key::C,
-                Key::P,
-                Key::Z,
-                Key::Y,
-                Key::R,
-            ] {
-                if i.key_pressed(k) {
-                    pressed.push(k);
-                }
-            }
-            (pressed, i.modifiers)
-        });
-        let alt = mods.alt;
-        for k in keys {
-            // Strg+Z / Strg+Umschalt+Z (und Strg+Y) vor allem anderen.
-            if mods.command && (k == Key::Z || k == Key::Y) {
-                if k == Key::Y || mods.shift {
-                    self.redo();
-                } else {
-                    self.undo();
-                }
-                continue;
-            }
-            if mods.command {
-                // Datei-Kürzel behandelt `file_shortcuts`.
-                continue;
-            }
-            if let Some(tool) = Tool::from_key(k) {
-                self.tool = tool;
-                continue;
-            }
-            match k {
-                Key::J => self.snap = !self.snap,
-                Key::H => self.view.zoom(1.25, None),
-                Key::G => self.view.zoom(0.8, None),
-                Key::Space => self.toggle_play(),
-                Key::Slash => self.toggle_cycle(),
-                Key::F3 => {
-                    // F3: Mixer ein/aus; ist gerade der Editor zu sehen, zum Mixer wechseln.
-                    if self.show_lower && self.lower == LowerZone::Mixer {
-                        self.show_lower = false;
-                    } else {
-                        self.show_lower = true;
-                        self.lower = LowerZone::Mixer;
-                    }
-                }
-                Key::Delete | Key::Backspace => {
-                    if self.key_editor.focused && self.show_lower && self.lower == LowerZone::Editor
-                    {
-                        self.delete_selected_notes();
-                    } else {
-                        self.delete_selection();
-                    }
-                }
-                Key::Home | Key::Comma => self.locate(0),
-                Key::I if alt => self.show_inspector = !self.show_inspector,
-                Key::R if alt => self.show_right = !self.show_right,
-                Key::I => self.punch_in = !self.punch_in,
-                Key::O => self.punch_out = !self.punch_out,
-                Key::C => self.toggle_metronome(),
-                Key::P => self.locators_to_selection(),
-                _ => {}
-            }
-        }
+        self.dispatch_keys(ui);
     }
 
     /// Zeichnet das ganze Projektfenster.
@@ -665,8 +583,6 @@ impl ProjectWindow {
             ui.ctx()
                 .request_repaint_after(std::time::Duration::from_millis(15));
         }
-        self.file_shortcuts(ui);
-        self.edit_shortcuts(ui);
         self.handle_keys(ui);
         let dt_s = ui.input(|i| i.unstable_dt);
         mixer::update_meters(self, dt_s);
@@ -748,6 +664,7 @@ impl ProjectWindow {
         self.update_focus(ui.ctx(), zones);
         quantize::panel(self, ui.ctx());
         self.color_popup(ui.ctx());
+        self.key_commands_dialog(ui.ctx());
 
         self.sync_tempo();
         let playing = self.is_playing();
@@ -1262,6 +1179,7 @@ const UNDO_STEPS: usize = 200;
 #[cfg(test)]
 mod tests {
     use super::*;
+    use egui::Key;
     use egui_kittest::{Harness, kittest::Queryable};
     use studiocraft_project::TempoMap;
 
@@ -2200,6 +2118,56 @@ mod tests {
         assert!(h.query_by_label("Last –").is_none());
         // Without the status line, messages show in the transport bar.
         h.get_by_label("Datei fehlt");
+    }
+
+    #[test]
+    fn key_commands_can_be_reassigned_with_a_conflict_warning() {
+        use keymap::Cmd;
+        let (w, _) = one_event_window();
+        let mut h = window_harness(w);
+        h.get_by_label("Bearbeiten").click();
+        h.run_steps(2);
+        h.get_by_label("Tastaturbefehle …").click();
+        h.run_steps(2);
+        assert!(h.state().key_dialog.open);
+        // Snap from J to K.
+        h.state_mut().key_dialog.capturing = Some(Cmd::Snap);
+        h.run_steps(1);
+        h.key_press(Key::K);
+        h.run_steps(2);
+        let k = egui::KeyboardShortcut::new(egui::Modifiers::NONE, Key::K);
+        assert_eq!(h.state().keymap.bindings(Cmd::Snap).last(), Some(&k));
+        // K for the metronome now clashes: the dialog asks, "Ersetzen" moves it.
+        h.state_mut().key_dialog.capturing = Some(Cmd::Metronome);
+        h.run_steps(1);
+        h.key_press(Key::K);
+        h.run_steps(2);
+        assert!(h.state().key_dialog.conflict.is_some());
+        h.get_by_label("Ersetzen").click();
+        h.run_steps(2);
+        assert!(!h.state().keymap.bindings(Cmd::Snap).contains(&k));
+        assert!(h.state().keymap.bindings(Cmd::Metronome).contains(&k));
+        // Close the dialog: J still toggles snap (it kept J), K no longer does.
+        h.state_mut().key_dialog.open = false;
+        h.run_steps(1);
+        let snap = h.state().snap;
+        h.key_press(Key::J);
+        h.run_steps(1);
+        assert_ne!(h.state().snap, snap);
+        h.key_press(Key::K);
+        h.run_steps(1);
+        assert_eq!(h.state().snap, !snap, "K is the metronome now, not snap");
+    }
+
+    #[test]
+    fn renders_key_commands_dialog() {
+        shot("tastaturbefehle", |w| {
+            w.key_dialog.open = true;
+            w.keymap.assign(
+                keymap::Cmd::Metronome,
+                egui::KeyboardShortcut::new(egui::Modifiers::NONE, Key::J),
+            );
+        });
     }
 
     #[test]

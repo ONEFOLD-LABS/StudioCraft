@@ -6,7 +6,6 @@
 //! Die Kürzel werden vor [`ProjectWindow::handle_keys`] verbraucht, damit dort keine
 //! Doppelbelegung greift (z. B. Alt+X gegen X).
 
-use egui::{Key, Modifiers, Ui};
 use studiocraft_project::{Event, EventId, Position};
 
 use crate::ProjectWindow;
@@ -18,7 +17,7 @@ pub(crate) struct Clipboard {
 }
 
 /// Ein Befehl aus der Standardbelegung.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) enum EditCommand {
     Cut,
     Copy,
@@ -40,58 +39,7 @@ pub(crate) enum EditCommand {
     Crossfade,
 }
 
-const BINDINGS: [(Modifiers, Key, EditCommand); 18] = [
-    (Modifiers::COMMAND, Key::X, EditCommand::Cut),
-    (Modifiers::COMMAND, Key::C, EditCommand::Copy),
-    (Modifiers::COMMAND, Key::V, EditCommand::Paste),
-    (Modifiers::COMMAND, Key::D, EditCommand::Duplicate),
-    (Modifiers::COMMAND, Key::A, EditCommand::SelectAll),
-    (Modifiers::ALT, Key::X, EditCommand::SplitAtCursor),
-    (Modifiers::ALT, Key::L, EditCommand::ToggleLeftZone),
-    (Modifiers::SHIFT, Key::F, EditCommand::ZoomToProject),
-    (Modifiers::NONE, Key::ArrowUp, EditCommand::PrevTrack),
-    (Modifiers::NONE, Key::ArrowDown, EditCommand::NextTrack),
-    (Modifiers::NONE, Key::ArrowLeft, EditCommand::PrevEvent),
-    (Modifiers::NONE, Key::ArrowRight, EditCommand::NextEvent),
-    (Modifiers::NONE, Key::M, EditCommand::Mute),
-    (Modifiers::NONE, Key::S, EditCommand::Solo),
-    (Modifiers::NONE, Key::R, EditCommand::RecordArm),
-    (Modifiers::NONE, Key::F2, EditCommand::ToggleTransport),
-    (Modifiers::NONE, Key::Q, EditCommand::Quantize),
-    (Modifiers::NONE, Key::X, EditCommand::Crossfade),
-];
-
-/// Wie `InputState::consume_key`, aber die Modifier müssen genau passen: `R` soll nicht auch
-/// bei Alt+R auslösen.
-fn consume_exact(i: &mut egui::InputState, m: Modifiers, key: Key) -> bool {
-    let mut hit = false;
-    i.events.retain(|e| {
-        let is = matches!(e, egui::Event::Key { key: k, pressed: true, modifiers, .. }
-            if *k == key && modifiers.matches_exact(m));
-        hit |= is;
-        !is
-    });
-    hit
-}
-
 impl ProjectWindow {
-    /// Verbraucht die Kürzel dieses Moduls und führt sie aus.
-    pub(crate) fn edit_shortcuts(&mut self, ui: &Ui) {
-        if ui.ctx().egui_wants_keyboard_input() {
-            return;
-        }
-        let hits: Vec<EditCommand> = ui.input_mut(|i| {
-            BINDINGS
-                .iter()
-                .filter(|(m, k, _)| consume_exact(i, *m, *k))
-                .map(|(_, _, c)| *c)
-                .collect()
-        });
-        for c in hits {
-            self.run_edit_command(c);
-        }
-    }
-
     pub(crate) fn run_edit_command(&mut self, c: EditCommand) {
         match c {
             EditCommand::Copy => self.copy_selection(),

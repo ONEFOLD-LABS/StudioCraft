@@ -127,6 +127,8 @@ fn main() -> ExitCode {
     let builder = egui::ViewportBuilder::default().with_title("StudioCraft");
     let builder = studiocraft_ui::titlebar::apply_frame(builder, &frame);
     window.set_window_frame(frame);
+    // Eigene Tastaturbelegung aus dem Einstellungsordner.
+    window.load_keymap();
     let options = eframe::NativeOptions {
         viewport: builder
             // Wayland finds the window icon through the app id and the installed desktop file

@@ -3,7 +3,7 @@
 use egui::Key;
 use studiocraft_project::{Project, QuantizeValue, TICKS_PER_QUARTER};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Tool {
     Select,
     Range,

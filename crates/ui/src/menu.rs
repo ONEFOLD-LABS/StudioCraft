@@ -2,12 +2,13 @@
 
 use std::path::PathBuf;
 
-use egui::{Key, KeyboardShortcut, Modifiers, Ui, ViewportCommand};
+use egui::{Key, Ui, ViewportCommand};
 use studiocraft_project::file::EXTENSION;
 
 use crate::ProjectWindow;
+use crate::keymap::Cmd;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) enum Action {
     New,
     Open,
@@ -26,66 +27,26 @@ impl Action {
     }
 }
 
-const CMD: Modifiers = Modifiers::COMMAND;
-const SC_NEW: KeyboardShortcut = KeyboardShortcut::new(CMD, Key::N);
-const SC_OPEN: KeyboardShortcut = KeyboardShortcut::new(CMD, Key::O);
-const SC_SAVE: KeyboardShortcut = KeyboardShortcut::new(CMD, Key::S);
-const SC_SAVE_AS: KeyboardShortcut = KeyboardShortcut::new(CMD.plus(Modifiers::SHIFT), Key::S);
-const SC_VERSION: KeyboardShortcut = KeyboardShortcut::new(CMD.plus(Modifiers::ALT), Key::S);
-const SC_UNDO: KeyboardShortcut = KeyboardShortcut::new(CMD, Key::Z);
-const SC_REDO: KeyboardShortcut = KeyboardShortcut::new(CMD.plus(Modifiers::SHIFT), Key::Z);
-const SC_TRACK: KeyboardShortcut = KeyboardShortcut::new(CMD, Key::T);
-
 impl ProjectWindow {
-    /// Tastenkürzel der Datei-Befehle (Spec „Tastaturkonzept“).
-    pub(crate) fn file_shortcuts(&mut self, ui: &Ui) {
-        // Die längeren Kombinationen zuerst, sonst schluckt Strg+S die anderen.
-        let hit = ui.input_mut(|i| {
-            [
-                (SC_SAVE_AS, Action::SaveAs),
-                (SC_VERSION, Action::SaveVersion),
-                (SC_SAVE, Action::Save),
-                (SC_NEW, Action::New),
-                (SC_OPEN, Action::Open),
-            ]
-            .into_iter()
-            .find(|(sc, _)| i.consume_shortcut(sc))
-            .map(|(_, a)| a)
-        });
-        if ui.input_mut(|i| i.consume_shortcut(&SC_TRACK)) {
-            self.add_audio_track();
-        }
-        if let Some(a) = hit {
-            self.request(ui, a);
-        }
-    }
-
     pub(crate) fn menu_bar(&mut self, ui: &mut Ui) {
         egui::MenuBar::new().ui(ui, |ui| {
             ui.menu_button("Datei", |ui| {
-                let fmt = |sc: &KeyboardShortcut| ui.ctx().format_shortcut(sc);
                 let items = [
-                    ("Neu", Some(fmt(&SC_NEW)), Action::New),
-                    ("Öffnen …", Some(fmt(&SC_OPEN)), Action::Open),
-                    ("Speichern", Some(fmt(&SC_SAVE)), Action::Save),
-                    ("Speichern unter …", Some(fmt(&SC_SAVE_AS)), Action::SaveAs),
-                    (
-                        "Neue Version speichern",
-                        Some(fmt(&SC_VERSION)),
-                        Action::SaveVersion,
-                    ),
-                    ("Audiodatei importieren …", None, Action::ImportAudio),
-                    ("Audio-Mixdown exportieren …", None, Action::ExportMixdown),
-                    ("Beenden", None, Action::Quit),
+                    ("Neu", Action::New),
+                    ("Öffnen …", Action::Open),
+                    ("Speichern", Action::Save),
+                    ("Speichern unter …", Action::SaveAs),
+                    ("Neue Version speichern", Action::SaveVersion),
+                    ("Audiodatei importieren …", Action::ImportAudio),
+                    ("Audio-Mixdown exportieren …", Action::ExportMixdown),
+                    ("Beenden", Action::Quit),
                 ];
-                for (i, (label, sc, action)) in items.into_iter().enumerate() {
+                for (i, (label, action)) in items.into_iter().enumerate() {
                     if i == 5 || i == 7 {
                         ui.separator();
                     }
-                    let mut b = egui::Button::new(label);
-                    if let Some(sc) = sc {
-                        b = b.shortcut_text(sc);
-                    }
+                    let keys = self.key_label(ui.ctx(), Cmd::File(action));
+                    let b = egui::Button::new(label).shortcut_text(keys);
                     if ui.add(b).clicked() {
                         self.request(ui, action);
                     }
@@ -93,12 +54,12 @@ impl ProjectWindow {
             });
             ui.menu_button("Bearbeiten", |ui| {
                 let undo = egui::Button::new("Rückgängig")
-                    .shortcut_text(ui.ctx().format_shortcut(&SC_UNDO));
+                    .shortcut_text(self.key_label(ui.ctx(), Cmd::Undo));
                 if ui.add_enabled(!self.undo.is_empty(), undo).clicked() {
                     self.undo();
                 }
                 let redo = egui::Button::new("Wiederherstellen")
-                    .shortcut_text(ui.ctx().format_shortcut(&SC_REDO));
+                    .shortcut_text(self.key_label(ui.ctx(), Cmd::Redo));
                 if ui.add_enabled(!self.redo.is_empty(), redo).clicked() {
                     self.redo();
                 }
@@ -106,16 +67,17 @@ impl ProjectWindow {
                 use crate::shortcuts::EditCommand as E;
                 let has_sel = !self.selection.is_empty();
                 let items = [
-                    ("Ausschneiden", "Strg+X", E::Cut, has_sel),
-                    ("Kopieren", "Strg+C", E::Copy, has_sel),
-                    ("Einfügen", "Strg+V", E::Paste, true),
-                    ("Duplizieren", "Strg+D", E::Duplicate, has_sel),
-                    ("Am Cursor teilen", "Alt+X", E::SplitAtCursor, true),
-                    ("Alles auswählen", "Strg+A", E::SelectAll, true),
-                    ("Quantisieren", "Q", E::Quantize, true),
-                    ("Crossfade", "X", E::Crossfade, has_sel),
+                    ("Ausschneiden", E::Cut, has_sel),
+                    ("Kopieren", E::Copy, has_sel),
+                    ("Einfügen", E::Paste, true),
+                    ("Duplizieren", E::Duplicate, has_sel),
+                    ("Am Cursor teilen", E::SplitAtCursor, true),
+                    ("Alles auswählen", E::SelectAll, true),
+                    ("Quantisieren", E::Quantize, true),
+                    ("Crossfade", E::Crossfade, has_sel),
                 ];
-                for (label, keys, cmd, enabled) in items {
+                for (label, cmd, enabled) in items {
+                    let keys = self.key_label(ui.ctx(), Cmd::Edit(cmd));
                     let b = egui::Button::new(label).shortcut_text(keys);
                     if ui.add_enabled(enabled, b).clicked() {
                         self.run_edit_command(cmd);
@@ -127,14 +89,20 @@ impl ProjectWindow {
                     self.show_quantize = true;
                     ui.close();
                 }
-                let del = egui::Button::new("Löschen").shortcut_text("Entf");
+                let del = egui::Button::new("Löschen")
+                    .shortcut_text(self.key_label(ui.ctx(), Cmd::Delete));
                 if ui.add_enabled(has_sel, del).clicked() {
                     self.delete_selection();
+                }
+                ui.separator();
+                if ui.button("Tastaturbefehle …").clicked() {
+                    self.key_dialog.open = true;
+                    ui.close();
                 }
             });
             ui.menu_button("Projekt", |ui| {
                 let audio = egui::Button::new("Audio-Spur hinzufügen")
-                    .shortcut_text(ui.ctx().format_shortcut(&SC_TRACK));
+                    .shortcut_text(self.key_label(ui.ctx(), Cmd::AddAudioTrack));
                 if ui.add(audio).clicked() {
                     self.add_audio_track();
                 }

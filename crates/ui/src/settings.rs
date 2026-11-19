@@ -21,6 +21,11 @@ impl Default for Settings {
     }
 }
 
+/// Ordner der Einstellungen (auch für die Tastaturbelegung).
+pub(crate) fn config_dir() -> Option<PathBuf> {
+    dir()
+}
+
 fn dir() -> Option<PathBuf> {
     if let Some(d) = std::env::var_os("STUDIOCRAFT_CONFIG_DIR") {
         return Some(PathBuf::from(d));
