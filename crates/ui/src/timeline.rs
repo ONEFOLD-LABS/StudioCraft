@@ -12,6 +12,7 @@ use crate::icons::Icon;
 use crate::{ProjectWindow, TPQ, Tool};
 
 mod automation;
+mod tempo;
 pub(crate) use automation::range as param_range;
 
 const HEADER_W: f32 = 290.0;
@@ -86,6 +87,13 @@ pub(crate) enum Drag {
     Marker {
         index: usize,
         grab: f64,
+    },
+    /// Punkt der Tempospur ziehen (`index` `None`: Anfangstempo); `range` = BPM-Bereich der
+    /// Anzeige beim Greifen (bleibt beim Ziehen fest).
+    TempoPoint {
+        row: usize,
+        index: Option<usize>,
+        range: (f64, f64),
     },
     /// Automation frei zeichnen; `last` = zuletzt gezeichneter Tick.
     AutoDraw {
@@ -743,7 +751,7 @@ fn scroll_and_zoom(
 
 /// Während der Wiedergabe blättert die Ansicht mit, wenn der Cursor rechts hinausläuft.
 fn follow_cursor(w: &mut ProjectWindow, lanes: Rect) {
-    if !w.is_playing() {
+    if !w.is_playing() || !w.follow_playback {
         return;
     }
     let visible = f64::from(lanes.width() / w.view.px_per_quarter) * TPQ;
@@ -812,7 +820,7 @@ fn interact(w: &mut ProjectWindow, ui: &Ui, resp: &egui::Response, g: &Geo) {
         )
         && let Some(id) = hit_event(w, g, row, p.y, g.ticks(p.x).max(0.0) as u64)
     {
-        w.open_key_editor(id);
+        w.open_key_editor_from_selection(id);
         return;
     }
 
@@ -1038,6 +1046,15 @@ fn live_drag(w: &mut ProjectWindow, g: &Geo, d: Drag, p: Pos2, mods: egui::Modif
             ));
             return;
         }
+        Drag::TempoPoint { row, index, range } => {
+            let t = if mods.alt {
+                raw.round() as u64
+            } else {
+                snapped
+            };
+            tempo::live_drag(w, g, (row, index, range), p, t);
+            return;
+        }
         Drag::Marker { index, grab } => {
             let t = if mods.alt {
                 (raw - grab).max(0.0).round() as u64
@@ -1086,6 +1103,11 @@ fn start_drag(w: &mut ProjectWindow, g: &Geo, p: Pos2, mods: egui::Modifiers) ->
     }
     if !g.lanes.contains(p) {
         return None;
+    }
+    if let Some(row) = g.row_at(p.y)
+        && w.project.tracks[row].kind == TrackKind::Tempo
+    {
+        return tempo::start_drag(w, g, row, p);
     }
     if let Some(row) = g.row_at(p.y)
         && w.project.tracks[row].kind == TrackKind::Marker
@@ -1378,7 +1400,8 @@ fn finish_drag(w: &mut ProjectWindow, g: &Geo, d: Drag, p: Pos2, mods: egui::Mod
         | Drag::EventGain { .. }
         | Drag::AutoPoint { .. }
         | Drag::AutoDraw { .. }
-        | Drag::Marker { .. } => {}
+        | Drag::Marker { .. }
+        | Drag::TempoPoint { .. } => {}
         Drag::Comp { id, start, .. } => {
             let end = w.snap_ticks(g.ticks(p.x));
             comp(w, id, start, end);
@@ -1542,6 +1565,12 @@ fn click(w: &mut ProjectWindow, g: &Geo, p: Pos2, mods: egui::Modifiers) {
         return;
     }
     if !g.lanes.contains(p) {
+        return;
+    }
+    if let Some(row) = g.row_at(p.y)
+        && w.project.tracks[row].kind == TrackKind::Tempo
+    {
+        tempo::click(w, g, row, p);
         return;
     }
     if let Some(row) = g.row_at(p.y)
@@ -1807,6 +1836,9 @@ fn paint_lanes(w: &ProjectWindow, painter: &Painter, g: &Geo) {
         }
         if w.project.tracks[row].kind == TrackKind::Marker {
             paint_markers(w, painter, g, row);
+        }
+        if w.project.tracks[row].kind == TrackKind::Tempo {
+            tempo::paint(w, painter, g, row);
         }
     }
     automation::paint(w, painter, g);
@@ -2093,15 +2125,20 @@ fn paint_waveform(
         return;
     }
     let tempo = &w.project.tempo;
-    // Frames des Clips pro Tick.
-    let fpt = f64::from(w.sample_rate) * 60.0 / (tempo.bpm * TPQ);
+    let rate = f64::from(w.sample_rate);
+    // Clip-Frame zu einer Tick-Position (über Sekunden, damit Tempowechsel stimmen).
+    let start_s = tempo.seconds(studiocraft_project::Position(ev.start.0));
+    let frame_at = |t: f64| {
+        let s = tempo.seconds(studiocraft_project::Position(t.max(0.0) as u64));
+        ev.offset as f64 + (s - start_s) * rate
+    };
     let mid = area.center().y;
     let half = area.height() * 0.5 - 1.0;
     let mut shapes = Vec::with_capacity(area.width() as usize + 1);
     let mut x = area.left().floor();
     while x < area.right() {
-        let f0 = ev.offset as f64 + (g.ticks(x) - ev.start.0 as f64) * fpt;
-        let f1 = ev.offset as f64 + (g.ticks(x + 1.0) - ev.start.0 as f64) * fpt;
+        let f0 = frame_at(g.ticks(x));
+        let f1 = frame_at(g.ticks(x + 1.0));
         let (lo, hi) = clip.peaks.range(f0, f1.max(f0 + 1.0));
         let fade = fade_gain(ev, g.ticks(x + 0.5) - ev.start.0 as f64);
         let (lo, hi) = (lo * fade, hi * fade);

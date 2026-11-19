@@ -3,7 +3,7 @@
 
 use std::{collections::HashMap, sync::Arc};
 
-use studiocraft_project::{ClipId, FadeCurve, Project, TrackKind, db_to_gain};
+use studiocraft_project::{ClipId, FadeCurve, Project, TempoMap, TrackKind, db_to_gain};
 
 /// Ein Event, wie der Audio-Thread es braucht.
 #[derive(Debug, Clone)]
@@ -128,6 +128,9 @@ pub struct Song {
     pub master: f32,
     /// Anzahl benutzter Bus-Puffer.
     pub buses: usize,
+    /// Tempo-Map für das Metronom im Audio-Thread (eine Kopie: sie wird mit dem Song
+    /// ausgetauscht und im Hauptthread freigegeben).
+    pub tempo: TempoMap,
 }
 
 impl Default for Song {
@@ -136,6 +139,7 @@ impl Default for Song {
             tracks: Vec::new(),
             master: 1.0,
             buses: 0,
+            tempo: TempoMap::default(),
         }
     }
 }
@@ -155,6 +159,7 @@ impl Song {
             }],
             master: 1.0,
             buses: 0,
+            tempo: TempoMap::default(),
         }
     }
 
@@ -190,8 +195,13 @@ impl Song {
                         }
                         let env_offset = fa - ev_start;
                         events.push(PlayEvent {
-                            fade_in: tempo.frames(e.fade_in, rate),
-                            fade_out: tempo.frames(e.fade_out, rate),
+                            // Fades als Dauer an ihrer Stelle (Tempowechsel möglich).
+                            fade_in: tempo.duration_frames(e.start.0, e.fade_in, rate),
+                            fade_out: tempo.duration_frames(
+                                e.end().saturating_sub(e.fade_out),
+                                e.fade_out,
+                                rate,
+                            ),
                             fade_in_curve: e.fade_in_curve,
                             fade_out_curve: e.fade_out_curve,
                             gain: db_to_gain(e.gain_db),
@@ -253,6 +263,7 @@ impl Song {
             tracks,
             master: db_to_gain(project.master_db),
             buses: 0,
+            tempo: project.tempo.clone(),
         };
         song.route(project);
         song
@@ -455,6 +466,7 @@ mod tests {
             ],
             master: 1.0,
             buses: 0,
+            tempo: TempoMap::default(),
         };
         let mut out = vec![0.0; 16];
         song.mix(&mut out, 0, 8);
@@ -472,6 +484,7 @@ mod tests {
             tracks: vec![track(1.0, 0, vec![PlayEvent::new(10, 5, 3, samples)])],
             master: 1.0,
             buses: 0,
+            tempo: TempoMap::default(),
         };
         let mut out = vec![0.0; 8];
         song.mix(&mut out, 12, 4);
@@ -491,6 +504,7 @@ mod tests {
             tracks: vec![track(1.0, 0, vec![ev])],
             master: 1.0,
             buses: 0,
+            tempo: TempoMap::default(),
         };
         let mut out = vec![0.0; 16];
         song.mix(&mut out, 0, 8);
@@ -512,6 +526,7 @@ mod tests {
             tracks: vec![track(1.0, 0, vec![ev])],
             master: 1.0,
             buses: 0,
+            tempo: TempoMap::default(),
         };
         let mut out = vec![0.0; 16];
         song.mix(&mut out, 0, 8);
@@ -540,6 +555,7 @@ mod tests {
             tracks: vec![track(1.0, 0, vec![plain])],
             master: 1.0,
             buses: 0,
+            tempo: TempoMap::default(),
         };
         let mut out = vec![0.0; 8];
         song.mix(&mut out, 0, 4);

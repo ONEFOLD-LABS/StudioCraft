@@ -287,6 +287,27 @@ pub(crate) const COMMANDS: &[CommandInfo] = &[
         [k(N, Key::ArrowDown)]
     ),
     cmd!(
+        Cmd::Edit(EditCommand::OctaveUp),
+        "edit.octave_up",
+        "Noten eine Oktave höher",
+        "Bearbeiten",
+        [k(S, Key::ArrowUp)]
+    ),
+    cmd!(
+        Cmd::Edit(EditCommand::OctaveDown),
+        "edit.octave_down",
+        "Noten eine Oktave tiefer",
+        "Bearbeiten",
+        [k(S, Key::ArrowDown)]
+    ),
+    cmd!(
+        Cmd::Edit(EditCommand::ToggleFollow),
+        "view.follow",
+        "Der Wiedergabe folgen",
+        "Navigation",
+        [k(N, Key::F)]
+    ),
+    cmd!(
         Cmd::Edit(EditCommand::NudgeLeft),
         "nav.nudge_left",
         "Nudge links",

@@ -453,7 +453,11 @@ impl ProjectWindow {
                     tempo.ticks(pass.start, rate),
                     id,
                     pass.offset,
-                    tempo.ticks(pass.length, rate).max(1),
+                    // Länge über das Ende, damit Tempowechsel im Take stimmen.
+                    tempo
+                        .ticks(pass.start.saturating_add(pass.length), rate)
+                        .saturating_sub(tempo.ticks(pass.start, rate))
+                        .max(1),
                     &name,
                 ) else {
                     continue;

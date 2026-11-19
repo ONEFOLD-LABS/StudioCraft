@@ -81,7 +81,7 @@ impl ProjectWindow {
             self.open_sample_editor(id);
             EditorWindow::Sample
         } else {
-            self.open_key_editor(id);
+            self.open_key_editor_from_selection(id);
             EditorWindow::Key
         };
         // Die Editoren schalten beim Öffnen die untere Zone um; das rückgängig machen.
@@ -178,6 +178,8 @@ impl ProjectWindow {
             body(self, ui, &mut open);
             return (open, None);
         }
+        // Tasten, die in diesem Fenster gedrückt werden, kommen nur in seiner Eingabe an.
+        self.handle_window_keys(ui);
         egui::CentralPanel::default().show(ui, |ui| body(self, ui, &mut open));
         let (close, outer, inner) = ui.input(|i| {
             let v = i.viewport();

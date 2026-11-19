@@ -58,7 +58,11 @@ pub(crate) enum NoteDrag {
 /// Zustand des Key-Editors (welcher Part, Auswahl, Ansicht).
 #[derive(Debug, Clone)]
 pub(crate) struct KeyEditor {
+    /// Aktiver Part: nur seine Noten werden bearbeitet.
     pub part: Option<EventId>,
+    /// Alle geöffneten Parts in fester Reihenfolge (Reiter), der aktive darunter. Die
+    /// anderen erscheinen gedimmt; ein Klick auf eine ihrer Noten macht ihren Part aktiv.
+    pub open: Vec<EventId>,
     pub view: KeyView,
     pub selection: Vec<usize>,
     pub drag: Option<NoteDrag>,
@@ -66,6 +70,8 @@ pub(crate) struct KeyEditor {
     pub preview: Option<u8>,
     /// Der Editor hatte den letzten Klick: Entf usw. wirken auf Noten.
     pub focused: bool,
+    /// Akustisches Feedback: angeklickte und verschobene Noten erklingen.
+    pub feedback: bool,
     /// Lage des Notenrasters und der Velocity-Spur im letzten Frame (für Tests).
     pub grid_rect: Rect,
     pub vel_rect: Rect,
@@ -75,11 +81,13 @@ impl Default for KeyEditor {
     fn default() -> Self {
         Self {
             part: None,
+            open: Vec::new(),
             view: KeyView::default(),
             selection: Vec::new(),
             drag: None,
             preview: None,
             focused: false,
+            feedback: true,
             grid_rect: Rect::NOTHING,
             vel_rect: Rect::NOTHING,
         }
@@ -145,6 +153,7 @@ impl ProjectWindow {
         };
         let (start, notes) = (ev.start.0, ev.notes.clone());
         self.key_editor.part = Some(part);
+        self.key_editor.open = vec![part];
         self.key_editor.selection.clear();
         self.key_editor.view.scroll_ticks = start as f64;
         if let Some(mid) = notes.iter().map(|n| i32::from(n.pitch)).max() {
@@ -159,6 +168,58 @@ impl ProjectWindow {
         }
         self.lower = crate::LowerZone::Editor;
         self.show_lower = true;
+    }
+
+    /// Akustisches Feedback für eine Note (nur wenn eingeschaltet).
+    pub(crate) fn note_feedback(&mut self, pitch: u8) {
+        if self.key_editor.feedback {
+            self.preview(Some(pitch));
+        }
+    }
+
+    /// Mehrere Parts öffnen; der erste wird aktiv. Nur MIDI-Parts (ohne Audio-Clip).
+    pub(crate) fn open_key_editor_parts(&mut self, ids: &[EventId]) {
+        let parts: Vec<EventId> = ids
+            .iter()
+            .copied()
+            .filter(|&id| self.project.event(id).is_some_and(|e| e.clip.is_none()))
+            .collect();
+        let Some(&first) = parts.first() else {
+            return;
+        };
+        self.open_key_editor(first);
+        self.key_editor.open = parts;
+    }
+
+    /// Doppelklick bzw. Strg+E auf `id`: Ist `id` Teil einer Auswahl aus mehreren Parts,
+    /// öffnen alle, `id` aktiv; sonst nur `id`.
+    pub(crate) fn open_key_editor_from_selection(&mut self, id: EventId) {
+        if self.selection.len() > 1 && self.selection.contains(&id) {
+            let mut ids = vec![id];
+            ids.extend(self.selection.iter().copied().filter(|&s| s != id));
+            self.open_key_editor_parts(&ids);
+        } else {
+            self.open_key_editor(id);
+        }
+    }
+
+    /// Macht einen der geöffneten Parts aktiv (Ansicht bleibt, Auswahl leert sich).
+    pub(crate) fn activate_part(&mut self, id: EventId) {
+        if self.key_editor.open.contains(&id) && self.project.event(id).is_some() {
+            self.key_editor.part = Some(id);
+            self.key_editor.selection.clear();
+            self.key_editor.drag = None;
+        }
+    }
+
+    /// Die geöffneten Parts außer dem aktiven, die es noch gibt.
+    fn other_parts(&self) -> Vec<EventId> {
+        self.key_editor
+            .open
+            .iter()
+            .copied()
+            .filter(|&id| Some(id) != self.key_editor.part && self.project.event(id).is_some())
+            .collect()
     }
 
     fn part_track(&self) -> Option<usize> {
@@ -222,6 +283,42 @@ pub(crate) fn show(w: &mut ProjectWindow, ui: &mut Ui) {
         .map(|(t, _)| w.project.tracks[t].color)
         .map_or(Color32::LIGHT_BLUE, |c| Color32::from_rgb(c[0], c[1], c[2]));
 
+    ui.horizontal(|ui| {
+        ui.toggle_value(&mut w.key_editor.feedback, "Akustisches Feedback")
+            .on_hover_text("Angeklickte und verschobene Noten erklingen");
+        ui.toggle_value(&mut w.follow_playback, "Folgen (F)")
+            .on_hover_text("Die Ansicht folgt dem Cursor während der Wiedergabe");
+        // Reiter der geöffneten Parts, wenn es mehrere sind.
+        let others = w.other_parts();
+        if !others.is_empty() {
+            ui.separator();
+            let open: Vec<EventId> = w
+                .key_editor
+                .open
+                .iter()
+                .copied()
+                .filter(|&id| w.project.event(id).is_some())
+                .collect();
+            for id in open {
+                let name = w
+                    .project
+                    .event(id)
+                    .map(|e| e.name.clone())
+                    .unwrap_or_default();
+                if ui
+                    .selectable_label(Some(id) == w.key_editor.part, name)
+                    .clicked()
+                {
+                    w.activate_part(id);
+                }
+            }
+        }
+        // Info-Zeile der gewählten Noten (noteinfo.rs).
+        if !w.key_editor.selection.is_empty() {
+            ui.separator();
+            w.note_info(ui, part);
+        }
+    });
     let (resp, painter) = ui.allocate_painter(ui.available_size(), Sense::click_and_drag());
     let r = resp.rect;
     let keys = Rect::from_min_max(
@@ -237,6 +334,15 @@ pub(crate) fn show(w: &mut ProjectWindow, ui: &mut Ui) {
         pos2(r.right(), r.bottom() - VEL_H),
     );
     let vel = Rect::from_min_max(pos2(r.left() + KEYS_W, r.bottom() - VEL_H + 4.0), r.max);
+    // Taste F: während der Wiedergabe mitblättern, wenn der Cursor hinausläuft.
+    if w.follow_playback && w.is_playing() {
+        let v = &mut w.key_editor.view;
+        let visible = f64::from(grid.width() / v.px_per_quarter) * TPQ;
+        let c = w.cursor as f64;
+        if c > v.scroll_ticks + visible * 0.95 || c < v.scroll_ticks {
+            v.scroll_ticks = (c - visible * 0.05).max(0.0);
+        }
+    }
 
     // Scrollen und Zoomen wie im Projektfenster.
     if resp.hovered() {
@@ -286,6 +392,25 @@ pub(crate) fn show(w: &mut ProjectWindow, ui: &mut Ui) {
         .unwrap_or_default();
     let p = painter.with_clip_rect(grid);
     paint_grid(w, &p, &g, ev.start.0, ev.end());
+    // Die anderen geöffneten Parts gedimmt darunter.
+    for other in w.other_parts() {
+        let Some(o) = w.project.event(other) else {
+            continue;
+        };
+        let c = w
+            .project
+            .find(other)
+            .map(|(t, _)| w.project.tracks[t].color)
+            .map_or(Color32::GRAY, |c| Color32::from_rgb(c[0], c[1], c[2]))
+            .gamma_multiply(0.35);
+        let og = KGeo {
+            part_start: o.start.0,
+            ..g
+        };
+        for n in &o.notes {
+            p.rect_filled(og.note_rect(n), 2.0, c);
+        }
+    }
     for (i, n) in notes.iter().enumerate() {
         let rect = g.note_rect(n);
         let selected = w.key_editor.selection.contains(&i);
@@ -404,6 +529,27 @@ fn interact(
 
     let in_grid = |p: Pos2| g.grid.contains(p);
 
+    // Klick auf eine gedimmte Note eines anderen geöffneten Parts: dieser wird aktiv.
+    if (resp.clicked() || resp.drag_started())
+        && let Some(p) = press.filter(|p| in_grid(*p))
+        && hit_note(g, notes, p).is_none()
+    {
+        for other in w.other_parts() {
+            let Some(o) = w.project.event(other) else {
+                continue;
+            };
+            let og = KGeo {
+                part_start: o.start.0,
+                ..*g
+            };
+            if let Some(i) = hit_note(&og, &o.notes, p) {
+                w.activate_part(other);
+                w.key_editor.selection = vec![i];
+                return;
+            }
+        }
+    }
+
     // Ziehen beginnen.
     if resp.drag_started()
         && let Some(p) = press.filter(|p| in_grid(*p))
@@ -424,7 +570,7 @@ fn interact(
                             note: i,
                         }
                     } else {
-                        w.preview(Some(n.pitch));
+                        w.note_feedback(n.pitch);
                         NoteDrag::Move {
                             original: notes.to_vec(),
                             anchor_tick: tick,
@@ -452,7 +598,7 @@ fn interact(
                         note: i,
                     });
                 }
-                w.preview(Some(pitch));
+                w.note_feedback(pitch);
             }
             _ => {}
         }
@@ -474,6 +620,11 @@ fn interact(
                 let anchor_start = anchor_tick - grab_offset;
                 let dt = snap(w, raw, mods.alt) - snap(w, anchor_start, mods.alt);
                 let dp = g.pitch(p.y) - anchor_pitch;
+                // Neue Tonhöhe der gegriffenen Note anspielen.
+                let heard = (anchor_pitch + dp).clamp(0, 127) as u8;
+                if w.key_editor.preview.is_some_and(|k| k != heard) {
+                    w.note_feedback(heard);
+                }
                 let copy = mods.command;
                 if let Some(ev) = w.project.event_mut(part) {
                     ev.notes = original.clone();
