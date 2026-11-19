@@ -1,4 +1,4 @@
-//! Quantisierung (Spec „Raster, Snap und Bearbeitung“ → Quantisierung, Issue #21).
+//! Quantisierung (Spec „Raster, Snap und Bearbeitung“ → Quantisierung).
 //!
 //! Ein globaler Quantisierungswert von 1/1 bis 1/64, gerade, triolisch oder punktiert. Swing
 //! verschiebt jede zweite Rasterposition nach rechts, bei 100 % um einen halben Rasterabstand.

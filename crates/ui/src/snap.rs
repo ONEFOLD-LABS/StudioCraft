@@ -1,4 +1,4 @@
-//! Snap (Spec „Raster, Snap und Bearbeitung“, Issue #12): Snap-Modus, Raster-Typ und
+//! Snap (Spec „Raster, Snap und Bearbeitung“): Snap-Modus, Raster-Typ und
 //! „An Zoom anpassen“. Events und Cursor wirken magnetisch nur in der Nähe (wenige Pixel),
 //! das Raster überall. Alt beim Ziehen hebt Snap auf (in den Zieh-Funktionen).
 

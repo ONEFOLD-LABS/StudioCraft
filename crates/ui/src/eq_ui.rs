@@ -1,4 +1,4 @@
-//! Abschnitt „EQ“ im Inspector (Spec „Mixer“ → Signalfluss, Punkt 4; Issue #29): Kurve des
+//! Abschnitt „EQ“ im Inspector (Spec „Mixer“ → Signalfluss, Punkt 4; Issue #20): Kurve des
 //! Frequenzgangs und vier Bänder mit Form, Frequenz, Gain und Güte, je ein- und abschaltbar.
 
 use egui::{Align2, Color32, DragValue, FontId, Sense, Stroke, Ui, pos2, vec2};

@@ -1,5 +1,5 @@
 //! Bearbeitungs- und Navigationskürzel aus der Standardbelegung (Spec „Tastaturkonzept“,
-//! Issue #7): Ausschneiden/Kopieren/Einfügen, Duplizieren, am Cursor teilen, alles auswählen,
+//! Issue #2): Ausschneiden/Kopieren/Einfügen, Duplizieren, am Cursor teilen, alles auswählen,
 //! auf das Projekt zoomen, Spur und Event wechseln, M/S/R der gewählten Spur, F2, Alt+L und
 //! Q (Quantisieren) und X (Crossfade).
 //!

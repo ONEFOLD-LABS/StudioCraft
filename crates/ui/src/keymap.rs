@@ -1,4 +1,4 @@
-//! Zentrale Befehlsliste mit frei belegbaren Tasten (Spec „Tastaturkonzept“, Issue #6).
+//! Zentrale Befehlsliste mit frei belegbaren Tasten (Spec „Tastaturkonzept“, Issue #1).
 //!
 //! Jeder Befehl hat eine feste Kennung, einen Namen, eine Kategorie und seine Standardtasten.
 //! Eigene Belegungen liegen als Textdatei `keys.txt` im Einstellungsordner, eine Zeile je

@@ -1,5 +1,5 @@
 //! Automationsspuren in der Event-Anzeige (Spec „Automation“ → Automationsspuren und
-//! Kurvenbearbeitung, Issue #34).
+//! Kurvenbearbeitung, Issue #25).
 //!
 //! Sichtbare Automationsspuren liegen unter ihrer Spur (unter den Lanes), je eine Zeile hoch.
 //! Der Pfeil im Spurkopf klappt sie auf und zu. Objektauswahl: Klick setzt einen Punkt, Ziehen

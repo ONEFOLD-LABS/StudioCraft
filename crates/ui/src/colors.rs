@@ -1,4 +1,4 @@
-//! Spur- und Event-Farben (Spec „Farbe“, Issue #19): Jede Spur hat eine Farbe, neue Events
+//! Spur- und Event-Farben (Spec „Farbe“): Jede Spur hat eine Farbe, neue Events
 //! erben sie. Ein Klick auf die Farbleiste im Spurkopf öffnet die Palette; über
 //! Bearbeiten → Event-Farbe bekommen gewählte Events eine eigene Farbe oder wieder die der Spur.
 

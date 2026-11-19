@@ -1,4 +1,4 @@
-//! Kanal-EQ: Biquad-Filter je Band (Spec „Mixer“ → Signalfluss, Punkt 4; Issue #29).
+//! Kanal-EQ: Biquad-Filter je Band (Spec „Mixer“ → Signalfluss, Punkt 4; Issue #20).
 //!
 //! Die Koeffizienten folgen den allgemein bekannten Formeln für digitale Glocken-, Shelf-,
 //! Hoch- und Tiefpassfilter (bilineare Transformation analoger Prototypen zweiter Ordnung).

@@ -1,4 +1,4 @@
-//! Automation (Spec „Automation“, Issue #34): Kurven für Parameter eines Kanals oder Plugins.
+//! Automation (Spec „Automation“, Issue #25): Kurven für Parameter eines Kanals oder Plugins.
 //!
 //! Jede Kurve liegt auf einer Automationsspur unter ihrer Spur. Punkte stehen in Ticks und in
 //! der natürlichen Einheit des Parameters: Lautstärke in dB, Pan −1…+1, Mute 0/1, Plugin-

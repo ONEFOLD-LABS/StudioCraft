@@ -1,4 +1,4 @@
-//! Ordnerspuren (Spec „Spurtypen und Inspector“: Ordner; Issue #16).
+//! Ordnerspuren (Spec „Spurtypen und Inspector“: Ordner; Issue #10).
 //!
 //! Eine Spur gehört über `Track::parent` zu einer Ordnerspur. Die Reihenfolge der Spuren im
 //! Projekt bleibt dabei unverändert (Engine und Plugins hängen an ihr); Spurliste und

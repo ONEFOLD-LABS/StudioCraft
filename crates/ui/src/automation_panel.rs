@@ -1,4 +1,4 @@
-//! Abschnitt „Automation“ im Inspector (Spec „Automation“, Issue #34): Automationsspuren der
+//! Abschnitt „Automation“ im Inspector (Spec „Automation“, Issue #25): Automationsspuren der
 //! Spur zeigen, stummschalten, entfernen und für weitere Parameter anlegen, auch für die
 //! Parameter der Inserts und des Instruments.
 

@@ -1,4 +1,4 @@
-//! Ordnerspuren in der Oberfläche (Issue #16): anlegen (Projekt → Ordner-Spur hinzufügen,
+//! Ordnerspuren in der Oberfläche (Issue #10): anlegen (Projekt → Ordner-Spur hinzufügen,
 //! mit der gewählten Spur darin) und im Inspector einer Spur ihren Ordner wählen. Auf- und
 //! zuklappen über den Pfeil im Spurkopf der Ordnerspur.
 

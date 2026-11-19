@@ -1,4 +1,4 @@
-//! Rechte Zone (Spec „Fenster-Architektur“, docs/ui-parity.md „Rechte Zone“, Issue #27):
+//! Rechte Zone (Spec „Fenster-Architektur“, docs/ui-parity.md „Rechte Zone“):
 //! Reiter „Medien“ mit dem Pool des Projekts, „Dateien“ als Dateibrowser mit Vorhören und
 //! „Plugins“ mit den gefundenen CLAP-Plugins. Ein- und ausblenden mit Alt+R oder dem
 //! Zonen-Schalter rechts in der Werkzeugzeile.

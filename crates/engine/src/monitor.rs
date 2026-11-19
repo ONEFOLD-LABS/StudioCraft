@@ -1,6 +1,6 @@
 //! Mithören (Monitor): Der Eingangs-Callback schiebt seine Samples zusätzlich in einen
 //! eigenen Ringpuffer, den der Audio-Thread Block für Block liest und in die Kanäle der
-//! Spuren mit eingeschaltetem Monitor mischt (Spec „Spurkopf“: Monitor, Issue #19).
+//! Spuren mit eingeschaltetem Monitor mischt (Spec „Spurkopf“: Monitor).
 //!
 //! Eingang und Ausgang sind getrennte Streams mit eigenem Takt. Damit die Verzögerung nicht
 //! wächst, verwirft [`MonitorInput::read`] alles, was über [`MAX_LAG_FRAMES`] hinaus wartet;

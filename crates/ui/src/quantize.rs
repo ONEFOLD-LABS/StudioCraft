@@ -1,5 +1,5 @@
-//! Quantisierung in der Oberfläche (Spec „Raster, Snap und Bearbeitung“ → Quantisierung,
-//! Issue #21): Quantisierungswert in der Werkzeugzeile, Taste Q und ein Panel für Swing und
+//! Quantisierung in der Oberfläche (Spec „Raster, Snap und Bearbeitung“ → Quantisierung):
+//! Quantisierungswert in der Werkzeugzeile, Taste Q und ein Panel für Swing und
 //! Stärke. Q wirkt im Key-Editor auf die gewählten Noten (ohne Auswahl auf alle), sonst auf
 //! die gewählten Events.
 

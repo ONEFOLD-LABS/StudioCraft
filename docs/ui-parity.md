@@ -1,6 +1,6 @@
 # UI-Parität: Anordnung des Projektfensters
 
-Stand: 2026-11-19 (Status nach #62–#69)
+Stand: 2026-11-19
 
 Ziel: Wer klassische DAWs kennt, findet sich in StudioCraft ohne Suchen zurecht. Dazu folgt das
 Projektfenster der Anordnung, die `docs/spec.md` (Abschnitt „Fenster-Architektur“) beschreibt,
@@ -102,7 +102,7 @@ Inhalt oben, eine schmale Reiterleiste am **unteren** Rand der Zone: Mixer, Edit
 Reiter oben: Medien (Pool), Dateien (Dateibrowser: Ordner öffnen, ein Klick hört vor, Doppelklick
 oder Ziehen legt die Datei ins Projekt), Plugins (Doppelklick oder Ziehen: Instrument auf eine
 leere Fläche gibt eine neue Instrument-Spur, auf eine Instrument-Spur ersetzt es deren Instrument;
-Effekt auf eine Spur wird Insert) (Issue #27). Ein-/ausblendbar über Alt+R und den
+Effekt auf eine Spur wird Insert). Ein-/ausblendbar über Alt+R und den
 Zonen-Schalter.
 
 ## Transportleiste
@@ -130,32 +130,32 @@ Die Positionsanzeige hat einen dunklen Hintergrund (`counter_bg`) mit heller Sch
 
 ## Reihenfolge der Umsetzung
 
-1. ✅ Werkzeugzeile mit eigenen Symbolen und Zonen-Schaltern (#62)
-2. ✅ Info-Zeile (#63), Mehrfachauswahl mit relativen Änderungen
-3. ✅ Spurköpfe: Aufnahme-Punkt und neutrale Auswahl (#64), Monitor und R/W (#73), Zeitbasis
-   und Lanes (#75)
-4. ✅ Transportleiste (#64) und Reiter der unteren Zone (#65)
-5. ✅ Farben: neutrale Grautöne, Akzent sparsamer (#65)
-6. ✅ Rechte Zone: Medien und Plugins (#67), Dateibrowser mit Vorhören (#86), Dateien und Plugins
-   ins Projekt ziehen (Issue #27)
-7. ✅ Inspector-Kopf in Spurfarbe (#69)
-8. ✅ Quantisierungswert in der Werkzeugzeile, Taste Q, Panel für Swing und Stärke (#71, Issue #21)
-9. ✅ Snap-Modi, Raster-Typen Sekunden/Frames/Samples, „An Zoom anpassen“ (#72, Issue #12)
-10. ✅ Monitor (Eingang mithören) und Automation R/W in Spurkopf und Inspector (#73, Issue #19)
-11. ✅ Fokusrahmen: Klick gibt einer Zone den Fokus, schmaler Rahmen in Akzentfarbe (#74)
-12. ✅ Zeitbasis (musikalisch/linear) und Lanes ein/aus in Spurkopf und Inspector (#75, Issue #19)
-13. ✅ Feine Rasterlinien in Event-Anzeige und Key-Editor (#76)
-14. ✅ Automation (Issue #34): Kurven abspielen mit R (#77), unter der Spur bearbeiten (#78),
-    schreiben mit W in Touch und Auto-Latch (#81), Sends (#83), Overwrite und Trim
-15. ✅ Statusanzeige der Transportleiste läuft nicht mehr über Tempo und Takt (#79)
+1. ✅ Werkzeugzeile mit eigenen Symbolen und Zonen-Schaltern
+2. ✅ Info-Zeile, Mehrfachauswahl mit relativen Änderungen
+3. ✅ Spurköpfe: Aufnahme-Punkt und neutrale Auswahl, Monitor und R/W, Zeitbasis
+   und Lanes
+4. ✅ Transportleiste und Reiter der unteren Zone
+5. ✅ Farben: neutrale Grautöne, Akzent sparsamer
+6. ✅ Rechte Zone: Medien und Plugins, Dateibrowser mit Vorhören, Dateien und Plugins
+   ins Projekt ziehen
+7. ✅ Inspector-Kopf in Spurfarbe
+8. ✅ Quantisierungswert in der Werkzeugzeile, Taste Q, Panel für Swing und Stärke
+9. ✅ Snap-Modi, Raster-Typen Sekunden/Frames/Samples, „An Zoom anpassen“
+10. ✅ Monitor (Eingang mithören) und Automation R/W in Spurkopf und Inspector
+11. ✅ Fokusrahmen: Klick gibt einer Zone den Fokus, schmaler Rahmen in Akzentfarbe
+12. ✅ Zeitbasis (musikalisch/linear) und Lanes ein/aus in Spurkopf und Inspector
+13. ✅ Feine Rasterlinien in Event-Anzeige und Key-Editor
+14. ✅ Automation (Issue #25): Kurven abspielen mit R, unter der Spur bearbeiten,
+    schreiben mit W in Touch und Auto-Latch, Sends, Overwrite und Trim
+15. ✅ Statusanzeige der Transportleiste läuft nicht mehr über Tempo und Takt
 16. ✅ Titelleiste wie in den Craft-Apps: Symbol, Menü, Titel und Fensterknöpfe in einer Zeile,
-    `craft-window` entscheidet pro Desktop (#80)
-17. ✅ Comping: Comp-Werkzeug, Abschnitte eines Takes per Klick oder Ziehen hörbar machen (#82)
+    `craft-window` entscheidet pro Desktop
+17. ✅ Comping: Comp-Werkzeug, Abschnitte eines Takes per Klick oder Ziehen hörbar machen
 18. ✅ Farben: Klick auf die Farbleiste im Spurkopf öffnet die Palette; Events folgen der Spurfarbe,
-    über Bearbeiten → Event-Farbe bekommen sie eine eigene (Issue #19)
+    über Bearbeiten → Event-Farbe bekommen sie eine eigene
 19. ✅ Linke Zone mit Kanalzug-Spalte neben dem Inspector
 20. ✅ Spurkopf zweizeilig mit Farbleiste, Spurnummer und Lautstärkeregler
 21. ✅ Inspector: Sektionen mit Titelleiste, Eingang und Ausgang unter „Routing“
 
-**Als Nächstes:** Aus dieser Liste ist nichts mehr offen; die Automationsmodi Overwrite und Trim
-kommen mit #91. Weitere Angleichungen ergeben sich aus `docs/spec.md`.
+**Als Nächstes:** Aus dieser Liste ist nichts mehr offen. Weitere Angleichungen ergeben sich aus
+`docs/spec.md`.

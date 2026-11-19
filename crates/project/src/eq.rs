@@ -1,4 +1,4 @@
-//! Kanal-EQ (Spec „Mixer“ → Signalfluss, Punkt 4; Issue #29): vier Bänder pro Kanalzug,
+//! Kanal-EQ (Spec „Mixer“ → Signalfluss, Punkt 4; Issue #20): vier Bänder pro Kanalzug,
 //! einzeln und als Ganzes abschaltbar. Die Filter selbst rechnet die Engine.
 
 /// Filterform eines Bands.

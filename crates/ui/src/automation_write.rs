@@ -1,4 +1,4 @@
-//! Automation schreiben (Spec „Automation“ → Schreibmodi, Issue #34).
+//! Automation schreiben (Spec „Automation“ → Schreibmodi, Issue #25).
 //!
 //! Bewegt man bei laufender Wiedergabe ein Bedienelement einer Spur mit W (Fader, Pan, Mute,
 //! Plugin-Parameter, im Mixer wie im Inspector), entsteht ein Schreibdurchgang für diesen

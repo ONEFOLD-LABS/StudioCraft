@@ -1,4 +1,4 @@
-//! Automation beim Abspielen (Spec „Automation“ → Engine-Hinweis, Issue #34).
+//! Automation beim Abspielen (Spec „Automation“ → Engine-Hinweis, Issue #25).
 //!
 //! [`Song::build`](crate::Song::build) übersetzt die Kurven einer Spur mit R in Hüllkurven in
 //! Frames. Der Audio-Thread wertet sie sample-genau aus: Lautstärke, Pan und Mute als Faktor

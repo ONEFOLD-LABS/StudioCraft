@@ -894,9 +894,9 @@ impl ProjectWindow {
             }
             if mixer::has_channel(track.kind) {
                 icons::state_toggle(ui, &mut track.read, "R", t.monitor)
-                    .on_hover_text("Automation lesen (wirkt mit der Automation, #34)");
+                    .on_hover_text("Automation lesen");
                 icons::state_toggle(ui, &mut track.write, "W", t.rec)
-                    .on_hover_text("Automation schreiben (wirkt mit der Automation, #34)");
+                    .on_hover_text("Automation schreiben");
             }
         });
         if track.kind.holds_events() {
