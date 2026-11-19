@@ -226,7 +226,9 @@ impl Track {
     }
 
     /// Hörbare Abschnitte (Ticks) je Event, in der Reihenfolge von `events`: Ein Event wird
-    /// von nicht stummen Events mit höherem (Comp-Rang, Listenplatz) verdeckt.
+    /// von nicht stummen Events mit höherem (Comp-Rang, Listenplatz) verdeckt, aber nur von
+    /// deren Teil ohne Fades: Im Fade-In oder Fade-Out des oberen klingt das untere durch
+    /// (Crossfade).
     pub fn audible_parts(&self) -> Vec<Vec<(u64, u64)>> {
         self.events
             .iter()
@@ -240,7 +242,11 @@ impl Track {
                     if j == i || c.muted || (c.comp, j) < (e.comp, i) {
                         continue;
                     }
-                    let (ca, cb) = (c.start.0, c.end());
+                    let ca = c.start.0.saturating_add(c.fade_in);
+                    let cb = c.end().saturating_sub(c.fade_out);
+                    if cb <= ca {
+                        continue;
+                    }
                     parts = parts
                         .into_iter()
                         .flat_map(|(a, b)| {
@@ -698,6 +704,67 @@ impl Project {
         Some((before, total))
     }
 
+    /// Crossfade (Taste X): Überlappen sich `a` und `b` auf einer Spur teilweise, bekommt das
+    /// frühere ein Fade-Out und das spätere ein Fade-In über die ganze Überlappung. Liegt eins
+    /// ganz im anderen oder überlappen sie nicht, passiert nichts.
+    pub fn crossfade(&mut self, a: EventId, b: EventId) -> bool {
+        let (Some((ta, _)), Some((tb, _))) = (self.find(a), self.find(b)) else {
+            return false;
+        };
+        let (Some(ea), Some(eb)) = (self.event(a).cloned(), self.event(b).cloned()) else {
+            return false;
+        };
+        if ta != tb || a == b {
+            return false;
+        }
+        let (first, second) = if (ea.start.0, a) <= (eb.start.0, b) {
+            (ea, eb)
+        } else {
+            (eb, ea)
+        };
+        if !(second.start.0 > first.start.0
+            && second.start.0 < first.end()
+            && second.end() > first.end())
+        {
+            return false;
+        }
+        let overlap = first.end() - second.start.0;
+        let first_in = first.fade_in.min(first.length - overlap);
+        let second_out = second.fade_out.min(second.length - overlap);
+        let before = (
+            first.fade_in,
+            first.fade_out,
+            second.fade_in,
+            second.fade_out,
+        );
+        self.set_fades(first.id, first_in, overlap);
+        self.set_fades(second.id, overlap, second_out);
+        let fades = |id| self.event(id).map_or((0, 0), |e| (e.fade_in, e.fade_out));
+        let (f, g) = (fades(first.id), fades(second.id));
+        (f.0, f.1, g.0, g.1) != before
+    }
+
+    /// Crossfades für jedes überlappende Paar unter `ids` und ihren Nachbarn auf der Spur.
+    /// Gibt zurück, ob sich etwas geändert hat.
+    pub fn crossfade_selection(&mut self, ids: &[EventId]) -> bool {
+        let mut pairs = Vec::new();
+        for &id in ids {
+            let Some((t, _)) = self.find(id) else {
+                continue;
+            };
+            for other in self.tracks[t].events.iter().map(|e| e.id) {
+                if other != id && !pairs.contains(&(other, id)) {
+                    pairs.push((id, other));
+                }
+            }
+        }
+        let mut changed = false;
+        for (a, b) in pairs {
+            changed |= self.crossfade(a, b);
+        }
+        changed
+    }
+
     /// Comping: Der Abschnitt `from..to` des Takes `id` klingt ab jetzt über allen anderen.
     /// Das Take wird an den Grenzen geteilt (die Lanes bleiben fest); der Abschnitt bekommt den
     /// höchsten Comp-Rang der Spur. Gibt die Id des Abschnitts zurück.
@@ -1076,6 +1143,33 @@ impl Project {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn crossfade_fades_both_events_over_the_overlap_and_both_sound() {
+        let mut p = Project::default();
+        let t = p.add_track(TrackKind::Audio, "A");
+        let a = p.create_event(t, 0, 2000).expect("a");
+        let b = p.create_event(t, 1500, 2000).expect("b");
+        // Without a crossfade the later event covers the overlap.
+        assert_eq!(
+            p.tracks[t].audible_parts(),
+            [vec![(0, 1500)], vec![(1500, 3500)]]
+        );
+        assert!(p.crossfade(b, a));
+        let (ea, eb) = (p.event(a).expect("a"), p.event(b).expect("b"));
+        assert_eq!((ea.fade_out, eb.fade_in), (500, 500));
+        // Now the earlier event plays through its fade-out under the later one's fade-in.
+        assert_eq!(
+            p.tracks[t].audible_parts(),
+            [vec![(0, 2000)], vec![(1500, 3500)]]
+        );
+        // Contained or separate events are left alone.
+        let inner = p.create_event(t, 100, 200).expect("inner");
+        assert!(!p.crossfade(a, inner));
+        let far = p.create_event(t, 9000, 100).expect("far");
+        assert!(!p.crossfade(a, far));
+        assert!(!p.crossfade_selection(&[a]), "already crossfaded");
+    }
 
     #[test]
     fn events_follow_the_track_colour_unless_they_have_their_own() {

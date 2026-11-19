@@ -918,6 +918,42 @@ mod tests {
     }
 
     #[test]
+    fn crossfaded_events_blend_in_the_overlap() {
+        use std::collections::HashMap;
+        use studiocraft_project::{PoolClip, Project, TrackKind};
+        let mut p = Project::default();
+        let t = p.add_track(TrackKind::Audio, "A");
+        let mut clips = HashMap::new();
+        let mut add = |p: &mut Project, level: f32| {
+            let c = p.add_clip(PoolClip {
+                name: "c".into(),
+                path: None,
+                sample_rate: 48_000,
+                frames: 2000,
+            });
+            clips.insert(c, Arc::<[f32]>::from(vec![level; 4000]));
+            c
+        };
+        // 120 bpm, 48 kHz: one tick is 25 frames.
+        let ca = add(&mut p, 1.0);
+        let cb = add(&mut p, 0.5);
+        let a = p.add_audio_event(t, 0, ca).expect("a");
+        let b = p.add_audio_event(t, 40, cb).expect("b");
+        assert!(p.crossfade(a, b));
+        let song = Song::build(&p, &clips, 48_000);
+        let (mut core, mut ctl) = engine(48_000, TempoMap::default());
+        ctl.send(Command::SetSong(Arc::new(song)));
+        ctl.send(Command::Play);
+        let mut out = vec![0.0f32; 2 * 2400];
+        core.process(&mut out);
+        let at = |f: usize| out[2 * f];
+        assert!((at(500) - 1.0).abs() < 1e-3, "before the overlap: a alone");
+        // Overlap from frame 1000 to 2000; in the middle both at half gain.
+        assert!((at(1500) - 0.75).abs() < 0.01, "{}", at(1500));
+        assert!((at(2200) - 0.5).abs() < 1e-3, "after the overlap: b alone");
+    }
+
+    #[test]
     fn channel_eq_shapes_the_track_before_the_fader() {
         let mut eq = studiocraft_project::ChannelEq::default();
         eq.bands[2].gain = 6.0;

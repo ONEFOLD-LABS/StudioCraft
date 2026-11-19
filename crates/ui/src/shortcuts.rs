@@ -1,7 +1,7 @@
 //! Bearbeitungs- und Navigationskürzel aus der Standardbelegung (Spec „Tastaturkonzept“,
 //! Issue #7): Ausschneiden/Kopieren/Einfügen, Duplizieren, am Cursor teilen, alles auswählen,
 //! auf das Projekt zoomen, Spur und Event wechseln, M/S/R der gewählten Spur, F2, Alt+L und
-//! Q (Quantisieren).
+//! Q (Quantisieren) und X (Crossfade).
 //!
 //! Die Kürzel werden vor [`ProjectWindow::handle_keys`] verbraucht, damit dort keine
 //! Doppelbelegung greift (z. B. Alt+X gegen X).
@@ -37,9 +37,10 @@ pub(crate) enum EditCommand {
     ToggleTransport,
     ToggleLeftZone,
     Quantize,
+    Crossfade,
 }
 
-const BINDINGS: [(Modifiers, Key, EditCommand); 17] = [
+const BINDINGS: [(Modifiers, Key, EditCommand); 18] = [
     (Modifiers::COMMAND, Key::X, EditCommand::Cut),
     (Modifiers::COMMAND, Key::C, EditCommand::Copy),
     (Modifiers::COMMAND, Key::V, EditCommand::Paste),
@@ -57,6 +58,7 @@ const BINDINGS: [(Modifiers, Key, EditCommand); 17] = [
     (Modifiers::NONE, Key::R, EditCommand::RecordArm),
     (Modifiers::NONE, Key::F2, EditCommand::ToggleTransport),
     (Modifiers::NONE, Key::Q, EditCommand::Quantize),
+    (Modifiers::NONE, Key::X, EditCommand::Crossfade),
 ];
 
 /// Wie `InputState::consume_key`, aber die Modifier müssen genau passen: `R` soll nicht auch
@@ -131,6 +133,15 @@ impl ProjectWindow {
             EditCommand::ToggleTransport => self.show_transport = !self.show_transport,
             EditCommand::ToggleLeftZone => self.show_inspector = !self.show_inspector,
             EditCommand::Quantize => self.quantize_selection(),
+            EditCommand::Crossfade => {
+                let before = self.project.clone();
+                let ids = self.selection.clone();
+                if !self.project.crossfade_selection(&ids) && !ids.is_empty() {
+                    self.message =
+                        Some("Crossfade: die Events müssen sich auf einer Spur überlappen".into());
+                }
+                self.checkpoint(before);
+            }
         }
     }
 

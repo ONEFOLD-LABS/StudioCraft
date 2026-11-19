@@ -2201,6 +2201,36 @@ mod tests {
     }
 
     #[test]
+    fn x_crossfades_overlapping_events() {
+        let mut p = Project::default();
+        let t = p.add_track(TrackKind::Audio, "A");
+        let a = p.create_event(t, 0, 3840).unwrap();
+        let b = p.create_event(t, 2880, 3840).unwrap();
+        let mut w = ProjectWindow::new(p, None, String::new());
+        w.selection = vec![b];
+        let mut h = window_harness(w);
+        h.key_press(Key::X);
+        h.run_steps(1);
+        let p = &h.state().project;
+        assert_eq!(p.event(a).map(|e| e.fade_out), Some(960));
+        assert_eq!(p.event(b).map(|e| e.fade_in), Some(960));
+        h.state_mut().undo();
+        assert_eq!(h.state().project.event(b).map(|e| e.fade_in), Some(0));
+    }
+
+    #[test]
+    fn renders_crossfade() {
+        shot("crossfade", |w| {
+            let bar = w.bar_ticks();
+            w.project.tracks[0].events.clear();
+            let a = w.project.create_event(0, 0, 3 * bar).unwrap();
+            let b = w.project.create_event(0, 2 * bar, 3 * bar).unwrap();
+            w.project.crossfade(a, b);
+            w.project.tracks[0].show_lanes = true;
+        });
+    }
+
+    #[test]
     fn eq_section_shapes_the_curve_and_saves_with_the_project() {
         let mut w = ProjectWindow::new(Project::demo(4), None, "kein Audio (Test)".into());
         w.selected_track = Some(0);
@@ -3351,7 +3381,7 @@ mod tests {
         h.key_press(Key::M);
         h.run_steps(1);
         assert!(h.state().project.tracks[track].mute);
-        // Alt+X teilt am Cursor, X allein ist (noch) kein Crossfade und teilt nicht.
+        // Alt+X teilt am Cursor; X allein (Crossfade) teilt nicht.
         h.state_mut().cursor = h.state().project.event(id).map_or(0, |e| e.start.0 + 100);
         h.key_press_modifiers(egui::Modifiers::ALT, Key::X);
         h.run_steps(1);

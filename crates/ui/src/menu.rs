@@ -113,6 +113,7 @@ impl ProjectWindow {
                     ("Am Cursor teilen", "Alt+X", E::SplitAtCursor, true),
                     ("Alles auswählen", "Strg+A", E::SelectAll, true),
                     ("Quantisieren", "Q", E::Quantize, true),
+                    ("Crossfade", "X", E::Crossfade, has_sel),
                 ];
                 for (label, keys, cmd, enabled) in items {
                     let b = egui::Button::new(label).shortcut_text(keys);
