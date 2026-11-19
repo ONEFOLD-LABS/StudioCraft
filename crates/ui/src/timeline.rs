@@ -6,9 +6,12 @@ use egui::{
 };
 use studiocraft_project::{Event, EventId, Track, TrackKind};
 
+use crate::icons::Icon;
 use crate::{ProjectWindow, TPQ, Tool};
 
-const HEADER_W: f32 = 220.0;
+const HEADER_W: f32 = 250.0;
+/// Anzahl der Schalter im Spurkopf.
+const HEADER_BUTTONS: usize = 6;
 const RULER_H: f32 = 30.0;
 
 #[derive(Debug, Clone, Copy)]
@@ -159,12 +162,14 @@ impl Geo {
         first.min(self.rows)..(first + count).min(self.rows)
     }
     /// Rechtecke der Knöpfe M, S, R im Spurkopf.
-    fn header_buttons(&self, row: usize) -> [Rect; 3] {
+    /// Schalter im Spurkopf, von links: Mute, Solo, Aufnahme bereit, Monitor,
+    /// Automation lesen, Automation schreiben (Spec „Spurkopf in der Spurliste“).
+    fn header_buttons(&self, row: usize) -> [Rect; HEADER_BUTTONS] {
         let top = self.row_top(row) + (self.view.row_h - 18.0) / 2.0;
         let right = self.header.right() - 6.0;
         std::array::from_fn(|i| {
-            let x = right - (3 - i) as f32 * 22.0;
-            Rect::from_min_size(pos2(x, top), vec2(20.0, 18.0))
+            let x = right - (HEADER_BUTTONS - i) as f32 * 21.0;
+            Rect::from_min_size(pos2(x, top), vec2(19.0, 18.0))
         })
     }
 }
@@ -603,14 +608,22 @@ fn click(w: &mut ProjectWindow, g: &Geo, p: Pos2, mods: egui::Modifiers) {
     }
     if g.header.contains(p) {
         if let Some(row) = g.row_at(p.y) {
-            let [m, s, r] = g.header_buttons(row);
+            let [m, s, r, mon, read, write] = g.header_buttons(row);
             let track = &mut w.project.tracks[row];
+            let kind = track.kind;
             if m.contains(p) {
                 track.mute = !track.mute;
             } else if s.contains(p) {
                 track.solo = !track.solo;
-            } else if r.contains(p) && track.kind.holds_events() {
+            } else if r.contains(p) && kind.holds_events() {
                 track.record = !track.record;
+            } else if mon.contains(p) && kind == TrackKind::Audio {
+                let on = !track.monitor;
+                w.set_monitor(row, on);
+            } else if read.contains(p) && crate::mixer::has_channel(kind) {
+                track.read = !track.read;
+            } else if write.contains(p) && crate::mixer::has_channel(kind) {
+                track.write = !track.write;
             } else {
                 w.selected_track = Some(row);
             }
@@ -1153,27 +1166,27 @@ fn paint_headers(w: &ProjectWindow, painter: &Painter, g: &Geo) {
             FontId::proportional(10.0),
             visuals.weak_text_color(),
         );
+        let t = crate::theme::tokens(painter.ctx());
+        let channel = crate::mixer::has_channel(track.kind);
         let flags = [
+            (Flag::Text("M"), track.mute, t.mute, true),
+            (Flag::Text("S"), track.solo, t.solo, true),
             (
-                "M",
-                track.mute,
-                crate::theme::tokens(painter.ctx()).mute,
-                true,
-            ),
-            (
-                "S",
-                track.solo,
-                crate::theme::tokens(painter.ctx()).solo,
-                true,
-            ),
-            (
-                "R",
+                Flag::Icon(Icon::Record),
                 track.record,
-                crate::theme::tokens(painter.ctx()).rec,
+                t.rec,
                 track.kind.holds_events(),
             ),
+            (
+                Flag::Icon(Icon::Play),
+                track.monitor,
+                t.monitor,
+                track.kind == TrackKind::Audio,
+            ),
+            (Flag::Text("R"), track.read, t.monitor, channel),
+            (Flag::Text("W"), track.write, t.rec, channel),
         ];
-        for (b, (label, on, color, shown)) in g.header_buttons(row).into_iter().zip(flags) {
+        for (b, (flag, on, color, shown)) in g.header_buttons(row).into_iter().zip(flags) {
             if !shown {
                 continue;
             }
@@ -1183,23 +1196,32 @@ fn paint_headers(w: &ProjectWindow, painter: &Painter, g: &Geo) {
                 visuals.widgets.inactive.bg_fill
             };
             painter.rect_filled(b, 3.0, fill);
-            let text = if on {
-                Color32::BLACK
-            } else {
-                visuals.text_color()
-            };
-            if label == "R" {
-                // Aufnahme bereit: roter Punkt statt Buchstabe, wie überall in der Transportsteuerung.
-                let dot = if on { Color32::WHITE } else { color };
-                crate::icons::paint(painter, b.shrink(4.0), crate::icons::Icon::Record, dot);
-            } else {
-                painter.text(
-                    b.center(),
-                    Align2::CENTER_CENTER,
-                    label,
-                    FontId::proportional(11.0),
-                    text,
-                );
+            match flag {
+                Flag::Icon(icon) => {
+                    // Aufnahme bereit (Punkt) und Monitor (Lautsprecher) als Symbol.
+                    let fg = if on {
+                        Color32::WHITE
+                    } else if icon == Icon::Record {
+                        color
+                    } else {
+                        visuals.text_color()
+                    };
+                    crate::icons::paint(painter, b.shrink(4.0), icon, fg);
+                }
+                Flag::Text(label) => {
+                    let text = if on {
+                        Color32::BLACK
+                    } else {
+                        visuals.text_color()
+                    };
+                    painter.text(
+                        b.center(),
+                        Align2::CENTER_CENTER,
+                        label,
+                        FontId::proportional(11.0),
+                        text,
+                    );
+                }
             }
         }
         painter.hline(
@@ -1208,6 +1230,12 @@ fn paint_headers(w: &ProjectWindow, painter: &Painter, g: &Geo) {
             Stroke::new(1.0, visuals.faint_bg_color),
         );
     }
+}
+
+/// Beschriftung eines Spurkopf-Schalters.
+enum Flag {
+    Text(&'static str),
+    Icon(Icon),
 }
 
 fn paint_cursor(w: &ProjectWindow, painter: &Painter, g: &Geo) {

@@ -12,6 +12,7 @@ pub mod input;
 pub mod inserts;
 pub mod meters;
 pub mod midi;
+pub mod monitor;
 pub mod transport;
 
 pub mod output;
@@ -22,6 +23,7 @@ pub use core::{Command, EngineControl, EngineCore, EngineStatus, engine};
 pub use input::{AudioInput, InputInfo, PreparedInput, Recorder, Recording};
 pub use inserts::{Insert, InsertChain};
 pub use meters::{MAX_METERED_TRACKS, Meters};
+pub use monitor::MonitorInput;
 pub use output::{AudioOutput, OutputInfo, PreparedOutput};
 pub use song::{PlayEvent, PlayNote, PlayTrack, Song};
 pub use transport::{Transport, TransportState};

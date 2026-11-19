@@ -103,6 +103,14 @@ pub struct Track {
     pub mute: bool,
     pub solo: bool,
     pub record: bool,
+    /// Eingang mithören (Audio-Spuren): das Eingangssignal läuft durch den Kanal der Spur.
+    #[serde(default)]
+    pub monitor: bool,
+    /// Automation lesen (R) und schreiben (W); wirken, sobald es Automationsspuren gibt.
+    #[serde(default)]
+    pub read: bool,
+    #[serde(default)]
+    pub write: bool,
     /// Fader in dB; [`MIN_DB`] und darunter gilt als −∞.
     pub volume_db: f32,
     /// Panorama: −1 links, 0 Mitte, +1 rechts (Stereo-Balance).
@@ -350,6 +358,9 @@ impl Project {
                 mute: false,
                 solo: false,
                 record: false,
+                monitor: false,
+                read: false,
+                write: false,
                 volume_db: 0.0,
                 pan: 0.0,
                 input: TrackInput::default(),
@@ -654,6 +665,9 @@ impl Project {
             mute: false,
             solo: false,
             record: false,
+            monitor: false,
+            read: false,
+            write: false,
             volume_db: 0.0,
             pan: 0.0,
             input: TrackInput::default(),

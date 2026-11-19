@@ -24,6 +24,7 @@ use cpal::{
 };
 
 use crate::clock::{CaptureClock, now_nanos};
+use crate::monitor::{MonitorInput, monitor_ring, push_frames};
 
 /// Puffer zwischen Eingangs-Callback und Recorder in Sekunden.
 const RING_SECONDS: usize = 4;
@@ -127,8 +128,9 @@ impl PreparedInput {
         })
     }
 
-    /// Startet Eingang und Recorder-Thread.
-    pub fn start(self) -> Result<(AudioInput, Recorder), String> {
+    /// Startet Eingang und Recorder-Thread. Der dritte Teil speist das Mithören und gehört
+    /// per [`crate::Command::SetMonitorInput`] in die Engine.
+    pub fn start(self) -> Result<(AudioInput, Recorder, MonitorInput), String> {
         let Self {
             device,
             config,
@@ -137,15 +139,20 @@ impl PreparedInput {
         } = self;
         let capacity = config.sample_rate as usize * usize::from(config.channels) * RING_SECONDS;
         let (producer, consumer) = rtrb::RingBuffer::new(capacity);
+        let (monitor_tx, monitor) = monitor_ring(
+            config.channels,
+            config.sample_rate,
+            crate::core::SCRATCH_FRAMES,
+        );
         let overruns = Arc::new(AtomicU64::new(0));
         let clock = Arc::new(CaptureClock::default());
         let (o, c) = (overruns.clone(), clock.clone());
         let stream = match format {
-            SampleFormat::F32 => build::<f32>(&device, &config, producer, o, c),
-            SampleFormat::I16 => build::<i16>(&device, &config, producer, o, c),
-            SampleFormat::I32 => build::<i32>(&device, &config, producer, o, c),
-            SampleFormat::U16 => build::<u16>(&device, &config, producer, o, c),
-            SampleFormat::F64 => build::<f64>(&device, &config, producer, o, c),
+            SampleFormat::F32 => build::<f32>(&device, &config, producer, monitor_tx, o, c),
+            SampleFormat::I16 => build::<i16>(&device, &config, producer, monitor_tx, o, c),
+            SampleFormat::I32 => build::<i32>(&device, &config, producer, monitor_tx, o, c),
+            SampleFormat::U16 => build::<u16>(&device, &config, producer, monitor_tx, o, c),
+            SampleFormat::F64 => build::<f64>(&device, &config, producer, monitor_tx, o, c),
             other => Err(format!("Sampleformat {other} wird nicht unterstützt")),
         }?;
         stream.play().map_err(|e| format!("Eingang starten: {e}"))?;
@@ -157,6 +164,7 @@ impl PreparedInput {
                 info,
             },
             recorder,
+            monitor,
         ))
     }
 }
@@ -165,6 +173,7 @@ fn build<T>(
     device: &Device,
     config: &StreamConfig,
     mut producer: rtrb::Producer<f32>,
+    mut monitor: rtrb::Producer<f32>,
     overruns: Arc<AtomicU64>,
     clock: Arc<CaptureClock>,
 ) -> Result<Stream, String>
@@ -195,6 +204,11 @@ where
                     // SAFETY: alle `n` Plätze wurden oben beschrieben.
                     unsafe { chunk.commit_all() };
                 }
+                push_frames(
+                    &mut monitor,
+                    channels,
+                    data.iter().map(|s| s.to_sample::<f32>()),
+                );
                 if n < data.len() {
                     overruns.fetch_add((data.len() - n) as u64, Ordering::Relaxed);
                 }

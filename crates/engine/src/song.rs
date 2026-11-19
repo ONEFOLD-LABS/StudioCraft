@@ -70,6 +70,8 @@ pub struct PlayTrack {
     /// Wohin das Signal nach dem Fader geht.
     pub output: Output,
     pub sends: Vec<PlaySend>,
+    /// Audio-Spuren mit Monitor: Eingangskanal und ob Stereo (`first`, `first + 1`).
+    pub monitor: Option<(u16, bool)>,
 }
 
 /// Ziel des Ausgangs einer Spur.
@@ -207,7 +209,10 @@ impl Song {
                     notes.sort_by_key(|n| n.start);
                 }
                 let (gain_l, gain_r) = t.gains();
-                let keep = !events.is_empty()
+                let monitor = (t.monitor && t.kind == TrackKind::Audio)
+                    .then_some((t.input.first, t.input.stereo));
+                let keep = monitor.is_some()
+                    || !events.is_empty()
                     || !t.inserts.is_empty()
                     || t.instrument.is_some()
                     || Project::is_bus(t.kind);
@@ -219,6 +224,7 @@ impl Song {
                         slot,
                         events,
                         notes,
+                        monitor,
                         ..Default::default()
                     },
                 )
@@ -407,6 +413,25 @@ impl PlayTrack {
 mod tests {
     use super::*;
     use studiocraft_project::{PoolClip, TICKS_PER_QUARTER};
+
+    #[test]
+    fn monitor_keeps_empty_audio_tracks_and_carries_their_input() {
+        let mut p = Project::default();
+        let a = p.add_track(TrackKind::Audio, "Gesang");
+        p.tracks[a].monitor = true;
+        p.tracks[a].input = studiocraft_project::TrackInput {
+            first: 2,
+            stereo: false,
+        };
+        let m = p.add_track(TrackKind::Midi, "MIDI");
+        p.tracks[m].monitor = true;
+        let quiet = p.add_track(TrackKind::Audio, "Leer");
+        let song = Song::build(&p, &HashMap::new(), 48_000);
+        let monitored: Vec<(usize, Option<(u16, bool)>)> =
+            song.tracks.iter().map(|t| (t.slot, t.monitor)).collect();
+        assert_eq!(monitored, [(a, Some((2, false)))]);
+        assert!(!song.tracks.iter().any(|t| t.slot == quiet));
+    }
 
     fn ones(frames: usize, v: f32) -> Arc<[f32]> {
         vec![v; frames * 2].into()

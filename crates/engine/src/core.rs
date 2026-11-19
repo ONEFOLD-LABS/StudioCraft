@@ -11,11 +11,12 @@ use std::sync::{
 use studiocraft_project::{Position, TempoMap};
 
 use crate::midi::{MidiMsg, MidiSender, RecordedMidi};
+use crate::monitor::{MonitorInput, mix_into};
 use crate::song::Output;
 use crate::{InsertChain, MAX_METERED_TRACKS, Meters, Song, Transport, TransportState};
 
 /// Größter Block, den der Kern in einem Stück mischt.
-const SCRATCH_FRAMES: usize = 8192;
+pub(crate) const SCRATCH_FRAMES: usize = 8192;
 
 /// Befehle von der Oberfläche an den Audio-Thread.
 #[derive(Debug)]
@@ -48,6 +49,8 @@ pub enum Command {
     SetLocators(u64, u64),
     /// Cursor auf Frame setzen.
     Locate(u64),
+    /// Eingang zum Mithören (Monitor). Ein vorheriger geht über die Rückgabe-Queue zurück.
+    SetMonitorInput(Box<MonitorInput>),
 }
 
 /// Vom Audio-Thread veröffentlichter Zustand, lesbar von jedem Thread.
@@ -91,6 +94,7 @@ pub struct EngineControl {
     commands: rtrb::Producer<Command>,
     garbage: rtrb::Consumer<Arc<Song>>,
     plugin_garbage: rtrb::Consumer<Box<InsertChain>>,
+    monitor_garbage: rtrb::Consumer<Box<MonitorInput>>,
     /// Schreibzugang für MIDI-Eingänge (Keyboard).
     pub midi: MidiSender,
     /// Während der Aufnahme gespielte Noten (vom Audio-Thread).
@@ -123,6 +127,7 @@ impl EngineControl {
         while self.garbage.pop().is_ok() {}
         // Plugins werden hier, im Hauptthread, deaktiviert und zerstört.
         while self.plugin_garbage.pop().is_ok() {}
+        while self.monitor_garbage.pop().is_ok() {}
     }
 
     pub fn frames(&self, pos: Position) -> u64 {
@@ -144,6 +149,9 @@ pub struct EngineCore {
     commands: rtrb::Consumer<Command>,
     garbage: rtrb::Producer<Arc<Song>>,
     plugin_garbage: rtrb::Producer<Box<InsertChain>>,
+    monitor_garbage: rtrb::Producer<Box<MonitorInput>>,
+    /// Eingang zum Mithören, sobald die Oberfläche ihn geöffnet hat.
+    monitor: Option<Box<MonitorInput>>,
     midi_in: rtrb::Consumer<MidiMsg>,
     midi_rec: rtrb::Producer<RecordedMidi>,
     midi_target: Option<usize>,
@@ -191,6 +199,7 @@ pub fn engine(sample_rate: u32, tempo: TempoMap) -> (EngineCore, EngineControl) 
     let (producer, consumer) = rtrb::RingBuffer::new(256);
     let (garbage_tx, garbage_rx) = rtrb::RingBuffer::new(64);
     let (plugin_tx, plugin_rx) = rtrb::RingBuffer::new(64);
+    let (monitor_tx, monitor_rx) = rtrb::RingBuffer::new(4);
     let (midi_tx, midi_rx) = rtrb::RingBuffer::new(1024);
     let (rec_tx, rec_rx) = rtrb::RingBuffer::new(8192);
     let status = Arc::new(EngineStatus::default());
@@ -202,6 +211,8 @@ pub fn engine(sample_rate: u32, tempo: TempoMap) -> (EngineCore, EngineControl) 
         commands: consumer,
         garbage: garbage_tx,
         plugin_garbage: plugin_tx,
+        monitor_garbage: monitor_tx,
+        monitor: None,
         midi_in: midi_rx,
         midi_rec: rec_tx,
         midi_target: None,
@@ -235,6 +246,7 @@ pub fn engine(sample_rate: u32, tempo: TempoMap) -> (EngineCore, EngineControl) 
         commands: producer,
         garbage: garbage_rx,
         plugin_garbage: plugin_rx,
+        monitor_garbage: monitor_rx,
         midi: std::sync::Arc::new(std::sync::Mutex::new(midi_tx)),
         recorded_midi: rec_rx,
         status,
@@ -331,6 +343,12 @@ impl EngineCore {
                     self.panic = true;
                 }
                 self.midi_target = t;
+            }
+            Command::SetMonitorInput(input) => {
+                if let Some(old) = self.monitor.replace(input) {
+                    // Volle Queue: dann bleibt nur das Freigeben hier (praktisch nie).
+                    let _ = self.monitor_garbage.push(old);
+                }
             }
             Command::SetBypass(track, slot, bypass) => {
                 if let Some(Some(chain)) = self.inserts.get_mut(track)
@@ -470,6 +488,12 @@ impl EngineCore {
             for b in self.bus_bufs.iter_mut().take(self.song.buses) {
                 b[..n].fill(0.0);
             }
+            // Eingang zum Mithören: immer lesen, damit die Verzögerung klein bleibt.
+            let in_ch = self.monitor.as_ref().map_or(0, |m| m.channels());
+            let input: &[f32] = match self.monitor.as_deref_mut() {
+                Some(m) => m.read(frames),
+                None => &[],
+            };
             for track in &self.song.tracks {
                 let chain = self
                     .inserts
@@ -477,7 +501,7 @@ impl EngineCore {
                     .and_then(|c| c.as_deref_mut())
                     .filter(|c| c.is_active());
                 // Busse laufen immer (sie sammeln, was andere Spuren schicken).
-                if !running && chain.is_none() && track.bus.is_none() {
+                if !running && chain.is_none() && track.bus.is_none() && track.monitor.is_none() {
                     continue;
                 }
                 tmp.fill(0.0);
@@ -485,6 +509,9 @@ impl EngineCore {
                     tmp.copy_from_slice(&self.bus_bufs[b][..n]);
                 } else if running {
                     track.render(tmp, pos, frames);
+                }
+                if let Some((first, stereo)) = track.monitor {
+                    mix_into(tmp, input, in_ch, first, stereo);
                 }
                 if let Some(chain) = chain {
                     let held = &mut self.held[track.slot.min(MAX_METERED_TRACKS - 1)];
@@ -609,6 +636,39 @@ mod tests {
 
     fn left(out: &[f32]) -> Vec<f32> {
         out.chunks(2).map(|c| c[0]).collect()
+    }
+
+    #[test]
+    fn monitored_track_plays_the_input_through_its_fader_while_stopped() {
+        let (mut core, mut ctl) = engine(48_000, TempoMap::default());
+        let (mut tx, input) = crate::monitor::monitor_ring(2, 48_000, SCRATCH_FRAMES);
+        ctl.send(Command::SetMonitorInput(Box::new(input)));
+        let track = crate::PlayTrack {
+            gain_l: 0.5,
+            gain_r: 0.5,
+            monitor: Some((1, false)),
+            ..Default::default()
+        };
+        let song = Song {
+            tracks: vec![track],
+            master: 1.0,
+            buses: 0,
+        };
+        ctl.send(Command::SetSong(Arc::new(song)));
+        crate::monitor::push_frames(&mut tx, 2, [0.1, 0.8, 0.2, 0.6].into_iter());
+        let mut out = [0.0f32; 6];
+        core.process(&mut out);
+        assert_eq!(out, [0.4, 0.4, 0.3, 0.3, 0.0, 0.0]);
+        // Without monitor the same input stays silent.
+        let song = Song {
+            tracks: vec![crate::PlayTrack::default()],
+            master: 1.0,
+            buses: 0,
+        };
+        ctl.send(Command::SetSong(Arc::new(song)));
+        crate::monitor::push_frames(&mut tx, 2, [0.1, 0.8].into_iter());
+        core.process(&mut out);
+        assert!(out.iter().all(|&s| s == 0.0));
     }
 
     #[test]

@@ -90,11 +90,46 @@ impl ProjectWindow {
             return Ok(());
         }
         let prepared = PreparedInput::open(self.audio_host.as_deref(), self.sample_rate)?;
-        let (input, recorder) = prepared.start()?;
+        let (input, recorder, monitor) = prepared.start()?;
+        if let Some(t) = &mut self.transport {
+            // Nur einmal pro Sitzung; ist die Queue gerade voll, bleibt Monitor stumm.
+            t.send(Command::SetMonitorInput(Box::new(monitor)));
+        }
         self.input_status = format!("{} · {} Kanäle", input.info.device, input.info.channels);
         self.input = Some(input);
         self.recorder = Some(recorder);
         Ok(())
+    }
+
+    /// Monitor einer Audio-Spur ein- oder ausschalten.
+    pub(crate) fn set_monitor(&mut self, track: usize, on: bool) {
+        if let Some(t) = self
+            .project
+            .tracks
+            .get_mut(track)
+            .filter(|t| t.kind == TrackKind::Audio)
+        {
+            t.monitor = on;
+            self.dirty = true;
+        }
+    }
+
+    /// Hört eine Spur mit, wird der Eingang geöffnet (erst dann, damit kein Mikrofon ohne
+    /// Grund belegt ist). Klappt das nicht, gehen alle Monitore aus und die Statuszeile
+    /// nennt den Grund.
+    pub(crate) fn sync_monitor_input(&mut self) {
+        if self.transport.is_none()
+            || self.recorder.is_some()
+            || !self.project.tracks.iter().any(|t| t.monitor)
+        {
+            return;
+        }
+        if let Err(e) = self.ensure_input() {
+            self.input_status = e;
+            for t in &mut self.project.tracks {
+                t.monitor = false;
+            }
+        }
     }
 
     /// Ordner für neue Aufnahmen: `Audio/` im Projekt, sonst ein temporärer Ordner

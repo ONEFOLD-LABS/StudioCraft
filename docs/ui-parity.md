@@ -21,7 +21,7 @@ Status: ✅ umgesetzt · 🟡 teilweise · ⬜ offen
 | 1 | Menüzeile | Datei, Bearbeiten, Projekt, Ansicht, … | ✅ |
 | 2 | Werkzeugzeile | Zonen-Schalter links, Transport-Kurzform, Werkzeuge, Snap/Raster, Zonen-Schalter rechts | ✅ |
 | 3 | Info-Zeile | Werte des gewählten Events, direkt editierbar; ein-/ausblendbar | ✅ (Mehrfachauswahl relativ: offen) |
-| 4 | Mitte | linke Zone · Spurliste · Lineal/Event-Anzeige · rechte Zone | ✅ (Spurköpfe: Monitor, R/W offen) |
+| 4 | Mitte | linke Zone · Spurliste · Lineal/Event-Anzeige · rechte Zone | ✅ (Spurköpfe: Lanes, Zeitbasis offen) |
 | 5 | Untere Zone | Reiter (Mixer, Editor, …) am unteren Rand der Zone | ✅ |
 | 6 | Transportleiste | fest am unteren Fensterrand, F2 blendet aus | ✅ |
 | 7 | Statuszeile | Audio-Gerät, Abtastrate, Last, Meldungen | 🟡 (in Transportleiste) |
@@ -104,13 +104,14 @@ Die Positionsanzeige hat einen dunklen Hintergrund (`counter_bg`) mit heller Sch
 
 1. ✅ Werkzeugzeile mit eigenen Symbolen und Zonen-Schaltern (#62)
 2. ✅ Info-Zeile (#63)
-3. 🟡 Spurköpfe: Aufnahme-Punkt und neutrale Auswahl (#64); Monitor, R/W, Lanes folgen mit
-   Issue #19 und der Automation (#34)
+3. 🟡 Spurköpfe: Aufnahme-Punkt und neutrale Auswahl (#64), Monitor und R/W (Punkt 10);
+   Lanes und Zeitbasis folgen (Issue #19), R/W wirken mit der Automation (#34)
 4. ✅ Transportleiste (#64) und Reiter der unteren Zone (#65)
 5. ✅ Farben: neutrale Grautöne, Akzent sparsamer (#65)
 6. 🟡 Rechte Zone: Medien und Plugins (#67); Dateibrowser und Vorhören folgen (Issue #27)
 7. ✅ Inspector-Kopf in Spurfarbe (#69)
 8. ✅ Quantisierungswert in der Werkzeugzeile, Taste Q, Panel für Swing und Stärke (#21)
 9. ✅ Snap-Modi, Raster-Typen Sekunden/Frames/Samples, „An Zoom anpassen“ (#12)
+10. ✅ Spurkopf und Inspector: Monitor (Eingang mithören) und Automation R/W (#19)
 
-**Als Nächstes:** Spurkopf-Schalter Monitor und R/W (#19), Fokusrahmen der Zonen (Spec „Fokus-Regel“).
+**Als Nächstes:** Fokusrahmen der Zonen (Spec „Fokus-Regel“).

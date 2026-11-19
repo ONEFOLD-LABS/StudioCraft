@@ -705,6 +705,7 @@ impl ProjectWindow {
         self.sync_tempo();
         if self.dirty {
             self.dirty = false;
+            self.sync_monitor_input();
             self.sync_inserts();
             self.rebuild_song();
         }
@@ -882,8 +883,37 @@ impl ProjectWindow {
             let s = icons::state_toggle(ui, &mut track.solo, "S", theme::tokens(ui.ctx()).solo)
                 .changed();
             self.dirty |= m || s;
-            if track.kind.holds_events() {
-                icons::state_toggle(ui, &mut track.record, "R", theme::tokens(ui.ctx()).rec);
+            let t = theme::tokens(ui.ctx());
+            if track.kind.holds_events()
+                && icons::icon_button(
+                    ui,
+                    icons::Icon::Record,
+                    track.record,
+                    Some(t.rec),
+                    "Aufnahme bereit",
+                )
+                .clicked()
+            {
+                track.record = !track.record;
+            }
+            if track.kind == TrackKind::Audio
+                && icons::icon_button(
+                    ui,
+                    icons::Icon::Play,
+                    track.monitor,
+                    Some(t.monitor),
+                    "Monitor",
+                )
+                .clicked()
+            {
+                track.monitor = !track.monitor;
+                self.dirty = true;
+            }
+            if mixer::has_channel(track.kind) {
+                icons::state_toggle(ui, &mut track.read, "R", t.monitor)
+                    .on_hover_text("Automation lesen (wirkt mit der Automation, #34)");
+                icons::state_toggle(ui, &mut track.write, "W", t.rec)
+                    .on_hover_text("Automation schreiben (wirkt mit der Automation, #34)");
             }
         });
         ui.horizontal(|ui| {
@@ -1342,6 +1372,49 @@ mod tests {
             w.snap_mode = tools::SnapMode::EventsGridCursor;
             w.grid = Grid::Frames;
             w.grid_zoom = true;
+        });
+    }
+
+    #[test]
+    fn track_header_toggles_monitor_and_automation() {
+        let (w, _) = one_event_window();
+        let mut h = window_harness(w);
+        let click_button = |h: &mut Harness<'_, ProjectWindow>, i: usize| {
+            let w = h.state();
+            let lanes = w.lanes_rect;
+            let mid = lanes.top() + w.view.row_h / 2.0;
+            // Buttons sit right-aligned in the header, 21 px apart, six of them.
+            let x = lanes.left() - 6.0 - (6 - i) as f32 * 21.0 + 9.0;
+            let pos = egui::pos2(x, mid);
+            h.event(egui::Event::PointerMoved(pos));
+            h.run_steps(1);
+            for pressed in [true, false] {
+                h.event(egui::Event::PointerButton {
+                    pos,
+                    button: egui::PointerButton::Primary,
+                    pressed,
+                    modifiers: egui::Modifiers::NONE,
+                });
+            }
+            h.run_steps(2);
+        };
+        click_button(&mut h, 3);
+        assert!(h.state().project.tracks[0].monitor);
+        click_button(&mut h, 4);
+        click_button(&mut h, 5);
+        assert!(h.state().project.tracks[0].read);
+        assert!(h.state().project.tracks[0].write);
+        h.state_mut().undo();
+        assert!(!h.state().project.tracks[0].write);
+    }
+
+    #[test]
+    fn renders_track_header_with_monitor_and_automation() {
+        shot("spurkopf-monitor", |w| {
+            w.project.tracks[0].monitor = true;
+            w.project.tracks[0].read = true;
+            w.project.tracks[1].write = true;
+            w.project.tracks[2].record = true;
         });
     }
 
