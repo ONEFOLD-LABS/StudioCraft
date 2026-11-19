@@ -3431,6 +3431,39 @@ mod tests {
     }
 
     #[test]
+    fn a_vst3_effect_works_as_insert_and_renders() {
+        let (mut w, _) = one_event_window();
+        let Some(p) = w
+            .plugin_list()
+            .iter()
+            .find(|p| {
+                p.format == studiocraft_plugin_host::PluginFormat::Vst3 && p.name == "ZamComp"
+            })
+            .cloned()
+        else {
+            eprintln!("ZamComp (VST3) nicht installiert – übersprungen");
+            return;
+        };
+        assert_eq!(p.display_name(), "ZamComp (VST3)");
+        w.add_insert(0, &p);
+        let slot = w.project.tracks[0].inserts[0].clone();
+        let inst = w.instantiate(&slot);
+        assert!(inst.is_ok(), "{:?}", inst.err());
+        let params = inst.as_ref().map(|i| i.params().len()).unwrap_or(0);
+        assert!(params > 0, "parameters from the controller");
+        drop(inst);
+        let range = w.render_range(0).unwrap_or_default();
+        let audio = w
+            .render_offline(render::RenderSpec::track(0, range, true))
+            .unwrap_or_default();
+        assert!(!audio.is_empty() && audio.iter().all(|s| s.is_finite()));
+        assert!(
+            audio.iter().any(|s| s.abs() > 1e-4),
+            "ZamComp (VST3) passes audio"
+        );
+    }
+
+    #[test]
     fn an_lv2_effect_works_as_insert_and_renders() {
         let (mut w, _) = one_event_window();
         // Bevorzugt ein schlichter Effekt; sonst irgendein LV2-Effekt.
@@ -6036,7 +6069,13 @@ mod tests {
 
     /// Ein installiertes CLAP-Effekt-Plugin für Tests (ZamComp bevorzugt), sonst `None`.
     fn test_effect(w: &mut ProjectWindow) -> Option<studiocraft_plugin_host::PluginInfo> {
-        let list = w.plugin_list().to_vec();
+        // CLAP: diese Tests prüfen Zustand und Fenster, die es dort vollständig gibt.
+        let list: Vec<_> = w
+            .plugin_list()
+            .iter()
+            .filter(|p| p.format == studiocraft_plugin_host::PluginFormat::Clap)
+            .cloned()
+            .collect();
         list.iter()
             .find(|p| p.name.eq_ignore_ascii_case("ZamComp"))
             .or_else(|| {
@@ -6676,7 +6715,9 @@ mod tests {
         let Some(fx) = w
             .plugin_list()
             .iter()
-            .find(|p| p.name == "ZamComp")
+            .find(|p| {
+                p.name == "ZamComp" && p.format == studiocraft_plugin_host::PluginFormat::Clap
+            })
             .cloned()
         else {
             eprintln!("ZamComp nicht installiert – übersprungen");
@@ -6796,7 +6837,9 @@ mod tests {
             if let Some(verb) = w
                 .plugin_list()
                 .iter()
-                .find(|p| p.name == "ZamVerb")
+                .find(|p| {
+                    p.name == "ZamVerb" && p.format == studiocraft_plugin_host::PluginFormat::Clap
+                })
                 .cloned()
             {
                 w.project.tracks[1]

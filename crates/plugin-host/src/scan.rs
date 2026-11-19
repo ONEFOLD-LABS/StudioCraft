@@ -13,6 +13,7 @@ pub enum PluginFormat {
     #[default]
     Clap,
     Lv2,
+    Vst3,
 }
 
 /// Beschreibung eines gefundenen Plugins.
@@ -36,6 +37,7 @@ impl PluginInfo {
         match self.format {
             PluginFormat::Clap => self.name.clone(),
             PluginFormat::Lv2 => format!("{} (LV2)", self.name),
+            PluginFormat::Vst3 => format!("{} (VST3)", self.name),
         }
     }
 
@@ -68,17 +70,30 @@ pub fn default_paths() -> Vec<PathBuf> {
         if let Some(p) = std::env::var_os("LOCALAPPDATA") {
             paths.push(PathBuf::from(p).join("Programs/Common/CLAP"));
         }
+        // VST3 (Standardorte des Formats).
+        if let Some(p) = std::env::var_os("COMMONPROGRAMFILES") {
+            paths.push(PathBuf::from(p).join("VST3"));
+        }
+        if let Some(p) = std::env::var_os("LOCALAPPDATA") {
+            paths.push(PathBuf::from(p).join("Programs/Common/VST3"));
+        }
     } else {
         if let Some(h) = &home {
             paths.push(h.join(".clap"));
         }
         paths.push("/usr/lib/clap".into());
         paths.push("/usr/local/lib/clap".into());
+        // VST3 (Standardorte des Formats).
+        if let Some(h) = &home {
+            paths.push(h.join(".vst3"));
+        }
+        paths.push("/usr/lib/vst3".into());
+        paths.push("/usr/local/lib/vst3".into());
     }
     paths
 }
 
-/// Alle `.clap`-Dateien bzw. Bundles unter `dir`, auch in Unterordnern.
+/// Alle `.clap`- und `.vst3`-Dateien bzw. Bundles unter `dir`, auch in Unterordnern.
 fn find_bundles(dir: &Path, out: &mut Vec<PathBuf>, depth: u32) {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return;
@@ -87,6 +102,7 @@ fn find_bundles(dir: &Path, out: &mut Vec<PathBuf>, depth: u32) {
         let p = e.path();
         if p.extension()
             .is_some_and(|x| x.eq_ignore_ascii_case("clap"))
+            || crate::vst3::is_vst3(&p)
         {
             out.push(p);
         } else if p.is_dir() && depth < 4 {
@@ -108,6 +124,9 @@ pub fn find_all(paths: &[PathBuf]) -> Vec<PathBuf> {
 
 /// Liest die Beschreibungen aller Plugins einer Datei, im eigenen Prozess.
 pub fn scan_bundle(bundle: &Path) -> Result<Vec<PluginInfo>, String> {
+    if crate::vst3::is_vst3(bundle) {
+        return crate::vst3::descriptors(bundle);
+    }
     let lib = Library::load(bundle)?;
     Ok(lib
         .descriptors()
