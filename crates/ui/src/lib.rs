@@ -936,49 +936,47 @@ impl ProjectWindow {
             let r = ui.add(egui::Slider::new(&mut track.pan, -1.0..=1.0).text("Pan"));
             self.dirty |= r.changed();
         });
-        if track.kind == TrackKind::Audio {
-            egui::ComboBox::from_label("Eingang")
-                .selected_text(track.input.label())
-                .show_ui(ui, |ui| {
-                    for opt in studiocraft_project::TrackInput::options(channels) {
-                        ui.selectable_value(&mut track.input, opt, opt.label());
-                    }
-                });
-        }
         ui.label(format!("{} Events", track.events.len()));
+        ui.add_space(4.0);
+        // Sektionen mit Titelleiste (docs/ui-parity.md, „Linke Zone“): Routing zuerst,
+        // dann Instrument, Inserts, Sends, EQ, Automation, Notizen.
+        let kind = track.kind;
+        let channel = crate::mixer::has_channel(kind);
         self.folder_ui(ui, idx);
-        ui.separator();
-        if self.project.tracks[idx].kind == TrackKind::Instrument {
-            egui::CollapsingHeader::new("Instrument")
-                .default_open(true)
-                .show(ui, |ui| self.instrument_ui(ui, idx));
-        }
-        if crate::mixer::has_channel(self.project.tracks[idx].kind) {
-            egui::CollapsingHeader::new("Inserts")
-                .default_open(true)
-                .show(ui, |ui| self.inserts_ui(ui, idx));
-        }
-        if crate::mixer::has_channel(self.project.tracks[idx].kind) {
-            self.output_ui(ui, idx);
-            egui::CollapsingHeader::new("Sends")
-                .default_open(true)
-                .show(ui, |ui| self.sends_ui(ui, idx));
-        }
-        if crate::mixer::has_channel(self.project.tracks[idx].kind) {
-            egui::CollapsingHeader::new("Automation")
-                .default_open(false)
-                .show(ui, |ui| self.automation_ui(ui, idx));
-        }
-        if crate::mixer::has_channel(self.project.tracks[idx].kind) {
-            egui::CollapsingHeader::new("EQ")
-                .default_open(false)
-                .show(ui, |ui| self.eq_ui(ui, idx));
-        }
-        egui::CollapsingHeader::new("Notizen")
-            .default_open(false)
-            .show(ui, |ui| {
-                ui.weak("Kommt später");
+        if kind == TrackKind::Audio || channel {
+            inspector_section(ui, "Routing", true, |ui| {
+                let track = &mut self.project.tracks[idx];
+                if kind == TrackKind::Audio {
+                    ui.horizontal(|ui| {
+                        let l = ui.label("Eingang");
+                        egui::ComboBox::from_id_salt(("eingang", idx))
+                            .selected_text(track.input.label())
+                            .show_ui(ui, |ui| {
+                                for opt in studiocraft_project::TrackInput::options(channels) {
+                                    ui.selectable_value(&mut track.input, opt, opt.label());
+                                }
+                            })
+                            .response
+                            .labelled_by(l.id);
+                    });
+                }
+                if channel {
+                    self.output_ui(ui, idx);
+                }
             });
+        }
+        if kind == TrackKind::Instrument {
+            inspector_section(ui, "Instrument", true, |ui| self.instrument_ui(ui, idx));
+        }
+        if channel {
+            inspector_section(ui, "Inserts", true, |ui| self.inserts_ui(ui, idx));
+            inspector_section(ui, "Sends", true, |ui| self.sends_ui(ui, idx));
+            inspector_section(ui, "EQ", false, |ui| self.eq_ui(ui, idx));
+            inspector_section(ui, "Automation", false, |ui| self.automation_ui(ui, idx));
+        }
+        inspector_section(ui, "Notizen", false, |ui| {
+            ui.weak("Kommt später");
+        });
     }
 
     /// Transportleiste (docs/ui-parity.md, „Transportleiste“): Locatoren mit Punch und Cycle,
@@ -1188,6 +1186,56 @@ pub(crate) const TPQ: f64 = TICKS_PER_QUARTER as f64;
 
 /// So viele Schritte lassen sich rückgängig machen.
 const UNDO_STEPS: usize = 200;
+
+/// Aufklappbare Sektion im Inspector mit hinterlegter Titelleiste über die ganze Breite
+/// (docs/ui-parity.md, „Linke Zone“). Klick auf die Leiste klappt auf und zu.
+fn inspector_section(ui: &mut Ui, title: &str, open: bool, add: impl FnOnce(&mut Ui)) {
+    use egui::collapsing_header::CollapsingState;
+    let id = ui.make_persistent_id(("inspector-sektion", title));
+    let mut state = CollapsingState::load_with_default_open(ui.ctx(), id, open);
+    let (rect, resp) =
+        ui.allocate_exact_size(egui::vec2(ui.available_width(), 20.0), egui::Sense::click());
+    if resp.clicked() {
+        state.toggle(ui);
+    }
+    let t = theme::tokens(ui.ctx());
+    let fill = if resp.hovered() {
+        t.button_hi
+    } else {
+        t.button
+    };
+    let painter = ui.painter();
+    painter.rect_filled(rect, 3.0, fill);
+    // Pfeil: nach rechts zu, nach unten offen.
+    let c = rect.left_center() + egui::vec2(9.0, 0.0);
+    let pts = if state.is_open() {
+        vec![
+            c + egui::vec2(-4.0, -2.5),
+            c + egui::vec2(4.0, -2.5),
+            c + egui::vec2(0.0, 3.0),
+        ]
+    } else {
+        vec![
+            c + egui::vec2(-2.5, -4.0),
+            c + egui::vec2(3.0, 0.0),
+            c + egui::vec2(-2.5, 4.0),
+        ]
+    };
+    painter.add(egui::Shape::convex_polygon(pts, t.text, egui::Stroke::NONE));
+    painter.text(
+        rect.left_center() + egui::vec2(20.0, 0.0),
+        egui::Align2::LEFT_CENTER,
+        title,
+        egui::FontId::proportional(12.0),
+        t.text,
+    );
+    let is_open = state.is_open();
+    resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::DisclosureTriangle, true, title));
+    ui.ctx()
+        .accesskit_node_builder(resp.id, |node| node.set_expanded(is_open));
+    state.show_body_indented(&resp, ui, add);
+    ui.add_space(2.0);
+}
 
 #[cfg(test)]
 mod tests {
@@ -2907,6 +2955,26 @@ mod tests {
                 .contains("Phantom: nicht installiert")
         );
         assert_eq!(w.plugins.sent[0].map, [None]);
+    }
+
+    #[test]
+    fn inspector_groups_input_and_output_under_routing() {
+        let (mut w, _) = one_event_window();
+        w.selected_track = Some(0);
+        let mut h = window_harness(w);
+        // Routing is open by default and holds input and output of the audio track.
+        h.get_by_label("Routing");
+        h.get_by_label("Eingang");
+        h.get_by_label("Ausgang");
+        // Clicking the bar closes the section; clicking again opens it.
+        h.get_by_label("Routing").click();
+        h.run_steps(20);
+        assert!(h.query_by_label("Ausgang").is_none());
+        h.get_by_label("Routing").click();
+        h.run_steps(20);
+        h.get_by_label("Ausgang");
+        // Sections without content for the track type are left out.
+        assert!(h.query_by_label("Instrument").is_none());
     }
 
     #[test]

@@ -85,10 +85,12 @@ Inserts und Sends (umgangene gedimmt), Aufnahme bereit und Monitor, R/W, Panoram
 in dB, senkrechter Fader mit Pegelanzeige, unten der Name in Spurfarbe. Spuren ohne Kanal (MIDI)
 zeigen „Kein Kanal“. Rechts daneben der Inspector:
 
-Kopf mit Spurname und Spurfarbe, darunter aufklappbare Sektionen; die oberste Sektion ohne Titel
-enthält Lautstärke, Pan, M/S, Aufnahme, Monitor, R/W, Zeitbasis, Lanes, Eingang, Ausgang. Danach
-Inserts, Sends, Automation (Spuren zeigen, stummschalten, entfernen, „+ Parameter“ für Kanal,
-Sends und Plugin-Parameter, Ausdünnen), EQ, Notizen (Spec „Spurtypen und Inspector“).
+Kopf mit Spurname und Spurfarbe, darunter ein Bereich ohne Titel mit Name, M/S, Aufnahme,
+Monitor, R/W, Zeitbasis, Lanes, Lautstärke und Pan. Danach aufklappbare Sektionen, jede mit einer
+hinterlegten Titelleiste über die ganze Breite (Klick klappt auf und zu): **Routing** (Eingang,
+Ausgang), Instrument, Inserts, Sends, EQ, Automation (Spuren zeigen, stummschalten, entfernen,
+„+ Parameter“ für Kanal, Sends und Plugin-Parameter, Ausdünnen), Notizen (Spec „Spurtypen und
+Inspector“). Sektionen, die ein Spurtyp nicht hat, fehlen.
 
 ## Untere Zone
 
@@ -153,6 +155,7 @@ Die Positionsanzeige hat einen dunklen Hintergrund (`counter_bg`) mit heller Sch
     über Bearbeiten → Event-Farbe bekommen sie eine eigene (Issue #19)
 19. ✅ Linke Zone mit Kanalzug-Spalte neben dem Inspector
 20. ✅ Spurkopf zweizeilig mit Farbleiste, Spurnummer und Lautstärkeregler
+21. ✅ Inspector: Sektionen mit Titelleiste, Eingang und Ausgang unter „Routing“
 
 **Als Nächstes:** Aus dieser Liste ist nichts mehr offen; die Automationsmodi Overwrite und Trim
 kommen mit #91. Weitere Angleichungen ergeben sich aus `docs/spec.md`.
