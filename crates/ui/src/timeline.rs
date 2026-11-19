@@ -907,6 +907,41 @@ fn audition(w: &mut ProjectWindow, ui: &Ui, resp: &egui::Response, g: &Geo) -> b
     }
 }
 
+/// Ziehen am linken (`start`) bzw. rechten Rand im eingestellten Modus der Objektauswahl.
+fn resize_edge(w: &mut ProjectWindow, id: EventId, at: u64, start: bool) {
+    use crate::tools::ResizeMode;
+    match w.resize_mode {
+        ResizeMode::Normal => {
+            if start {
+                w.project.trim_start(id, at);
+            } else {
+                w.project.trim_end(id, at);
+            }
+        }
+        ResizeMode::Slide => {
+            if start {
+                w.project.slide_start(id, at);
+            } else {
+                w.project.slide_end(id, at);
+            }
+        }
+        ResizeMode::Stretch => {
+            let Some((a, b)) = w.project.event(id).map(|e| (e.start.0, e.end())) else {
+                return;
+            };
+            let (na, nb) = if start { (at.min(b - 1), b) } else { (a, at) };
+            if !w.project.stretch_to(id, na, nb) {
+                w.message = Some("Inhalt strecken geht bisher nur bei MIDI-Parts".into());
+                if start {
+                    w.project.trim_start(id, at);
+                } else {
+                    w.project.trim_end(id, at);
+                }
+            }
+        }
+    }
+}
+
 /// Änderungen, die schon während des Ziehens sichtbar und hörbar sind.
 fn live_drag(w: &mut ProjectWindow, g: &Geo, d: Drag, p: Pos2, mods: egui::Modifiers) {
     let raw = g.ticks(p.x).max(0.0);
@@ -935,12 +970,8 @@ fn live_drag(w: &mut ProjectWindow, g: &Geo, d: Drag, p: Pos2, mods: egui::Modif
             return;
         }
         Drag::ZoomRect { .. } => return,
-        Drag::TrimStart { id } => {
-            w.project.trim_start(id, snapped);
-        }
-        Drag::TrimEnd { id } => {
-            w.project.trim_end(id, snapped);
-        }
+        Drag::TrimStart { id } => resize_edge(w, id, snapped, true),
+        Drag::TrimEnd { id } => resize_edge(w, id, snapped, false),
         Drag::FadeIn { id } => {
             if let Some(ev) = w.project.event(id) {
                 let len = (raw as u64).saturating_sub(ev.start.0);

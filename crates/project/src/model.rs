@@ -1016,6 +1016,93 @@ impl Project {
         true
     }
 
+    /// Linken Rand verschieben, der Inhalt wandert mit (Objektauswahl, Modus „Inhalt
+    /// mitschieben“): Audio beginnt weiter an derselben Clip-Stelle, Noten behalten ihren
+    /// Abstand zum Part-Anfang. Das Ende bleibt; bei Audio reicht der Rand höchstens so weit,
+    /// wie der Clip ab dieser Stelle Material hat.
+    pub fn slide_start(&mut self, id: EventId, new_start: u64) -> bool {
+        let Some(ev) = self.event(id) else {
+            return false;
+        };
+        let end = ev.end();
+        let mut start = new_start.min(end.saturating_sub(1));
+        if let Some((before, total)) = self.clip_bounds(ev) {
+            start = start.max(end.saturating_sub(total.saturating_sub(before).max(1)));
+        }
+        let Some(ev) = self.event_mut(id) else {
+            return false;
+        };
+        ev.start = Position(start);
+        ev.length = end - start;
+        ev.fade_in = ev.fade_in.min(ev.length);
+        ev.fade_out = ev.fade_out.min(ev.length - ev.fade_in);
+        true
+    }
+
+    /// Rechten Rand verschieben, der Inhalt wandert mit (Modus „Inhalt mitschieben“): Der
+    /// Anfang bleibt, Audio und Noten rücken um dieselbe Strecke wie das Ende. Nach rechts
+    /// geht es bei Audio nur so weit, wie vor dem Event noch Clip-Material liegt.
+    pub fn slide_end(&mut self, id: EventId, new_end: u64) -> bool {
+        let Some(ev) = self.event(id) else {
+            return false;
+        };
+        let (start, old_end) = (ev.start.0, ev.end());
+        let mut end = new_end.max(start + 1);
+        let bounds = self.clip_bounds(ev);
+        if let Some((before, _)) = bounds {
+            end = end.min(old_end.saturating_add(before));
+        }
+        let rate = ev
+            .clip
+            .and_then(|c| self.pool.get(c as usize))
+            .map(|c| c.sample_rate);
+        let tempo = self.tempo.clone();
+        let Some(ev) = self.event_mut(id) else {
+            return false;
+        };
+        if let Some(rate) = rate {
+            if end >= old_end {
+                ev.offset = ev.offset.saturating_sub(tempo.frames(end - old_end, rate));
+            } else {
+                ev.offset += tempo.frames(old_end - end, rate);
+            }
+        }
+        let shift = end as i64 - old_end as i64;
+        for n in &mut ev.notes {
+            n.start += shift;
+        }
+        ev.length = end - start;
+        ev.fade_in = ev.fade_in.min(ev.length);
+        ev.fade_out = ev.fade_out.min(ev.length - ev.fade_in);
+        true
+    }
+
+    /// Part auf `new_start..new_end` strecken bzw. stauchen, die Noten werden mit skaliert
+    /// (Modus „Inhalt strecken“). Nur MIDI-Parts: Für Audio fehlt noch das Time-Stretch,
+    /// dann `false` und nichts ändert sich.
+    pub fn stretch_to(&mut self, id: EventId, new_start: u64, new_end: u64) -> bool {
+        let Some(ev) = self.event_mut(id) else {
+            return false;
+        };
+        if ev.clip.is_some() || ev.length == 0 {
+            return false;
+        }
+        let new_end = new_end.max(new_start + 1);
+        let new_len = new_end - new_start;
+        let f = new_len as f64 / ev.length as f64;
+        for n in &mut ev.notes {
+            n.start = (n.start as f64 * f).round() as i64;
+            n.length = ((n.length as f64 * f).round() as u64).max(1);
+        }
+        ev.fade_in = (ev.fade_in as f64 * f).round() as u64;
+        ev.fade_out = (ev.fade_out as f64 * f).round() as u64;
+        ev.start = Position(new_start);
+        ev.length = new_len;
+        ev.fade_in = ev.fade_in.min(ev.length);
+        ev.fade_out = ev.fade_out.min(ev.length - ev.fade_in);
+        true
+    }
+
     /// Verschiebt das Ende eines Events (Länge ändern am rechten Rand).
     pub fn trim_end(&mut self, id: EventId, new_end: u64) -> bool {
         let Some(ev) = self.event(id) else {
@@ -1474,6 +1561,76 @@ mod tests {
         for t in &p.tracks {
             assert_eq!(t.kind.holds_events(), !t.events.is_empty(), "{}", t.name);
         }
+    }
+
+    fn part_with_notes() -> (Project, EventId) {
+        let (mut p, id) = one_event();
+        let ev = p.event_mut(id).unwrap();
+        ev.notes = vec![
+            Note {
+                pitch: 60,
+                velocity: 100,
+                start: 0,
+                length: TICKS_PER_QUARTER,
+            },
+            Note {
+                pitch: 62,
+                velocity: 100,
+                start: 2 * TICKS_PER_QUARTER as i64,
+                length: TICKS_PER_QUARTER,
+            },
+        ];
+        (p, id)
+    }
+
+    #[test]
+    fn slide_moves_notes_with_the_edge() {
+        let q = TICKS_PER_QUARTER;
+        let (mut p, id) = part_with_notes();
+        p.event_mut(id).unwrap().start = Position(4 * q);
+        // Left edge one quarter earlier: notes keep their distance to the new start.
+        assert!(p.slide_start(id, 3 * q));
+        let e = p.event(id).unwrap();
+        assert_eq!((e.start.0, e.length), (3 * q, 5 * q));
+        assert_eq!(e.notes[0].start, 0);
+        // Right edge one quarter later: notes move right by a quarter.
+        assert!(p.slide_end(id, 9 * q));
+        let e = p.event(id).unwrap();
+        assert_eq!((e.start.0, e.length), (3 * q, 6 * q));
+        assert_eq!(e.notes[0].start, q as i64);
+        assert_eq!(e.notes[1].start, 3 * q as i64);
+    }
+
+    #[test]
+    fn stretch_scales_notes_and_refuses_audio() {
+        let q = TICKS_PER_QUARTER;
+        let (mut p, id) = part_with_notes();
+        assert!(p.stretch_to(id, 0, 8 * q));
+        let e = p.event(id).unwrap();
+        assert_eq!(e.length, 8 * q);
+        assert_eq!(e.notes[1].start, 4 * q as i64);
+        assert_eq!(e.notes[1].length, 2 * q);
+        assert!(p.stretch_to(id, 0, 2 * q));
+        assert_eq!(p.event(id).unwrap().notes[0].length, q / 2);
+    }
+
+    #[test]
+    fn slide_on_audio_keeps_clip_position_and_limits() {
+        let q = TICKS_PER_QUARTER;
+        let (mut p, c) = pool_project();
+        let id = p.add_audio_event(0, 0, c).unwrap();
+        let total = p.event(id).unwrap().length;
+        // Start the event one quarter into the clip.
+        p.trim_start(id, q);
+        assert_eq!(p.event(id).unwrap().offset, 24_000);
+        // Sliding the end right by more than the quarter of material before the event stops
+        // at that quarter; the offset reaches zero.
+        assert!(p.slide_end(id, total + 4 * q));
+        let e = p.event(id).unwrap();
+        assert_eq!(e.offset, 0);
+        assert_eq!(e.end(), total + q);
+        // Stretching audio is not possible yet.
+        assert!(!p.stretch_to(id, 0, 2 * total));
     }
 
     #[test]
