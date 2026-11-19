@@ -133,6 +133,14 @@ impl ProjectWindow {
                 {
                     self.add_folder_track();
                 }
+                if ui
+                    .button("Plugins neu prüfen")
+                    .on_hover_text("Sperrliste leeren und alle Plugin-Dateien neu prüfen")
+                    .clicked()
+                {
+                    self.rescan_plugins();
+                    ui.close();
+                }
                 ui.menu_button("Inserts vor dem Fader", |ui| {
                     for n in 0..=8u8 {
                         let text = format!("Slots 1–{n} vor, {}–8 nach dem Fader", n + 1);

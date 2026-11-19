@@ -44,6 +44,19 @@ pub(crate) struct SentChain {
     _offline: Option<Box<InsertChain>>,
 }
 
+/// Programm, das Plugin-Dateien in Kindprozessen prüft (siehe
+/// [`enable_isolated_plugin_scan`]); ohne: Scan im eigenen Prozess.
+static PLUGIN_SCANNER: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new();
+
+/// Cache- und Sperrlisten-Datei des Plugin-Scans im Einstellungsordner.
+const SCAN_CACHE: &str = "plugin-scan.tsv";
+
+/// Plugins in Kindprozessen prüfen: `exe` muss beim Schalter
+/// [`studiocraft_plugin_host::SCAN_FLAG`] [`studiocraft_plugin_host::run_scan_child`] aufrufen.
+pub fn enable_isolated_plugin_scan(exe: std::path::PathBuf) {
+    let _ = PLUGIN_SCANNER.set(exe);
+}
+
 /// Plugin-Liste und Parameterbeschreibungen (Hauptthread).
 #[derive(Default)]
 pub(crate) struct PluginState {
@@ -57,14 +70,51 @@ pub(crate) struct PluginState {
 impl ProjectWindow {
     pub(crate) fn plugin_list(&mut self) -> &[PluginInfo] {
         if self.plugins.list.is_none() {
-            let (list, errors) =
-                studiocraft_plugin_host::scan(&studiocraft_plugin_host::default_paths());
+            let paths = studiocraft_plugin_host::default_paths();
+            let (list, errors, blocked) = match PLUGIN_SCANNER.get() {
+                // Im Programm: jede Datei in einem eigenen Prozess (Absturzschutz).
+                Some(exe) => {
+                    let cache = crate::settings::config_dir().map(|d| d.join(SCAN_CACHE));
+                    let opts = studiocraft_plugin_host::ScanOptions::new(exe.clone(), cache);
+                    let r = studiocraft_plugin_host::scan_isolated(&paths, &opts);
+                    (r.plugins, r.errors, r.blocked.len())
+                }
+                // Tests und Werkzeuge ohne Scan-Programm: im eigenen Prozess.
+                None => {
+                    let (list, errors) = studiocraft_plugin_host::scan(&paths);
+                    (list, errors, 0)
+                }
+            };
+            let mut notes = Vec::new();
             if !errors.is_empty() {
-                self.message = Some(format!("{} Plugin-Datei(en) nicht ladbar", errors.len()));
+                notes.push(format!("{} Plugin-Datei(en) nicht ladbar", errors.len()));
+            }
+            if blocked > 0 {
+                notes.push(format!(
+                    "{blocked} Plugin-Datei(en) gesperrt (Absturz beim Scan; Menü Projekt: Plugins neu prüfen)"
+                ));
+            }
+            if !notes.is_empty() {
+                self.message = Some(notes.join(" · "));
             }
             self.plugins.list = Some(list);
         }
         self.plugins.list.as_deref().unwrap_or_default()
+    }
+
+    /// Sperrliste und Cache leeren; die Plugin-Liste wird beim nächsten Bedarf neu erstellt.
+    pub(crate) fn rescan_plugins(&mut self) {
+        if let Some(cache) = crate::settings::config_dir().map(|d| d.join(SCAN_CACHE))
+            && let Err(e) = studiocraft_plugin_host::clear_scan_cache(&cache)
+        {
+            self.message = Some(format!("Plugin-Cache nicht gelöscht: {e}"));
+            return;
+        }
+        self.plugins.list = None;
+        let n = self.plugin_list().len();
+        if self.message.is_none() {
+            self.message = Some(format!("{n} Plugins gefunden"));
+        }
     }
 
     fn find_plugin(&mut self, id: &str) -> Option<PluginInfo> {

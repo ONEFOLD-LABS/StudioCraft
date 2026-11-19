@@ -25,9 +25,15 @@ mod gui;
 #[cfg(not(target_arch = "wasm32"))]
 mod host;
 #[cfg(not(target_arch = "wasm32"))]
+mod isolated;
+#[cfg(not(target_arch = "wasm32"))]
 mod scan;
 
 #[cfg(not(target_arch = "wasm32"))]
 pub use clap::{ClapInstance, MAX_LATENCY, ParamInfo, PluginHandle};
 #[cfg(not(target_arch = "wasm32"))]
-pub use scan::{PluginInfo, default_paths, scan};
+pub use isolated::{
+    SCAN_FLAG, ScanOptions, ScanReport, clear_scan_cache, run_scan_child, scan_isolated,
+};
+#[cfg(not(target_arch = "wasm32"))]
+pub use scan::{PluginInfo, default_paths, find_all, scan, scan_bundle};
