@@ -17,6 +17,8 @@
       arrangiert Events auf Spuren, mischt mit Gruppen, FX-Kanälen und CLAP-Plugins und exportiert
       den Mix als WAV, FLAC oder AIFF.</p>
   </description>
+  <url type="homepage">https://github.com/xXCrusaderXx/StudioCraft</url>
+  <url type="bugtracker">https://github.com/xXCrusaderXx/StudioCraft/issues</url>
   <launchable type="desktop-id">io.github.xxcrusaderxx.studiocraft.desktop</launchable>
   <icon type="stock">studiocraft</icon>
   <categories>

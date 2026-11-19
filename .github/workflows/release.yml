@@ -24,7 +24,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        runner: [ubuntu-22.04, ubuntu-22.04-arm]
+        # 24.04: libspa 0.10 (cpal's PipeWire backend) needs PipeWire headers newer than
+        # the 0.3.48 that 22.04 ships.
+        runner: [ubuntu-24.04, ubuntu-24.04-arm]
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v7
@@ -55,7 +57,8 @@ jobs:
           - runner: macos-latest
             target: aarch64-apple-darwin
             os: macos-aarch64
-          - runner: macos-13
+          # Intel build cross-compiled on Apple silicon; the macOS 13 runners are gone.
+          - runner: macos-latest
             target: x86_64-apple-darwin
             os: macos-x86_64
     runs-on: ${{ matrix.runner }}
