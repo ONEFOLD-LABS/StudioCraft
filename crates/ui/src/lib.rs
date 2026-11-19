@@ -6709,18 +6709,25 @@ mod tests {
 
     #[test]
     fn plugin_state_survives_rebuild_and_save_open() {
-        let tmp = temp_dir("plugin-state");
+        state_survives_rebuild_and_save_open(studiocraft_plugin_host::PluginFormat::Clap);
+    }
+
+    #[test]
+    fn vst3_plugin_state_survives_rebuild_and_save_open() {
+        state_survives_rebuild_and_save_open(studiocraft_plugin_host::PluginFormat::Vst3);
+    }
+
+    fn state_survives_rebuild_and_save_open(format: studiocraft_plugin_host::PluginFormat) {
+        let tmp = temp_dir(&format!("plugin-state-{format:?}"));
         let (mut core, ctl) = studiocraft_engine::engine(48_000, TempoMap::default());
         let mut w = ProjectWindow::new(Project::default(), Some(ctl), String::new());
         let Some(fx) = w
             .plugin_list()
             .iter()
-            .find(|p| {
-                p.name == "ZamComp" && p.format == studiocraft_plugin_host::PluginFormat::Clap
-            })
+            .find(|p| p.name == "ZamComp" && p.format == format)
             .cloned()
         else {
-            eprintln!("ZamComp nicht installiert – übersprungen");
+            eprintln!("ZamComp ({format:?}) nicht installiert – übersprungen");
             return;
         };
         let slot = |fx: &studiocraft_plugin_host::PluginInfo| studiocraft_project::InsertSlot {

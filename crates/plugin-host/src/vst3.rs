@@ -4,7 +4,7 @@
 //!
 //! Umfang: Bundles finden und Klassen lesen, Komponente + Audioprozessor + Controller anlegen,
 //! Stereo-Audio (Mono-Busse bekommen die Summe), Parameter (normiert; gestufte als Stufen),
-//! Noten als Ereignisse. Zustand, Latenzänderungen und Fenster folgen.
+//! Noten als Ereignisse, Zustand (Komponente + Controller) und Latenzänderungen. Fenster folgen.
 
 use std::{
     collections::HashMap,
@@ -63,6 +63,12 @@ const IID_PARAMETER_CHANGES: Tuid = uid(0xA477_9663, 0x0BB6_4A56, 0xB443_84A8, 0
 const IID_PARAM_VALUE_QUEUE: Tuid = uid(0x0126_3A18, 0xED07_4F6F, 0x98C9_D356, 0x4686_F9BA);
 const IID_EVENT_LIST: Tuid = uid(0x3A2C_4214, 0x3463_49FE, 0xB2C4_F397, 0xB969_5A44);
 const IID_COMPONENT_HANDLER: Tuid = uid(0x93A0_BEA3, 0x0BD0_45DB, 0x8E89_0B0C, 0xC1E4_6AC6);
+const IID_STREAM: Tuid = uid(0xC3BF_6EA2, 0x3099_4752, 0x9B6B_F990, 0x1EE3_3E9B);
+
+/// Kennung gespeicherter VST3-Zustände in StudioCraft-Projekten (Komponente + Controller).
+const STATE_MAGIC: &[u8; 4] = b"SCV3";
+/// Höchstgröße eines Zustands (Schutz gegen entgleiste Plugins und kaputte Dateien).
+const MAX_STATE: usize = 256 << 20;
 
 const MEDIA_AUDIO: i32 = 0;
 const MEDIA_EVENT: i32 = 1;
@@ -761,6 +767,163 @@ impl EventList {
     }
 }
 
+// Datenstrom für Zustände: liest aus bzw. schreibt in einen Puffer (Hauptthread).
+
+#[repr(C)]
+struct StreamVt {
+    unknown: UnknownVt,
+    read: unsafe extern "system" fn(Obj, *mut c_void, i32, *mut i32) -> Tresult,
+    write: unsafe extern "system" fn(Obj, *const c_void, i32, *mut i32) -> Tresult,
+    seek: unsafe extern "system" fn(Obj, i64, i32, *mut i64) -> Tresult,
+    tell: unsafe extern "system" fn(Obj, *mut i64) -> Tresult,
+}
+
+#[repr(C)]
+struct Stream {
+    vt: *const StreamVt,
+    data: Vec<u8>,
+    pos: usize,
+}
+
+unsafe extern "system" fn stream_query(this: Obj, iid: *const Tuid, out: *mut Obj) -> Tresult {
+    // SAFETY: Aufruf durch das Plugin mit gültigen Zeigern.
+    unsafe { host_query(this, iid, out, &IID_STREAM) }
+}
+
+unsafe extern "system" fn stream_read(
+    this: Obj,
+    buf: *mut c_void,
+    n: i32,
+    read: *mut i32,
+) -> Tresult {
+    // SAFETY: `this` ist unser Strom; `buf` hat laut Vertrag `n` Bytes Platz.
+    unsafe {
+        let s = &mut *(this as *mut Stream);
+        let want = usize::try_from(n).unwrap_or(0);
+        let k = want.min(s.data.len().saturating_sub(s.pos));
+        if k > 0 && !buf.is_null() {
+            ptr::copy_nonoverlapping(s.data.as_ptr().add(s.pos), buf.cast::<u8>(), k);
+        }
+        s.pos += k;
+        if !read.is_null() {
+            *read = k as i32;
+        }
+    }
+    RESULT_OK
+}
+
+unsafe extern "system" fn stream_write(
+    this: Obj,
+    buf: *const c_void,
+    n: i32,
+    written: *mut i32,
+) -> Tresult {
+    // SAFETY: `this` ist unser Strom; `buf` hat laut Vertrag `n` Bytes.
+    unsafe {
+        let s = &mut *(this as *mut Stream);
+        let n = usize::try_from(n).unwrap_or(0);
+        if buf.is_null() || s.pos.saturating_add(n) > MAX_STATE {
+            return -1;
+        }
+        let src = std::slice::from_raw_parts(buf.cast::<u8>(), n);
+        let end = s.pos + n;
+        if s.data.len() < end {
+            s.data.resize(end, 0);
+        }
+        s.data[s.pos..end].copy_from_slice(src);
+        s.pos = end;
+        if !written.is_null() {
+            *written = n as i32;
+        }
+    }
+    RESULT_OK
+}
+
+unsafe extern "system" fn stream_seek(this: Obj, pos: i64, mode: i32, result: *mut i64) -> Tresult {
+    // SAFETY: `this` ist unser Strom; `result` gültig oder null.
+    unsafe {
+        let s = &mut *(this as *mut Stream);
+        let base = match mode {
+            0 => 0i64,
+            1 => s.pos as i64,
+            2 => s.data.len() as i64,
+            _ => return -1,
+        };
+        let Some(new) = base
+            .checked_add(pos)
+            .filter(|&p| (0..=MAX_STATE as i64).contains(&p))
+        else {
+            return -1;
+        };
+        s.pos = new as usize;
+        if !result.is_null() {
+            *result = new;
+        }
+    }
+    RESULT_OK
+}
+
+unsafe extern "system" fn stream_tell(this: Obj, pos: *mut i64) -> Tresult {
+    if pos.is_null() {
+        return -1;
+    }
+    // SAFETY: `this` ist unser Strom; `pos` gültig.
+    unsafe { *pos = (*(this as *const Stream)).pos as i64 };
+    RESULT_OK
+}
+
+static STREAM_VT: StreamVt = StreamVt {
+    unknown: UnknownVt {
+        query_interface: stream_query,
+        add_ref: host_add_ref,
+        release: host_release,
+    },
+    read: stream_read,
+    write: stream_write,
+    seek: stream_seek,
+    tell: stream_tell,
+};
+
+impl Stream {
+    fn new(data: Vec<u8>) -> Box<Self> {
+        Box::new(Self {
+            vt: &STREAM_VT,
+            data,
+            pos: 0,
+        })
+    }
+
+    fn obj(&mut self) -> Obj {
+        (self as *mut Self).cast()
+    }
+}
+
+/// Zustand in einen Container: Kennung, dann Länge + Bytes von Komponente und Controller.
+fn pack_state(component: &[u8], controller: &[u8]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(12 + component.len() + controller.len());
+    out.extend_from_slice(STATE_MAGIC);
+    for part in [component, controller] {
+        out.extend_from_slice(&(part.len() as u32).to_le_bytes());
+        out.extend_from_slice(part);
+    }
+    out
+}
+
+/// Gegenstück zu [`pack_state`]; `None` bei fremden oder kaputten Daten.
+fn unpack_state(data: &[u8]) -> Option<(&[u8], &[u8])> {
+    let rest = data.strip_prefix(STATE_MAGIC.as_slice())?;
+    let take = |d: &[u8]| -> Option<(usize, usize)> {
+        let len = u32::from_le_bytes(d.get(..4)?.try_into().ok()?) as usize;
+        (len <= MAX_STATE && d.len() >= 4 + len).then_some((4, len))
+    };
+    let (o, a) = take(rest)?;
+    let component = &rest[o..o + a];
+    let rest = &rest[o + a..];
+    let (o, b) = take(rest)?;
+    let controller = &rest[o..o + b];
+    (rest.len() == o + b).then_some((component, controller))
+}
+
 // ---------------------------------------------------------------------------
 // Module (Bibliotheken) und Fabriken. Module bleiben bis zum Programmende geladen.
 
@@ -1195,6 +1358,14 @@ impl Vst3Instance {
     pub fn handle(&self) -> Vst3Handle {
         Vst3Handle {
             shared: self.shared.clone(),
+            component: self.component,
+            processor: self.processor,
+            controller: if self.separate_controller {
+                self.controller
+            } else {
+                ptr::null_mut()
+            },
+            any_controller: self.controller,
         }
     }
 
@@ -1370,19 +1541,93 @@ impl Drop for Vst3Instance {
     }
 }
 
-/// Griff auf eine VST3-Instanz für den Hauptthread. Zustand und Fenster folgen; bis dahin
-/// liefert er die Latenz.
+/// Griff auf eine VST3-Instanz für den Hauptthread (Zustand, Latenz), während sie in der
+/// Engine rechnet. Muss vor der Instanz freigegeben werden; die Zeiger leben mit ihr.
 pub struct Vst3Handle {
     shared: Arc<Shared>,
+    component: Obj,
+    processor: Obj,
+    /// Eigener Controller (null, wenn die Komponente selbst Controller ist).
+    controller: Obj,
+    /// Controller überhaupt (eigener oder die Komponente), für setComponentState.
+    any_controller: Obj,
 }
+
+// SAFETY: Zustand und Latenz sind laut Formatbeschreibung Aufrufe aus dem UI-Thread, parallel zur
+// Verarbeitung erlaubt; der Griff wird nur dort benutzt und lebt kürzer als die Instanz.
+unsafe impl Send for Vst3Handle {}
 
 impl Vst3Handle {
     pub fn latency(&self) -> u32 {
         self.shared.latency.load(Ordering::Acquire)
     }
 
+    /// Hat das Plugin eine geänderte Latenz gemeldet? Dann wird sie hier neu gelesen.
     pub fn take_latency_changed(&self) -> bool {
-        self.shared.latency_dirty.swap(0, Ordering::AcqRel) != 0
+        if self.shared.latency_dirty.swap(0, Ordering::AcqRel) == 0 {
+            return false;
+        }
+        let _main = main_thread_lock();
+        // SAFETY: Prozessor lebt (Vertrag des Griffs); Abruf im Hauptthread.
+        let lat =
+            unsafe { (vt::<AudioProcessorVt>(self.processor).get_latency_samples)(self.processor) };
+        self.shared
+            .latency
+            .store(lat.min(MAX_LATENCY), Ordering::Release);
+        true
+    }
+
+    /// Zustand von Komponente und (eigenem) Controller speichern. Hauptthread.
+    pub fn save_state(&self) -> Option<Vec<u8>> {
+        let _main = main_thread_lock();
+        let mut comp = Stream::new(Vec::new());
+        // SAFETY: Komponente lebt; der Strom lebt während des Aufrufs.
+        let ok = unsafe {
+            (vt::<ComponentVt>(self.component).get_state)(self.component, comp.obj()) == RESULT_OK
+        };
+        if !ok {
+            return None;
+        }
+        let mut ctl = Stream::new(Vec::new());
+        if !self.controller.is_null() {
+            // SAFETY: Controller lebt; ein Fehler heißt nur: kein Controller-Zustand.
+            let ok = unsafe {
+                (vt::<EditControllerVt>(self.controller).get_state)(self.controller, ctl.obj())
+                    == RESULT_OK
+            };
+            if !ok {
+                ctl.data.clear();
+            }
+        }
+        Some(pack_state(&comp.data, &ctl.data))
+    }
+
+    /// Gespeicherten Zustand laden. Nur bevor die Instanz rechnet – StudioCraft lädt ihn beim
+    /// Erzeugen. Der Controller bekommt den Zustand der Komponente mit (gleiche Anzeige).
+    pub fn load_state(&self, data: &[u8]) -> bool {
+        let Some((comp, ctl)) = unpack_state(data) else {
+            return false;
+        };
+        let _main = main_thread_lock();
+        // SAFETY: Objekte leben; Ströme leben während der Aufrufe.
+        unsafe {
+            let mut s = Stream::new(comp.to_vec());
+            if (vt::<ComponentVt>(self.component).set_state)(self.component, s.obj()) != RESULT_OK {
+                return false;
+            }
+            if !self.any_controller.is_null() {
+                let mut s = Stream::new(comp.to_vec());
+                (vt::<EditControllerVt>(self.any_controller).set_component_state)(
+                    self.any_controller,
+                    s.obj(),
+                );
+            }
+            if !self.controller.is_null() && !ctl.is_empty() {
+                let mut s = Stream::new(ctl.to_vec());
+                (vt::<EditControllerVt>(self.controller).set_state)(self.controller, s.obj());
+            }
+        }
+        true
     }
 }
 
@@ -1449,6 +1694,84 @@ mod tests {
             }
         }
         out
+    }
+
+    #[test]
+    fn state_container_roundtrips_and_rejects_garbage() {
+        let packed = pack_state(b"comp", b"");
+        assert_eq!(unpack_state(&packed), Some((&b"comp"[..], &b""[..])));
+        let packed = pack_state(b"", b"ctl");
+        assert_eq!(unpack_state(&packed), Some((&b""[..], &b"ctl"[..])));
+        assert_eq!(
+            unpack_state(b"SCV3\xff\xff\xff\xff"),
+            None,
+            "length past the end"
+        );
+        assert_eq!(unpack_state(b"XXXX"), None);
+        let mut long = pack_state(b"a", b"b");
+        long.push(0);
+        assert_eq!(unpack_state(&long), None, "trailing bytes");
+    }
+
+    #[test]
+    fn stream_reads_writes_and_seeks_within_bounds() {
+        let mut s = Stream::new(Vec::new());
+        let o = s.obj();
+        let (mut n, mut pos) = (0i32, 0i64);
+        let mut buf = [0u8; 8];
+        // SAFETY: Test ruft den Strom wie ein Plugin auf.
+        unsafe {
+            assert_eq!(
+                stream_write(o, b"hello".as_ptr().cast(), 5, &mut n),
+                RESULT_OK
+            );
+            assert_eq!(n, 5);
+            assert_eq!(stream_seek(o, 1, 0, &mut pos), RESULT_OK);
+            assert_eq!(
+                stream_read(o, buf.as_mut_ptr().cast(), 8, &mut n),
+                RESULT_OK
+            );
+            assert_eq!((n, &buf[..4]), (4, &b"ello"[..]));
+            assert_eq!(stream_seek(o, -1, 0, &mut pos), -1, "before the start");
+            assert_eq!(stream_seek(o, 0, 9, &mut pos), -1, "unknown mode");
+            assert_eq!(stream_tell(o, &mut pos), RESULT_OK);
+            assert_eq!(pos, 5);
+        }
+    }
+
+    #[test]
+    fn plugin_state_survives_a_new_instance() {
+        let Some(info) = installed().into_iter().find(|p| p.name == "ZamComp") else {
+            eprintln!("ZamComp (VST3) nicht installiert – übersprungen");
+            return;
+        };
+        let a = Vst3Instance::new(&info, 48_000, 256);
+        assert!(a.is_ok());
+        let Ok(mut a) = a else { return };
+        // Einen Parameter verstellen und einen Block rechnen, damit er im Plugin ankommt.
+        let p = a.params[0].clone();
+        a.set_param(p.id, (p.min + p.max) * 0.25);
+        let (mut l, mut r) = (vec![0.0f32; 64], vec![0.0f32; 64]);
+        a.process(&mut l, &mut r);
+        let state = a.handle().save_state();
+        assert!(state.is_some(), "ZamComp saves its state");
+        let Some(state) = state else { return };
+        let fresh = Vst3Instance::new(&info, 48_000, 256);
+        assert!(fresh.is_ok());
+        let Ok(b) = fresh else { return };
+        let default_state = b.handle().save_state();
+        assert_ne!(
+            default_state.as_ref(),
+            Some(&state),
+            "changed parameter is in the state"
+        );
+        assert!(b.handle().load_state(&state));
+        assert_eq!(
+            b.handle().save_state(),
+            Some(state),
+            "same state after loading"
+        );
+        assert!(!b.handle().load_state(b"kein Zustand"));
     }
 
     #[test]
