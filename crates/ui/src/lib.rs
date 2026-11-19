@@ -27,6 +27,7 @@ mod infoline;
 mod inserts;
 mod keyeditor;
 mod keymap;
+pub mod keypad;
 mod macros;
 mod markers_ui;
 mod menu;
@@ -87,6 +88,8 @@ pub struct ProjectWindow {
     /// Tastaturbelegung (Standard plus eigene Änderungen) und der Dialog dazu.
     keymap: keymap::Keymap,
     key_dialog: keymap::KeyDialog,
+    /// Nummernblock-Drücke aus der App (ohne: Nummernblock wie Zahlenreihe).
+    keypad: Option<keypad::KeypadTap>,
     /// Dialog „Wiederholen“ (Strg+K).
     repeat_dialog: shortcuts::RepeatDialog,
     /// Sample-Editor in der unteren Zone.
@@ -211,6 +214,7 @@ impl ProjectWindow {
             color_popup_age: 0,
             keymap: keymap::Keymap::default(),
             key_dialog: keymap::KeyDialog::default(),
+            keypad: None,
             repeat_dialog: shortcuts::RepeatDialog::default(),
             sample_editor: sampleeditor::SampleEditor::default(),
             quantize: studiocraft_project::Quantize::default(),
@@ -576,10 +580,12 @@ impl ProjectWindow {
     }
 
     fn handle_keys(&mut self, ui: &Ui) {
+        // Zuerst der Nummernblock: er nimmt seine Ereignisse, bevor die Tastenbelegung sie sieht.
+        self.handle_keypad(ui);
         if ui.ctx().egui_wants_keyboard_input() {
             return;
         }
-        // `*` (auch auf dem Nummernblock): Aufnahme. egui hat dafür keine eigene Taste.
+        // `*` (ohne Nummernblock-Tap auch der Nummernblock): Aufnahme. egui hat dafür keine eigene Taste.
         let star = ui.input(|i| {
             i.events
                 .iter()
@@ -2337,6 +2343,68 @@ mod tests {
         assert!(h.query_by_label("Last –").is_none());
         // Without the status line, messages show in the transport bar.
         h.get_by_label("Datei fehlt");
+    }
+
+    #[test]
+    fn keypad_drives_the_transport_while_the_number_row_picks_tools() {
+        use keypad::{KeypadKey, KeypadPress, KeypadTap};
+        let (mut w, _) = one_event_window();
+        let tap = KeypadTap::new();
+        w.set_keypad(tap.clone());
+        w.left_locator = 3840;
+        w.right_locator = 7680;
+        assert_eq!(w.project.add_marker(11520), 3, "first position marker is 3");
+        let mut h = window_harness(w);
+        // A keypad press arrives as an egui key (Num1) plus the tap entry from the app.
+        let press = |h: &mut Harness<'_, ProjectWindow>, key: KeypadKey, egui_key: Option<Key>| {
+            tap.push(KeypadPress {
+                key,
+                shift: false,
+                repeat: false,
+            });
+            match egui_key {
+                Some(k) => h.key_press(k),
+                None => h.event(egui::Event::Text("*".into())),
+            }
+            h.run_steps(1);
+        };
+        h.key_press(Key::Num2);
+        h.run_steps(1);
+        assert_eq!(
+            h.state().tool,
+            Tool::Range,
+            "number row 2 picks the range tool"
+        );
+        press(&mut h, KeypadKey::Digit(1), Some(Key::Num1));
+        assert_eq!(h.state().tool, Tool::Range, "keypad 1 is no tool key");
+        assert_eq!(h.state().cursor, 3840, "keypad 1 jumps to the left locator");
+        press(&mut h, KeypadKey::Digit(2), Some(Key::Num2));
+        assert_eq!(h.state().cursor, 7680);
+        press(&mut h, KeypadKey::Digit(3), Some(Key::Num3));
+        assert_eq!(h.state().cursor, 11520, "keypad 3 goes to marker 3");
+        press(&mut h, KeypadKey::Subtract, Some(Key::Minus));
+        assert_eq!(h.state().cursor, 11520 - h.state().bar_ticks());
+        press(&mut h, KeypadKey::Add, Some(Key::Plus));
+        assert_eq!(h.state().cursor, 11520);
+        let cycle = h.state().cycle;
+        press(&mut h, KeypadKey::Divide, Some(Key::Slash));
+        assert_eq!(h.state().cycle, !cycle);
+        press(&mut h, KeypadKey::Decimal, None);
+        press(&mut h, KeypadKey::Digit(0), Some(Key::Num0));
+        assert_eq!(
+            h.state().cursor,
+            0,
+            "stop while stopped returns to the start"
+        );
+        assert_eq!(
+            h.state().tool,
+            Tool::Range,
+            "no keypad key changed the tool"
+        );
+        // Main row 1 still selects.
+        h.key_press(Key::Num1);
+        h.run_steps(1);
+        assert_eq!(h.state().tool, Tool::Select);
     }
 
     #[test]

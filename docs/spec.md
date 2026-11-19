@@ -201,6 +201,8 @@ Die Transportleiste unten im Projektfenster bedient Wiedergabe, Aufnahme und Loc
 | Minus / Plus | Zurück- / Vorspulen |
 | Geteilt (/) | Cycle an/aus |
 
+Die Zahlenreihe wählt weiter die Werkzeuge; nur Tasten, die das System als Nummernblock meldet, bedienen den Transport. Mit Strg oder Alt bleiben sie normale Kürzel; gehalten wiederholen nur Minus und Plus. Im Web fehlt dieser Abgriff noch; dort verhält sich der Nummernblock wie die Zahlenreihe.
+
 ## Mixer
 
 Der Mixer zeigt zu jeder Spur mit Kanal einen Kanalzug, links Eingänge, rechts Ausgangsbusse; er öffnet mit F3 als eigenes Fenster oder in der unteren Zone des Projektfensters. Spur und Kanal sind dasselbe Objekt: Mute, Solo, Name, Farbe und Auswahl sind synchron.

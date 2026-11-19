@@ -3539,6 +3539,7 @@ dependencies = [
  "studiocraft-engine",
  "studiocraft-project",
  "studiocraft-ui",
+ "winit",
 ]
 
 [[package]]

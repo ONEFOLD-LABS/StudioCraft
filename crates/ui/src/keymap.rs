@@ -513,8 +513,8 @@ pub(crate) const COMMANDS: &[CommandInfo] = &[
         "Marker",
         []
     ),
-    // Standard wäre der Nummernblock 3–9; egui unterscheidet ihn nicht von der Zahlenreihe
-    // (Issue #3), deshalb ohne Taste, frei belegbar.
+    // Der Nummernblock 3–9 springt fest zu diesen Markern (keypad.rs); hier ohne Taste,
+    // frei belegbar.
     cmd!(
         Cmd::GotoMarker(3),
         "marker.goto_3",

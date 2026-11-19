@@ -14,6 +14,8 @@
     )
 )]
 
+mod keypad;
+
 use std::{path::Path, process::ExitCode};
 
 use studiocraft_engine::{PreparedOutput, engine};
@@ -141,6 +143,9 @@ fn main() -> ExitCode {
     window.set_window_frame(frame);
     // Eigene Tastaturbelegung aus dem Einstellungsordner.
     window.load_keymap();
+    // Nummernblock getrennt von der Zahlenreihe (eigene Ereignisschleife, siehe keypad.rs).
+    let tap = studiocraft_ui::keypad::KeypadTap::new();
+    window.set_keypad(tap.clone());
     let options = eframe::NativeOptions {
         viewport: builder
             // Wayland finds the window icon through the app id and the installed desktop file
@@ -151,7 +156,15 @@ fn main() -> ExitCode {
             .with_drag_and_drop(true),
         ..Default::default()
     };
-    let result = eframe::run_native(
+    let event_loop =
+        match winit::event_loop::EventLoop::<eframe::UserEvent>::with_user_event().build() {
+            Ok(l) => l,
+            Err(e) => {
+                eprintln!("Fehler: {e}");
+                return ExitCode::FAILURE;
+            }
+        };
+    let eframe_app = eframe::create_native(
         "StudioCraft",
         options,
         Box::new(move |_cc| {
@@ -160,7 +173,10 @@ fn main() -> ExitCode {
                 _audio: audio,
             }))
         }),
+        &event_loop,
     );
+    let mut app = keypad::KeypadApp::new(eframe_app, tap);
+    let result = event_loop.run_app(&mut app);
     match result {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
