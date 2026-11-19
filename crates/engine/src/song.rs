@@ -75,6 +75,12 @@ pub struct PlayTrack {
     pub slot: usize,
     /// Nach `start` sortiert.
     pub events: Vec<PlayEvent>,
+    /// Eingangsgain als Faktor, negativ bei umgekehrter Phase; `None`: unverändert.
+    pub input_gain: Option<f32>,
+    /// Pre-Filter (Hochpass Platz 0, Tiefpass Platz 1) mit Platz im Filterzustand.
+    pub pre_filters: Vec<(usize, crate::eq::Biquad)>,
+    /// Insert-Slots im Projekt ab hier liegen hinter dem Fader; `None`: alle davor.
+    pub post_from: Option<usize>,
     /// Instrument- und MIDI-Spuren: Noten in Frames, nach `start` sortiert.
     pub notes: Vec<PlayNote>,
     /// MIDI-Spuren: Platz des Ausgangsports in [`Song::midi_ports`] und Kanal 0–15.
@@ -299,6 +305,33 @@ impl Song {
                     (input.first, input.stereo)
                 });
                 let auto = crate::automation::TrackAuto::build(t, tempo, rate);
+                // Eingang und Pre-Sektion (Spec „Signalfluss“, Punkte 1 und 2).
+                let gain = studiocraft_project::db_to_gain(t.input_gain_db)
+                    * if t.phase_invert { -1.0 } else { 1.0 };
+                let input_gain = (gain != 1.0).then_some(gain);
+                let filter = |kind, freq: Option<f32>| {
+                    freq.map(|f| {
+                        crate::eq::Biquad::design(
+                            &studiocraft_project::EqBand {
+                                on: true,
+                                kind,
+                                freq: f,
+                                gain: 0.0,
+                                q: std::f32::consts::FRAC_1_SQRT_2,
+                            },
+                            rate,
+                        )
+                    })
+                };
+                let pre_filters: Vec<(usize, crate::eq::Biquad)> = [
+                    filter(studiocraft_project::BandKind::LowCut, t.pre_hpf),
+                    filter(studiocraft_project::BandKind::HighCut, t.pre_lpf),
+                ]
+                .into_iter()
+                .enumerate()
+                .filter_map(|(i, f)| f.map(|f| (i, f)))
+                .collect();
+                let post_from = Some(usize::from(project.pre_fader_inserts));
                 // MIDI-Spuren mit Ausgang: Port-Platz und Kanal.
                 let midi_out = (t.kind == TrackKind::Midi)
                     .then_some(t.midi_port.as_ref())
@@ -322,6 +355,9 @@ impl Song {
                         slot,
                         events,
                         notes,
+                        input_gain,
+                        pre_filters,
+                        post_from,
                         midi_out,
                         ctrls,
                         monitor,

@@ -103,6 +103,22 @@ fn is_channel_one(v: &u8) -> bool {
     *v == 1
 }
 
+/// Standard: Inserts 1–6 vor dem Fader, 7–8 danach.
+pub const DEFAULT_PRE_INSERTS: u8 = 6;
+
+fn default_pre_inserts() -> u8 {
+    DEFAULT_PRE_INSERTS
+}
+
+fn is_default_pre_inserts(v: &u8) -> bool {
+    *v == DEFAULT_PRE_INSERTS
+}
+
+/// Bereich des Eingangsgains in dB.
+pub const INPUT_GAIN_DB: (f32, f32) = (-24.0, 24.0);
+/// Bereich der Pre-Filter in Hz.
+pub const PRE_FILTER_HZ: (f32, f32) = (20.0, 20_000.0);
+
 fn is_zero(v: &u32) -> bool {
     *v == 0
 }
@@ -228,6 +244,17 @@ pub struct Track {
     /// Ordnerspur, zu der diese Spur gehört (siehe `folders.rs`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub parent: Option<TrackId>,
+    /// Eingangsgain in dB (Spec „Signalfluss“, Punkt 1), −24 bis +24.
+    #[serde(default, skip_serializing_if = "is_zero_db")]
+    pub input_gain_db: f32,
+    /// Phase des Eingangs umkehren.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub phase_invert: bool,
+    /// Pre-Sektion: Hochpass bzw. Tiefpass mit Eckfrequenz in Hz; `None` aus.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pre_hpf: Option<f32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pre_lpf: Option<f32>,
     /// Im Mixer ausgeblendet (Kanalliste, Spec „Sichtbarkeit und Ansicht“).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub mixer_hidden: bool,
@@ -638,6 +665,13 @@ pub struct Project {
     /// Benannte Fensterlayouts, abrufbar per Taste.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub layouts: Vec<crate::NamedLayout>,
+    /// So viele Insert-Slots liegen vor dem Fader (Projekt-Voreinstellung, Standard 6 von 8);
+    /// die übrigen danach (Spec „Signalfluss“).
+    #[serde(
+        default = "default_pre_inserts",
+        skip_serializing_if = "is_default_pre_inserts"
+    )]
+    pub pre_fader_inserts: u8,
     /// Gespeicherte Mixer-Ansichten: welche Kanäle sichtbar und welche schmal sind.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub mixer_views: Vec<MixerView>,
@@ -671,6 +705,7 @@ impl Default for Project {
             layout: crate::WindowLayout::default(),
             layouts: Vec::new(),
             mixer_views: Vec::new(),
+            pre_fader_inserts: DEFAULT_PRE_INSERTS,
         }
     }
 }
@@ -811,6 +846,10 @@ impl Project {
                 pan_mode: PanMode::Balance,
                 mixer_hidden: false,
                 mixer_narrow: false,
+                input_gain_db: 0.0,
+                phase_invert: false,
+                pre_hpf: None,
+                pre_lpf: None,
                 volume_db: 0.0,
                 pan: 0.0,
                 input: TrackInput::default(),
@@ -1411,6 +1450,10 @@ impl Project {
             pan_mode: PanMode::Balance,
             mixer_hidden: false,
             mixer_narrow: false,
+            input_gain_db: 0.0,
+            phase_invert: false,
+            pre_hpf: None,
+            pre_lpf: None,
             volume_db: 0.0,
             pan: 0.0,
             input: TrackInput::default(),
@@ -2021,6 +2064,28 @@ mod tests {
         // Unknown in older files: a part without controllers still loads.
         let json = crate::file::to_json(&p);
         assert!(crate::file::from_json(&json).is_ok());
+    }
+
+    #[test]
+    fn channel_strip_input_values_load_and_are_sanitized() {
+        let mut p = Project::default();
+        let t = p.add_track(TrackKind::Audio, "a");
+        assert_eq!(p.pre_fader_inserts, 6);
+        p.tracks[t].input_gain_db = f32::NAN;
+        p.tracks[t].pre_hpf = Some(5.0);
+        p.tracks[t].pre_lpf = Some(f32::INFINITY);
+        p.pre_fader_inserts = 30;
+        p.sanitize();
+        let tr = &p.tracks[t];
+        assert_eq!(
+            (tr.input_gain_db, tr.pre_hpf, tr.pre_lpf),
+            (0.0, Some(20.0), None)
+        );
+        assert_eq!(p.pre_fader_inserts, 8);
+        // Defaults are not written, older files load with 6 pre-fader slots.
+        let json = crate::file::to_json(&Project::default());
+        assert!(!json.contains("pre_fader_inserts") && !json.contains("input_gain_db"));
+        assert_eq!(crate::file::from_json(&json).unwrap().pre_fader_inserts, 6);
     }
 
     #[test]
