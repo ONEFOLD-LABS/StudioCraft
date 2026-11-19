@@ -80,6 +80,7 @@ Alles passiert in einem Projektfenster: In der Mitte liegt die Event-Anzeige, um
 ```
 
 - Spurliste und Event-Anzeige scrollen vertikal gemeinsam; Lineal und Event-Anzeige horizontal gemeinsam
+- Bildlaufleisten am unteren und rechten Rand der Event-Anzeige: Griff ziehen verschiebt, Klick daneben blättert; dazu Mausrad (Spuren), Umschalt + Mausrad bzw. waagerechtes Wischen (Zeit)
 - Zonengrößen sind per Trenner ziehbar und werden im Projekt gespeichert
 - Fensterlayouts (welche Zonen und Fenster offen sind) lassen sich benennen und per Tastenkombination abrufen
 - Mehrere Monitore: jedes eigenständige Fenster merkt sich Bildschirm und Position

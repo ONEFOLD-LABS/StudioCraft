@@ -583,6 +583,123 @@ pub(crate) fn show(w: &mut ProjectWindow, ui: &mut Ui) {
     if let Some(t) = plugin_target {
         paint_plugin_target(&painter.with_clip_rect(header.union(lanes)), &geo, t);
     }
+    let content_h = geo.tops.last().copied().unwrap_or(0.0);
+    scrollbars(w, ui, &painter, lanes, content_h);
+}
+
+/// Dicke der Bildlaufleisten in Punkten.
+const BAR: f32 = 10.0;
+
+/// Ausdehnung des Projekts in Ticks für die Leiste: bis hinter das letzte Event bzw. den
+/// sichtbaren Teil, mit einer halben Fensterbreite Luft.
+fn timeline_extent(w: &ProjectWindow, visible: f64) -> f64 {
+    (w.project.length() as f64).max(w.view.scroll_ticks + visible) + visible * 0.5
+}
+
+/// Leiste mit Griff: (Griff, Position des Griffs als Anteil, Größe als Anteil).
+fn thumb(track: Rect, horizontal: bool, start: f32, size: f32) -> Rect {
+    let len = if horizontal {
+        track.width()
+    } else {
+        track.height()
+    };
+    let size = (size.clamp(0.0, 1.0) * len).clamp(24.0_f32.min(len), len);
+    let pos = (start.clamp(0.0, 1.0) * len).min(len - size);
+    if horizontal {
+        Rect::from_min_size(
+            pos2(track.left() + pos, track.top()),
+            vec2(size, track.height()),
+        )
+    } else {
+        Rect::from_min_size(
+            pos2(track.left(), track.top() + pos),
+            vec2(track.width(), size),
+        )
+    }
+}
+
+/// Bildlaufleisten unten (Zeit) und rechts (Spuren) über dem Rand der Event-Anzeige: Griff
+/// ziehen verschiebt, Klick daneben blättert um eine Fensterbreite bzw. -höhe.
+fn scrollbars(w: &mut ProjectWindow, ui: &Ui, painter: &Painter, lanes: Rect, content_h: f32) {
+    let t = crate::theme::tokens(ui.ctx());
+    let draw = |track: Rect, grip: Rect, active: bool| {
+        painter.rect_filled(track, 0.0, t.panel_bg2.gamma_multiply(0.85));
+        let c = if active { t.accent } else { t.button_hi };
+        painter.rect_filled(grip.shrink(2.0), 3.0, c);
+    };
+    // Waagerecht: Zeit.
+    let visible = f64::from(lanes.width() / w.view.px_per_quarter.max(0.01)) * TPQ;
+    let total = timeline_extent(w, visible).max(1.0);
+    let htrack = Rect::from_min_max(
+        pos2(lanes.left(), lanes.bottom() - BAR),
+        pos2(lanes.right() - BAR, lanes.bottom()),
+    );
+    let hgrip = thumb(
+        htrack,
+        true,
+        (w.view.scroll_ticks / total) as f32,
+        (visible / total) as f32,
+    );
+    let hresp = ui
+        .interact(
+            htrack,
+            ui.scope_id().with("bildlauf-zeit"),
+            Sense::click_and_drag(),
+        )
+        .on_hover_text("Zeit: ziehen oder daneben klicken");
+    hresp.widget_info(|| {
+        egui::WidgetInfo::labeled(egui::Role::ScrollBar, true, "Bildlaufleiste Zeit")
+    });
+    if hresp.dragged() {
+        let per_px = total / f64::from(htrack.width().max(1.0));
+        w.view.scroll_ticks += f64::from(hresp.drag_delta().x) * per_px;
+    } else if hresp.clicked()
+        && let Some(p) = hresp.interact_pointer_pos()
+        && !hgrip.contains(p)
+    {
+        let page = if p.x < hgrip.left() {
+            -visible
+        } else {
+            visible
+        };
+        w.view.scroll_ticks += page * 0.9;
+    }
+    w.view.scroll_ticks = w
+        .view
+        .scroll_ticks
+        .clamp(0.0, (total - visible * 0.5).max(0.0));
+    draw(htrack, hgrip, hresp.dragged() || hresp.hovered());
+    // Senkrecht: Spuren (nur, wenn sie nicht alle hineinpassen).
+    let view_h = lanes.height() - BAR;
+    let total_h = content_h + w.view.row_h;
+    if total_h > view_h {
+        let vtrack = Rect::from_min_max(
+            pos2(lanes.right() - BAR, lanes.top()),
+            pos2(lanes.right(), lanes.bottom() - BAR),
+        );
+        let vgrip = thumb(vtrack, false, w.view.scroll_y / total_h, view_h / total_h);
+        let vresp = ui
+            .interact(
+                vtrack,
+                ui.scope_id().with("bildlauf-spuren"),
+                Sense::click_and_drag(),
+            )
+            .on_hover_text("Spuren: ziehen oder daneben klicken");
+        vresp.widget_info(|| {
+            egui::WidgetInfo::labeled(egui::Role::ScrollBar, true, "Bildlaufleiste Spuren")
+        });
+        if vresp.dragged() {
+            w.view.scroll_y += vresp.drag_delta().y * total_h / vtrack.height().max(1.0);
+        } else if vresp.clicked()
+            && let Some(p) = vresp.interact_pointer_pos()
+            && !vgrip.contains(p)
+        {
+            let page = if p.y < vgrip.top() { -view_h } else { view_h };
+            w.view.scroll_y += page * 0.9;
+        }
+        w.view.scroll_y = w.view.scroll_y.clamp(0.0, (total_h - view_h).max(0.0));
+        draw(vtrack, vgrip, vresp.dragged() || vresp.hovered());
+    }
 }
 
 /// Wohin ein gezogenes Plugin fällt.
