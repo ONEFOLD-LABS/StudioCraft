@@ -178,6 +178,8 @@ impl ProjectWindow {
             body(self, ui, &mut open);
             return (open, None);
         }
+        // Tasten, die in diesem Fenster gedrückt werden, kommen nur in seiner Eingabe an.
+        self.handle_window_keys(ui);
         egui::CentralPanel::default().show(ui, |ui| body(self, ui, &mut open));
         let (close, outer, inner) = ui.input(|i| {
             let v = i.viewport();

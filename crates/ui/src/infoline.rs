@@ -93,7 +93,13 @@ pub(crate) fn show(w: &mut ProjectWindow, ui: &mut Ui) {
 
 /// Beschriftetes Textfeld. Gibt den neuen Text zurück, sobald die Eingabe abgeschlossen ist.
 /// `multi`: Mehrfachauswahl, die Beschriftung wird gelb.
-fn field(ui: &mut Ui, label: &str, value: String, width: f32, multi: bool) -> Option<String> {
+pub(crate) fn field(
+    ui: &mut Ui,
+    label: &str,
+    value: String,
+    width: f32,
+    multi: bool,
+) -> Option<String> {
     let id = ui.make_persistent_id(("infozeile", label));
     let mut text = ui
         .data(|d| d.get_temp::<String>(id))
