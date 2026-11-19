@@ -43,6 +43,51 @@ use crate::{
 /// Höchstzahl Parameteränderungen pro Block (vorab angelegt, keine Allokation im Audio-Thread).
 const MAX_EVENTS: usize = 256;
 
+/// Prozessweite Sperre für Hauptthread-Aufrufe in Plugins (Bibliothek laden und freigeben,
+/// Instanz erzeugen, aktivieren, Zustand laden, zerstören).
+///
+/// CLAP kennt genau einen Hauptthread, und viele Plugins verlassen sich darauf: Sie teilen
+/// nicht thread-sichere Bibliotheken (etwa FFT-Planer) zwischen Instanzen. Arbeiten mehrere
+/// Threads als „Hauptthread“ (parallele Tests, ein Scan im Hintergrund), stürzten solche
+/// Plugins ab. Die Sperre ist wiedereintrittsfähig, weil ein solcher Aufruf beim Aufräumen
+/// einen weiteren auslösen kann (gescheiterte Instanz, letzte Referenz auf die Bibliothek).
+/// Im Programm ist sie nie umkämpft.
+pub(crate) struct MainThreadGuard {
+    /// Hält die Sperre (nur der äußerste Aufruf); wird beim Drop freigegeben.
+    _lock: Option<std::sync::MutexGuard<'static, ()>>,
+}
+
+thread_local! {
+    static MAIN_DEPTH: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
+}
+
+pub(crate) fn main_thread_lock() -> MainThreadGuard {
+    static LOCK: Mutex<()> = Mutex::new(());
+    let depth = MAIN_DEPTH.with(|d| {
+        let n = d.get();
+        d.set(n.saturating_add(1));
+        n
+    });
+    if depth == 0 {
+        // Eine Vergiftung (Panik unter der Sperre) ändert nichts am Schutz.
+        MainThreadGuard {
+            _lock: Some(
+                LOCK.lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner),
+            ),
+        }
+    } else {
+        MainThreadGuard { _lock: None }
+    }
+}
+
+impl Drop for MainThreadGuard {
+    fn drop(&mut self) {
+        // Erst die Tiefe senken, danach gibt das Feld die Sperre frei.
+        MAIN_DEPTH.with(|d| d.set(d.get().saturating_sub(1)));
+    }
+}
+
 /// Eine geladene CLAP-Datei. Wird geteilt, solange Instanzen daraus leben;
 /// beim letzten Freigeben folgt `deinit`.
 pub(crate) struct Library {
@@ -56,6 +101,7 @@ unsafe impl Sync for Library {}
 
 impl Drop for Library {
     fn drop(&mut self) {
+        let _main = main_thread_lock();
         // SAFETY: `entry` stammt aus dieser Bibliothek, `init` war erfolgreich.
         unsafe {
             if let Some(deinit) = (*self.entry).deinit {
@@ -83,6 +129,7 @@ fn binary_path(bundle: &Path) -> PathBuf {
 impl Library {
     /// Lädt (oder teilt) die Bibliothek und ruft `init` auf. Nur im Hauptthread.
     pub(crate) fn load(bundle: &Path) -> Result<Arc<Self>, String> {
+        let _main = main_thread_lock();
         let mut cache = library_cache()
             .lock()
             .map_err(|_| "Plugin-Cache gesperrt".to_string())?;
@@ -355,6 +402,7 @@ impl PluginHandle {
 
     /// Zustand laden. Nur im Hauptthread.
     pub fn load_state(&self, data: &[u8]) -> bool {
+        let _main = main_thread_lock();
         let Some(load) = self.state_ext().and_then(|s| s.load) else {
             return false;
         };
@@ -461,6 +509,7 @@ unsafe impl Send for ClapInstance {}
 impl ClapInstance {
     /// Erzeugt, initialisiert und aktiviert das Plugin. Nur im Hauptthread.
     pub fn new(info: &PluginInfo, sample_rate: u32, max_frames: u32) -> Result<Self, String> {
+        let _main = main_thread_lock();
         let lib = Library::load(&info.path)?;
         let factory = lib.factory().ok_or("Plugin-Fabrik fehlt")?;
         let create = factory.create_plugin.ok_or("create_plugin fehlt")?;
@@ -831,6 +880,7 @@ impl Drop for ClapInstance {
         if self.plugin.is_null() {
             return;
         }
+        let _main = main_thread_lock();
         self.stop_processing();
         // SAFETY: `plugin` gültig und aktiviert; danach wird es nicht mehr benutzt.
         unsafe {
@@ -875,6 +925,35 @@ mod tests {
         assert!(b.handle().load_state(&state));
         let again = b.handle().save_state().unwrap();
         assert_eq!(again, state, "geladener Zustand ergibt denselben Zustand");
+    }
+
+    /// Mehrere Threads als „Hauptthread“ (wie parallele Tests): Plugins mit gemeinsamem,
+    /// nicht thread-sicherem FFT-Planer (Faltung) stürzten beim gleichzeitigen Erzeugen ab.
+    #[test]
+    fn plugins_can_be_created_from_several_threads_at_once() {
+        let plugins: Vec<PluginInfo> = installed()
+            .into_iter()
+            .filter(|p| ["ZamVerb", "ZamHeadX2"].contains(&p.name.as_str()))
+            .collect();
+        if plugins.is_empty() {
+            eprintln!("keine Faltungs-Plugins installiert – übersprungen");
+            return;
+        }
+        let threads: Vec<_> = (0..8)
+            .map(|t| {
+                let plugins = plugins.clone();
+                std::thread::spawn(move || {
+                    for k in 0..6 {
+                        let info = &plugins[(t + k) % plugins.len()];
+                        let inst = ClapInstance::new(info, 48_000, 256);
+                        assert!(inst.is_ok(), "{}", info.name);
+                    }
+                })
+            })
+            .collect();
+        for t in threads {
+            assert!(t.join().is_ok(), "no thread panicked");
+        }
     }
 
     #[test]
