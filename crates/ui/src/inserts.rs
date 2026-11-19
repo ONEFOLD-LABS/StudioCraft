@@ -99,7 +99,7 @@ impl ProjectWindow {
         }
     }
 
-    fn instantiate(&mut self, slot: &InsertSlot) -> Result<ClapInstance, String> {
+    pub(crate) fn instantiate(&mut self, slot: &InsertSlot) -> Result<ClapInstance, String> {
         let info = self
             .find_plugin(&slot.plugin_id)
             .ok_or_else(|| format!("{}: nicht installiert", slot.name))?;
