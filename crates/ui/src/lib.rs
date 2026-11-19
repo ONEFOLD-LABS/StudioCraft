@@ -3392,6 +3392,40 @@ mod tests {
     }
 
     #[test]
+    fn an_lv2_preset_sets_the_insert_parameters() {
+        let (mut w, _) = one_event_window();
+        let Some(p) = w
+            .plugin_list()
+            .iter()
+            .find(|p| p.format == studiocraft_plugin_host::PluginFormat::Lv2 && p.name == "ZamComp")
+            .cloned()
+        else {
+            eprintln!("ZamComp (LV2) nicht installiert – übersprungen");
+            return;
+        };
+        w.add_insert(0, &p);
+        w.selected_track = Some(0);
+        w.show_lower = false;
+        w.clear_history();
+        let mut h = window_harness(w);
+        h.run_steps(3);
+        h.get_all_by_label("Preset").last().unwrap().click();
+        h.run_steps(2);
+        h.get_by_label("PoppySnare").click();
+        h.run_steps(2);
+        let params = h.state().project.tracks[0].inserts[0].params.clone();
+        assert!(
+            params.len() > 3,
+            "preset sets several parameters: {params:?}"
+        );
+        h.state_mut().undo();
+        assert!(
+            h.state().project.tracks[0].inserts[0].params.is_empty(),
+            "one undo step"
+        );
+    }
+
+    #[test]
     fn an_lv2_effect_works_as_insert_and_renders() {
         let (mut w, _) = one_event_window();
         // Bevorzugt ein schlichter Effekt; sonst irgendein LV2-Effekt.
