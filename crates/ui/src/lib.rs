@@ -3490,6 +3490,76 @@ mod tests {
         assert_eq!(h.state().project.tracks[0].out_bus, None);
     }
 
+    /// Wellenform bei nicht ganzzahliger Skalierung (Bild für den Vergleich mit
+    /// `STUDIOCRAFT_SHOTS`): keine senkrechten Streifen.
+    #[test]
+    fn waveform_has_no_seams_at_fractional_scale() {
+        let (mut w, _) = one_event_window();
+        w.view.scroll_ticks = 0.0;
+        w.view.row_h = 80.0;
+        w.show_lower = false;
+        w.show_inspector = false;
+        let mut h = Harness::builder()
+            .with_size(egui::vec2(1200.0, 500.0))
+            .with_pixels_per_point(1.25)
+            .wgpu()
+            .build_ui_state(|ui, w: &mut ProjectWindow| w.ui(ui), w);
+        h.run_steps(3);
+        let Ok(img) = h.render() else {
+            eprintln!("kein GPU-Renderer verfügbar, Bild übersprungen");
+            return;
+        };
+        if let Ok(dir) = std::env::var("STUDIOCRAFT_SHOTS") {
+            img.save(std::path::Path::new(&dir).join("waveform-125.png"))
+                .unwrap();
+        }
+    }
+
+    #[test]
+    fn scrollbars_move_the_view_in_time_and_over_the_tracks() {
+        let mut p = Project::demo(40);
+        p.tracks.truncate(40);
+        let mut w = ProjectWindow::new(p, None, String::new());
+        w.show_lower = false;
+        w.view.scroll_ticks = 0.0;
+        let mut h = window_harness(w);
+        let lanes = h.state().lanes_rect;
+        let none = egui::Modifiers::NONE;
+        // Drag the time grip to the right: the view moves later.
+        let grip = egui::pos2(lanes.left() + 20.0, lanes.bottom() - 5.0);
+        drag_with(&mut h, grip, grip + egui::vec2(200.0, 0.0), none, none);
+        let after_drag = h.state().view.scroll_ticks;
+        assert!(after_drag > 0.0, "{after_drag}");
+        // Click left of the grip: one page back.
+        let left = egui::pos2(lanes.left() + 2.0, lanes.bottom() - 5.0);
+        h.event(egui::Event::PointerMoved(left));
+        h.run_steps(1);
+        for pressed in [true, false] {
+            h.event(egui::Event::PointerButton {
+                pos: left,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: none,
+            });
+            h.run_steps(1);
+        }
+        assert!(h.state().view.scroll_ticks < after_drag);
+        // 40 tracks do not fit: the track bar scrolls down.
+        let vgrip = egui::pos2(lanes.right() - 5.0, lanes.top() + 15.0);
+        drag_with(&mut h, vgrip, vgrip + egui::vec2(0.0, 120.0), none, none);
+        assert!(h.state().view.scroll_y > 0.0);
+        h.get_by_label("Bildlaufleiste Zeit");
+        h.get_by_label("Bildlaufleiste Spuren");
+    }
+
+    #[test]
+    fn render_scrollbars() {
+        shot("scrollbars", |w| {
+            w.view.scroll_ticks = 8.0 * 3840.0;
+            w.view.scroll_y = 200.0;
+        });
+    }
+
     #[test]
     fn the_file_menu_opens_the_stem_export_with_all_channels() {
         let (w, _) = one_event_window();
