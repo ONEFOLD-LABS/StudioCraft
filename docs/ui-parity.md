@@ -72,6 +72,14 @@ Bei Mehrfachauswahl: Werte des frühesten Events, Beschriftungen gelb, davor die
 - **Automationsspuren** unter ihrer Spur (und unter den Lanes), je eine Zeile: Kopf mit
   Parametername, Mute und Entfernen; Kurve in Spurfarbe, gedimmt bei Mute oder ohne R.
 - Gewählte Spur: Kopf heller hinterlegt, nicht in Akzentfarbe vollflächig.
+- **Spuren umsortieren:** Ziehen am Spurkopf (nicht auf Schaltern, Pfeil oder Farbleiste)
+  verschiebt die Spur; eine Linie zeigt die Einfügestelle. Die mittlere Hälfte eines
+  Ordnerkopfs legt die Spur in den Ordner (Rahmen um den Ordner), sonst kommt sie in den Ordner
+  der Nachbarspur bzw. heraus. Ein Ordner nimmt seine Spuren mit; ein Ordner in sich selbst
+  wird abgelehnt. Gespeichert wird nur die Anzeige-Reihenfolge (Engine und Plugins bleiben
+  unberührt).
+- **Ordnerbereich verschieben:** Ziehen in der Ordnerzeile (Objektauswahl) verschiebt alle
+  Events der enthaltenen Spuren, mit Snap (Alt: ohne), nach links höchstens bis zum Anfang.
 
 ## Event-Anzeige und Lineal
 

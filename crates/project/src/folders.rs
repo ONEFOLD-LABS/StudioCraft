@@ -63,9 +63,13 @@ impl Project {
         true
     }
 
-    /// Platz einer Spur in der Baumreihenfolge: ihr eigener Index, bei Ordnern der kleinste
-    /// Index darin. So erscheint ein neuer Ordner dort, wo seine erste Spur stand.
+    /// Platz einer Spur in der Baumreihenfolge: der beim Umsortieren vergebene Rang, sonst
+    /// ihr Index; bei Ordnern ohne Rang der kleinste Platz darin. So erscheint ein neuer Ordner
+    /// dort, wo seine erste Spur stand.
     fn sort_key(&self, i: usize) -> usize {
+        if let Some(o) = self.tracks[i].order {
+            return o as usize;
+        }
         if self.tracks[i].kind != TrackKind::Folder {
             return i;
         }
@@ -134,6 +138,96 @@ impl Project {
                 self.mark_subtree(c, seen);
             }
         }
+    }
+
+    /// Alle Spuren in Baumreihenfolge, auch die in zugeklappten Ordnern.
+    fn tree_order(&self) -> Vec<usize> {
+        let mut out = Vec::with_capacity(self.tracks.len());
+        let mut roots: Vec<usize> = (0..self.tracks.len())
+            .filter(|&i| self.parent_of(i).is_none())
+            .collect();
+        roots.sort_by_key(|&i| (self.sort_key(i), i));
+        let mut seen = vec![false; self.tracks.len()];
+        let mut stack: Vec<usize> = roots.into_iter().rev().collect();
+        while let Some(i) = stack.pop() {
+            if std::mem::replace(&mut seen[i], true) {
+                continue;
+            }
+            out.push(i);
+            if self.tracks[i].kind == TrackKind::Folder {
+                let mut children: Vec<usize> = (0..self.tracks.len())
+                    .filter(|&c| self.parent_of(c) == Some(i))
+                    .collect();
+                children.sort_by_key(|&c| (self.sort_key(c), c));
+                stack.extend(children.into_iter().rev());
+            }
+        }
+        out.extend((0..self.tracks.len()).filter(|&i| !seen[i]));
+        out
+    }
+
+    /// Spur `track` in der Spurliste vor `before` einordnen (`None`: ans Ende) und in den
+    /// Ordner `folder` legen (`None`: oberste Ebene). Ein Ordner nimmt seine Spuren mit. Die
+    /// Reihenfolge in `tracks` bleibt; nur die Ränge der Anzeige (`Track::order`) ändern sich.
+    /// Abgelehnt, wenn ein Ordner in sich selbst landen würde.
+    pub fn move_track(
+        &mut self,
+        track: usize,
+        before: Option<usize>,
+        folder: Option<usize>,
+    ) -> bool {
+        let n = self.tracks.len();
+        if track >= n || before.is_some_and(|b| b >= n || b == track) {
+            return false;
+        }
+        if let Some(f) = folder
+            && (f == track
+                || f >= n
+                || self.tracks[f].kind != TrackKind::Folder
+                || self.is_inside(f, track))
+        {
+            return false;
+        }
+        let mut order = self.tree_order();
+        order.retain(|&i| i != track);
+        let at = before
+            .and_then(|b| order.iter().position(|&i| i == b))
+            .unwrap_or(order.len());
+        order.insert(at, track);
+        self.tracks[track].parent = folder.map(|f| self.tracks[f].id);
+        for (rank, &i) in order.iter().enumerate() {
+            self.tracks[i].order = u32::try_from(rank).ok();
+        }
+        true
+    }
+
+    /// Verschiebt alle Events der Spuren `tracks` um `delta` Ticks (Ordnerbereich ziehen).
+    /// Nach links höchstens bis 0; gibt die tatsächlich angewandte Verschiebung zurück.
+    pub fn shift_tracks(&mut self, tracks: &[usize], delta: i64) -> i64 {
+        let earliest = tracks
+            .iter()
+            .filter_map(|&t| self.tracks.get(t))
+            .flat_map(|t| t.events.iter().map(|e| e.start.0))
+            .min();
+        let Some(earliest) = earliest else {
+            return 0;
+        };
+        let delta = delta.max(-(earliest.min(i64::MAX as u64) as i64));
+        for &t in tracks {
+            if let Some(track) = self.tracks.get_mut(t) {
+                for e in &mut track.events {
+                    e.start.0 = e.start.0.saturating_add_signed(delta);
+                }
+            }
+        }
+        delta
+    }
+
+    /// Alle Spuren in `folder`, auch in Unterordnern.
+    pub fn tracks_inside(&self, folder: usize) -> Vec<usize> {
+        (0..self.tracks.len())
+            .filter(|&t| self.is_inside(t, folder))
+            .collect()
     }
 
     /// Ob `track` in einem zugeklappten Ordner liegt.
@@ -209,5 +303,63 @@ mod tests {
         p.tracks[f].mute = false;
         p.tracks[f].solo = true;
         assert!(p.audible(k) && p.audible(s) && !p.audible(a));
+    }
+
+    fn shown(p: &Project) -> Vec<usize> {
+        p.display_order().iter().map(|(t, _)| *t).collect()
+    }
+
+    #[test]
+    fn move_track_reorders_and_changes_folder() {
+        let (mut p, a, f, k, s) = project();
+        assert!(p.set_parent(k, Some(f)));
+        assert_eq!(shown(&p), [a, f, k, s]);
+        // Snare into the folder, before Kick.
+        assert!(p.move_track(s, Some(k), Some(f)));
+        assert_eq!(shown(&p), [a, f, s, k]);
+        assert_eq!(p.parent_of(s), Some(f));
+        // Gesang to the end, top level.
+        assert!(p.move_track(a, None, None));
+        assert_eq!(shown(&p), [f, s, k, a]);
+        // Kick out of the folder, before the folder: storage order never changes.
+        assert!(p.move_track(k, Some(f), None));
+        assert_eq!(shown(&p), [k, f, s, a]);
+        assert_eq!(
+            p.tracks.iter().map(|t| t.name.as_str()).collect::<Vec<_>>(),
+            ["Gesang", "Drums", "Kick", "Snare"]
+        );
+    }
+
+    #[test]
+    fn a_folder_cannot_move_into_itself() {
+        let (mut p, _a, f, k, _s) = project();
+        let inner = p.add_track(TrackKind::Folder, "Toms");
+        assert!(p.set_parent(inner, Some(f)));
+        assert!(!p.move_track(f, None, Some(f)));
+        assert!(!p.move_track(f, None, Some(inner)));
+        assert!(!p.move_track(k, Some(k), None));
+        // Moving a folder takes its tracks along.
+        assert!(p.set_parent(k, Some(f)));
+        assert!(p.move_track(f, None, None));
+        let order = shown(&p);
+        let pos = |t| order.iter().position(|&x| x == t).unwrap();
+        assert!(pos(f) < pos(inner) && pos(f) < pos(k));
+    }
+
+    #[test]
+    fn shift_tracks_moves_events_and_stops_at_zero() {
+        let (mut p, _a, f, k, s) = project();
+        p.set_parent(k, Some(f));
+        p.set_parent(s, Some(f));
+        let e1 = p.create_event(k, 960, 960).unwrap();
+        let e2 = p.create_event(s, 1920, 960).unwrap();
+        let inside = p.tracks_inside(f);
+        assert_eq!(inside, [k, s]);
+        assert_eq!(p.shift_tracks(&inside, 480), 480);
+        assert_eq!(p.event(e1).unwrap().start.0, 1440);
+        // Left only as far as the earliest event can go.
+        assert_eq!(p.shift_tracks(&inside, -5000), -1440);
+        assert_eq!(p.event(e1).unwrap().start.0, 0);
+        assert_eq!(p.event(e2).unwrap().start.0, 960);
     }
 }

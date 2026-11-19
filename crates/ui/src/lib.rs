@@ -4040,6 +4040,71 @@ mod tests {
     }
 
     #[test]
+    fn dragging_track_headers_moves_tracks_into_and_out_of_folders() {
+        let (mut w, _) = one_event_window();
+        let folder = w
+            .project
+            .add_track(TrackKind::Folder, String::from("Ordner"));
+        let second = w.project.add_track(TrackKind::Audio, String::from("Zwei"));
+        let mut h = window_harness(w);
+        // Header point of a track, `frac` of a row height below its top, right of the buttons.
+        let head = |h: &Harness<'_, ProjectWindow>, track: usize, frac: f32| {
+            let w = h.state();
+            let shown: Vec<usize> = w.project.display_order().iter().map(|(t, _)| *t).collect();
+            let d = shown.iter().position(|&t| t == track).unwrap();
+            let r = w.lanes_rect;
+            egui::pos2(r.left() - 70.0, r.top() + (d as f32 + frac) * w.view.row_h)
+        };
+        // "Zwei" onto the middle of the folder header: into the folder.
+        let (a, b) = (head(&h, second, 0.75), head(&h, folder, 0.5));
+        drag_with(&mut h, a, b, egui::Modifiers::NONE, egui::Modifiers::NONE);
+        assert_eq!(h.state().project.parent_of(second), Some(folder));
+        // "Zwei" onto the upper half of the first track: out of the folder, at the top.
+        let (a, b) = (head(&h, second, 0.75), head(&h, 0, 0.1));
+        drag_with(&mut h, a, b, egui::Modifiers::NONE, egui::Modifiers::NONE);
+        assert_eq!(h.state().project.parent_of(second), None);
+        let shown: Vec<usize> = h
+            .state()
+            .project
+            .display_order()
+            .iter()
+            .map(|(t, _)| *t)
+            .collect();
+        assert_eq!(shown[0], second);
+        h.state_mut().undo();
+        assert_eq!(
+            h.state().project.parent_of(second),
+            Some(folder),
+            "one move, one undo step"
+        );
+    }
+
+    #[test]
+    fn dragging_a_folder_row_moves_its_events() {
+        let (mut w, id) = one_event_window();
+        let folder = w
+            .project
+            .add_track(TrackKind::Folder, String::from("Ordner"));
+        w.project.set_parent(0, Some(folder));
+        let start = w.project.event(id).map(|e| e.start.0).unwrap_or(0);
+        let bar = w.bar_ticks();
+        let mut h = window_harness(w);
+        let row_of = |h: &Harness<'_, ProjectWindow>, t: usize| {
+            h.state()
+                .project
+                .display_order()
+                .iter()
+                .position(|(x, _)| *x == t)
+                .unwrap() as f32
+        };
+        let y = row_of(&h, folder) + 0.5;
+        let (a, b) = (lane_pos(&h, start, y), lane_pos(&h, start + bar, y));
+        drag_with(&mut h, a, b, egui::Modifiers::NONE, egui::Modifiers::NONE);
+        let now = h.state().project.event(id).map(|e| e.start.0).unwrap_or(0);
+        assert_eq!(now, start + bar);
+    }
+
+    #[test]
     fn info_line_edits_the_selected_event_by_keyboard() {
         let (mut w, id) = one_event_window();
         w.selection = vec![id];
