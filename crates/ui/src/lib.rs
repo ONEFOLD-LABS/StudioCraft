@@ -3798,6 +3798,104 @@ mod tests {
     }
 
     #[test]
+    fn controller_lanes_draw_select_move_and_delete() {
+        use studiocraft_project::CtrlKind;
+        let (mut w, part) = key_editor_window();
+        w.key_editor.selection.clear();
+        w.add_ctrl_lane(CtrlKind::Cc(1));
+        w.add_ctrl_lane(CtrlKind::Cc(1));
+        assert_eq!(w.key_editor.lanes.len(), 1, "a kind only once");
+        w.tool = Tool::Draw;
+        w.snap = true;
+        let mut h = window_harness(w);
+        h.run_steps(2);
+        // Screen point in the controller lane for a tick and a value 0..=1.
+        let at = |h: &Harness<'_, ProjectWindow>, tick: f64, frac: f32| {
+            let s = h.state();
+            let g = s.key_editor.grid_rect;
+            let v = s.key_editor.view;
+            let top = s.key_editor.vel_rect.bottom() + 2.0;
+            let lane_h = 62.0;
+            let x = g.left() + ((tick - v.scroll_ticks) / TPQ) as f32 * v.px_per_quarter;
+            egui::pos2(x, top + lane_h * (1.0 - frac))
+        };
+        let ctrls = |h: &Harness<'_, ProjectWindow>| {
+            h.state().project.event(part).unwrap().controllers.clone()
+        };
+        // Draw a ramp over one bar: one point per grid step, rising.
+        let (a, b) = (at(&h, 0.0, 0.2), at(&h, 4.0 * TPQ, 0.8));
+        drag_with(&mut h, a, b, egui::Modifiers::NONE, egui::Modifiers::NONE);
+        let drawn = ctrls(&h);
+        assert!(drawn.len() >= 4, "{drawn:?}");
+        assert!(drawn.iter().all(|c| c.kind == CtrlKind::Cc(1)));
+        let first = drawn.iter().min_by_key(|c| c.start).unwrap();
+        let last = drawn.iter().max_by_key(|c| c.start).unwrap();
+        assert!(first.value < last.value);
+        h.state_mut().undo();
+        assert!(ctrls(&h).is_empty(), "one stroke, one undo step");
+        h.state_mut().redo();
+        // Select the first point and drag it up.
+        h.state_mut().tool = Tool::Select;
+        let p0 = at(&h, first.start as f64, f32::from(first.value) / 127.0);
+        let up = p0 - egui::vec2(0.0, 20.0);
+        drag_with(&mut h, p0, up, egui::Modifiers::NONE, egui::Modifiers::NONE);
+        let moved = ctrls(&h)
+            .into_iter()
+            .find(|c| c.start == first.start)
+            .unwrap();
+        assert!(
+            moved.value > first.value,
+            "{} -> {}",
+            first.value,
+            moved.value
+        );
+        assert_eq!(h.state().key_editor.ctrl_sel.len(), 1);
+        // Delete removes the selected point.
+        let n = ctrls(&h).len();
+        h.key_press(Key::Delete);
+        h.run_steps(1);
+        assert_eq!(ctrls(&h).len(), n - 1);
+        // The eraser removes points under the pointer.
+        h.state_mut().tool = Tool::Erase;
+        let (a, b) = (at(&h, 0.0, 0.0), at(&h, 4.0 * TPQ, 0.0));
+        drag_with(&mut h, a, b, egui::Modifiers::NONE, egui::Modifiers::NONE);
+        assert!(ctrls(&h).is_empty());
+    }
+
+    #[test]
+    fn renders_controller_lanes() {
+        shot("controller-spuren", |w| {
+            use studiocraft_project::{CtrlKind, CtrlPoint};
+            let row = w
+                .project
+                .add_track(TrackKind::Instrument, String::from("Synth"));
+            let part = w.project.create_event(row, 0, 4 * 3840).unwrap();
+            let ev = w.project.event_mut(part).unwrap();
+            ev.notes = vec![studiocraft_project::Note {
+                pitch: 60,
+                velocity: 100,
+                start: 0,
+                length: 3840,
+            }];
+            ev.controllers = (0..16)
+                .map(|i| CtrlPoint {
+                    kind: CtrlKind::PitchBend,
+                    start: i * 960,
+                    value: (8192.0 + 6000.0 * (i as f32 * 0.6).sin()) as u16,
+                })
+                .chain((0..8).map(|i| CtrlPoint {
+                    kind: CtrlKind::Cc(1),
+                    start: i * 1920,
+                    value: (i * 16) as u16,
+                }))
+                .collect();
+            w.open_key_editor(part);
+            w.add_ctrl_lane(CtrlKind::PitchBend);
+            w.add_ctrl_lane(CtrlKind::Cc(1));
+        });
+    }
+
+    #[test]
     fn shift_arrows_transpose_by_an_octave_also_in_the_editor_window() {
         let (w, part) = key_editor_window();
         let mut h = window_harness(w);
@@ -5352,7 +5450,47 @@ mod tests {
             key,
             velocity: 100,
             on,
+            ctrl: None,
         }
+    }
+
+    #[test]
+    fn recorded_controllers_land_in_the_part_without_the_sustain_pedal() {
+        let mut p = Project::default();
+        let t = p.add_track(TrackKind::Instrument, "Synth");
+        let mut w = ProjectWindow::new(p, None, String::new());
+        let ctrl = |pos: u64, data: [u8; 3]| studiocraft_engine::midi::RecordedMidi {
+            pos,
+            key: 0,
+            velocity: 0,
+            on: false,
+            ctrl: Some(data),
+        };
+        // Half a second at 48 kHz = one quarter at 120 BPM.
+        let take = [
+            rec(0, 60, true),
+            ctrl(24_000, [0xb0, 1, 90]),
+            ctrl(48_000, [0xe0, 0, 64]),
+            rec(96_000, 60, false),
+        ];
+        w.place_midi_take(t, &take, 0, 96_000);
+        let ev = &w.project.tracks[t].events[0];
+        assert_eq!(ev.notes.len(), 1);
+        let c: Vec<(studiocraft_project::CtrlKind, i64, u16)> = ev
+            .controllers
+            .iter()
+            .map(|c| (c.kind, c.start, c.value))
+            .collect();
+        assert_eq!(
+            c,
+            [
+                (studiocraft_project::CtrlKind::Cc(1), 960, 90),
+                (studiocraft_project::CtrlKind::PitchBend, 1920, 8192),
+            ]
+        );
+        // Controllers alone also make a part.
+        w.place_midi_take(t, &[ctrl(0, [0xd0, 50, 0])], 0, 48_000);
+        assert_eq!(w.project.tracks[t].events.len(), 2);
     }
 
     #[test]

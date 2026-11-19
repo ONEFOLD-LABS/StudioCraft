@@ -74,6 +74,8 @@ pub struct PlayTrack {
     pub events: Vec<PlayEvent>,
     /// Instrument-Spuren: Noten in Frames, nach `start` sortiert.
     pub notes: Vec<PlayNote>,
+    /// Instrument-Spuren: Controller-Werte in Frames, nach `at` sortiert.
+    pub ctrls: Vec<PlayCtrl>,
     /// Gruppen und FX-Kanäle: Nummer des Bus-Puffers, aus dem diese Spur liest.
     pub bus: Option<usize>,
     /// Wohin das Signal nach dem Fader geht.
@@ -111,6 +113,14 @@ pub struct PlaySend {
 
 /// Höchstzahl Gruppen und FX-Kanäle (Bus-Puffer werden vorab angelegt).
 pub const MAX_BUSES: usize = 64;
+
+/// Ein Controller-Wert (Pitchbend, CC, Aftertouch), wie der Audio-Thread ihn braucht:
+/// Projektposition in Frames und die fertige MIDI-Nachricht.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PlayCtrl {
+    pub at: u64,
+    pub data: [u8; 3],
+}
 
 /// Eine Note, wie der Audio-Thread sie braucht (Projektpositionen in Frames).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -234,6 +244,24 @@ impl Song {
                     }
                     notes.sort_by_key(|n| n.start);
                 }
+                // Controller der nicht stummen Parts, nur im sichtbaren Teil.
+                let mut ctrls = Vec::new();
+                if t.kind == TrackKind::Instrument {
+                    for e in t.events.iter().filter(|e| !e.muted) {
+                        let len = e.length as i64;
+                        for c in e
+                            .controllers
+                            .iter()
+                            .filter(|c| c.start >= 0 && c.start < len)
+                        {
+                            ctrls.push(PlayCtrl {
+                                at: tempo.frames(e.start.0 + c.start as u64, rate),
+                                data: c.kind.midi(c.value),
+                            });
+                        }
+                    }
+                    ctrls.sort_by_key(|c| c.at);
+                }
                 let (gain_l, gain_r) = t.gains();
                 let monitor = (t.monitor && t.kind == TrackKind::Audio)
                     .then_some((t.input.first, t.input.stereo));
@@ -252,6 +280,7 @@ impl Song {
                         slot,
                         events,
                         notes,
+                        ctrls,
                         monitor,
                         auto,
                         eq: crate::eq::design(&t.eq, rate),
@@ -445,6 +474,58 @@ mod tests {
             song.tracks.iter().map(|t| (t.slot, t.monitor)).collect();
         assert_eq!(monitored, [(a, Some((2, false)))]);
         assert!(!song.tracks.iter().any(|t| t.slot == quiet));
+    }
+
+    #[test]
+    fn controllers_play_on_instrument_tracks_in_frames() {
+        use studiocraft_project::{CtrlKind, CtrlPoint, TICKS_PER_QUARTER};
+        let mut p = Project::default();
+        let t = p.add_track(TrackKind::Instrument, "Synth");
+        let id = p
+            .create_event(t, TICKS_PER_QUARTER, 4 * TICKS_PER_QUARTER)
+            .unwrap();
+        p.event_mut(id).unwrap().controllers = vec![
+            CtrlPoint {
+                kind: CtrlKind::PitchBend,
+                start: 0,
+                value: 16_383,
+            },
+            CtrlPoint {
+                kind: CtrlKind::Cc(1),
+                start: TICKS_PER_QUARTER as i64,
+                value: 64,
+            },
+            // Outside the part: silent.
+            CtrlPoint {
+                kind: CtrlKind::Cc(1),
+                start: 10 * TICKS_PER_QUARTER as i64,
+                value: 1,
+            },
+        ];
+        // Instrument tracks without a plugin are dropped, so give it one.
+        p.tracks[t].instrument = Some(studiocraft_project::InsertSlot {
+            plugin_id: "x".into(),
+            name: "x".into(),
+            bypass: false,
+            params: Vec::new(),
+            state: None,
+        });
+        let song = Song::build(&p, &HashMap::new(), 48_000);
+        let track = song.tracks.iter().find(|tr| tr.slot == t).unwrap();
+        // One quarter at 120 BPM and 48 kHz = 24 000 frames.
+        assert_eq!(
+            track.ctrls,
+            vec![
+                PlayCtrl {
+                    at: 24_000,
+                    data: [0xe0, 0x7f, 0x7f]
+                },
+                PlayCtrl {
+                    at: 48_000,
+                    data: [0xb0, 1, 64]
+                },
+            ]
+        );
     }
 
     fn ones(frames: usize, v: f32) -> Arc<[f32]> {
