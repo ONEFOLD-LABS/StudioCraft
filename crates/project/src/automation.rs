@@ -181,6 +181,42 @@ impl AutomationLane {
         self.set_point(to, value);
     }
 
+    /// Skaliert die Werte in `from..=to` um `factor`, bezogen auf das untere Ende `lo` des
+    /// Wertebereichs (Bereichsauswahl ziehen, Spec „Automation“). Ankerpunkte direkt vor
+    /// und hinter dem Bereich halten die Kurve außerhalb unverändert; an den Rändern selbst
+    /// entstehen Punkte, damit der Bereich genau dort beginnt und endet.
+    pub fn scale(&mut self, from: u64, to: u64, factor: f64, (lo, hi): (f64, f64)) {
+        let (a, b) = (from.min(to), from.max(to));
+        if self.points.is_empty() || !factor.is_finite() || b == a {
+            return;
+        }
+        let (before, start, end, after) = (
+            a.checked_sub(1)
+                .and_then(|t| self.value_at(t).map(|v| (t, v))),
+            self.value_at(a),
+            self.value_at(b),
+            b.checked_add(1)
+                .and_then(|t| self.value_at(t).map(|v| (t, v))),
+        );
+        for (t, v) in [before, after].into_iter().flatten() {
+            self.set_point(t, v);
+        }
+        if let Some(v) = start {
+            self.set_point(a, v);
+        }
+        if let Some(v) = end {
+            self.set_point(b, v);
+        }
+        let factor = factor.max(0.0);
+        for p in self
+            .points
+            .iter_mut()
+            .filter(|p| p.tick >= a && p.tick <= b)
+        {
+            p.value = (lo + (p.value - lo) * factor).clamp(lo.min(hi), hi.max(lo));
+        }
+    }
+
     /// Dünnt die Punkte in `from..=to` aus (Ramer-Douglas-Peucker): Punkte, die weniger als
     /// `tolerance` (in Einheiten des Parameters) von der Linie ihrer Nachbarn abweichen, fallen
     /// weg. Der erste und letzte Punkt des Bereichs bleiben.
@@ -351,6 +387,25 @@ mod tests {
             }
             .active()
         );
+    }
+
+    #[test]
+    fn scale_changes_only_the_range() {
+        let mut l = AutomationLane::new(AutoParam::Volume);
+        l.set_point(0, -10.0);
+        l.set_point(1000, -10.0);
+        // Halve (towards the bottom of 0..1 here) inside 100..=200.
+        l.scale(100, 200, 0.5, (-60.0, 6.0));
+        assert_eq!(l.value_at(50), Some(-10.0), "before the range unchanged");
+        assert_eq!(l.value_at(500), Some(-10.0), "after the range unchanged");
+        let v = l.value_at(150).unwrap();
+        assert!((v - (-60.0 + 50.0 * 0.5)).abs() < 1e-9, "{v}");
+        // Factor 10 clamps at the top of the range; NaN does nothing.
+        l.scale(100, 200, 10.0, (-60.0, 6.0));
+        assert_eq!(l.value_at(150), Some(6.0));
+        let before = l.clone();
+        l.scale(100, 200, f64::NAN, (-60.0, 6.0));
+        assert_eq!(l, before);
     }
 
     #[test]

@@ -4695,6 +4695,48 @@ mod tests {
     }
 
     #[test]
+    fn range_tool_scales_automation_inside_the_selection() {
+        use studiocraft_project::AutoParam;
+        let (mut w, _) = one_event_window();
+        let bar = w.bar_ticks();
+        {
+            let lane = w.project.tracks[0].automation_lane_mut(AutoParam::Volume);
+            lane.set_point(0, -20.0);
+            lane.set_point(8 * bar, -20.0);
+            lane.visible = true;
+        }
+        w.tool = Tool::Range;
+        w.range = Some((0, 0, 2 * bar, 3 * bar));
+        let mut h = window_harness(w);
+        h.run_steps(2);
+        // The automation lane is the second row of track 0.
+        let a = lane_pos(&h, 2 * bar + bar / 2, 1.5);
+        let b = a - egui::vec2(0.0, 15.0);
+        drag_with(&mut h, a, b, egui::Modifiers::NONE, egui::Modifiers::NONE);
+        let lane = h.state().project.tracks[0]
+            .automation_lane(AutoParam::Volume)
+            .unwrap()
+            .clone();
+        let inside = lane.value_at(2 * bar + bar / 2).unwrap();
+        assert!(inside > -20.0, "dragging up raises the values: {inside}");
+        assert_eq!(
+            lane.value_at(bar),
+            Some(-20.0),
+            "before the range unchanged"
+        );
+        assert_eq!(
+            lane.value_at(6 * bar),
+            Some(-20.0),
+            "after the range unchanged"
+        );
+        h.state_mut().undo();
+        let lane = h.state().project.tracks[0]
+            .automation_lane(AutoParam::Volume)
+            .unwrap();
+        assert_eq!(lane.points.len(), 2, "one gesture, one undo step");
+    }
+
+    #[test]
     fn info_line_edits_the_selected_event_by_keyboard() {
         let (mut w, id) = one_event_window();
         w.selection = vec![id];

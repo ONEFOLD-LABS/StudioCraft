@@ -96,6 +96,15 @@ pub(crate) enum Drag {
         range: (f64, f64),
     },
     /// Automation frei zeichnen; `last` = zuletzt gezeichneter Tick.
+    /// Bereichsauswahl auf einer Automationsspur ziehen: Werte in `from..=to` skalieren;
+    /// `y0` = Mausposition beim Greifen (Ausgangszustand: `drag_before`).
+    AutoScale {
+        row: usize,
+        lane: usize,
+        y0: f32,
+        from: u64,
+        to: u64,
+    },
     AutoDraw {
         row: usize,
         lane: usize,
@@ -1066,7 +1075,7 @@ fn live_drag(w: &mut ProjectWindow, g: &Geo, d: Drag, p: Pos2, mods: egui::Modif
             }
             return;
         }
-        Drag::AutoPoint { .. } | Drag::AutoDraw { .. } => {
+        Drag::AutoPoint { .. } | Drag::AutoDraw { .. } | Drag::AutoScale { .. } => {
             w.drag = Some(automation::live_drag(w, g, d, p, mods.alt));
             return;
         }
@@ -1400,6 +1409,7 @@ fn finish_drag(w: &mut ProjectWindow, g: &Geo, d: Drag, p: Pos2, mods: egui::Mod
         | Drag::EventGain { .. }
         | Drag::AutoPoint { .. }
         | Drag::AutoDraw { .. }
+        | Drag::AutoScale { .. }
         | Drag::Marker { .. }
         | Drag::TempoPoint { .. } => {}
         Drag::Comp { id, start, .. } => {
