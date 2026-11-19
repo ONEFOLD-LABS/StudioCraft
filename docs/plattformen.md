@@ -58,4 +58,4 @@ Releases laufen über den gemeinsamen Workflow `storytold/craft-common-actions/.
 
 ## Abgrenzung zu SoundCraft
 
-SoundCraft orientiert sich an einer anderen DAW, StudioCraft am Bedienkonzept von klassischen DAWs. Gemeinsame Bausteine (craft-libs) werden geteilt, die Bedienung bleibt getrennt.
+SoundCraft und StudioCraft haben jeweils ein eigenes Bedienkonzept. Gemeinsame Bausteine (craft-libs) werden geteilt, die Bedienung bleibt getrennt.

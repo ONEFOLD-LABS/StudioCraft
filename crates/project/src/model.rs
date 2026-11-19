@@ -81,7 +81,7 @@ fn is_zero(v: &u32) -> bool {
 
 /// Eine MIDI-Note in einem Part (Spec „MIDI-Part“: Noten relativ zum Part-Start).
 /// `start` darf negativ sein oder hinter dem Part-Ende liegen: Beim Kürzen eines
-/// Parts bleiben Noten erhalten und sind nur ausgeblendet, wie in klassischen DAWs.
+/// Parts bleiben Noten erhalten und sind nur ausgeblendet.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Note {
     pub pitch: u8,
@@ -1102,7 +1102,7 @@ impl Project {
         }
     }
 
-    /// Neues Tempo. Wie in klassischen DAWs: Audio-Events behalten ihre Zeitposition
+    /// Neues Tempo: Audio-Events behalten ihre Zeitposition
     /// (lineare Zeitbasis), MIDI-Parts ihre Taktposition (musikalisch).
     pub fn set_tempo(&mut self, bpm: f64) {
         let bpm = bpm.clamp(20.0, 300.0);

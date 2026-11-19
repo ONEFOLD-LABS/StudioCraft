@@ -1,6 +1,6 @@
 [package]
 name = "studiocraft"
-description = "StudioCraft – plattformübergreifende DAW mit klassischem Bedienkonzept"
+description = "StudioCraft – plattformübergreifende DAW"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

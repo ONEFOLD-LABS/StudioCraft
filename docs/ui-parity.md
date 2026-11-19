@@ -8,7 +8,7 @@ Element für Element. Diese Datei hält fest, **wo** welches Element sitzt und *
 das Verhalten steht in der Spec.
 
 **Quellen:** nur öffentliches Material (Handbuch, Produktseiten, Videos), in eigenen Worten
-zusammengefasst. Keine Screenshots, Icons, Farben oder Texte aus klassischen DAWs im Repo; Icons zeichnet
+zusammengefasst. Keine Screenshots, Icons, Farben, Texte oder Produktnamen anderer Programme im Repo; Icons zeichnet
 StudioCraft selbst im Code (`crates/ui/src/icons.rs`). Farben sind eigene: neutrale Grautöne,
 Weinrot (`theme::APP_COLOR`) als Akzent, sparsam eingesetzt.
 

@@ -164,7 +164,7 @@ impl Song {
                 ) && project.audible(*i)
             })
             .map(|(slot, t)| {
-                // Wie in klassischen DAWs klingt auf einer Audiospur bei Überlappung nur das oberste Event
+                // Auf einer Audiospur klingt bei Überlappung nur das oberste Event
                 // (höchster Comp-Rang, sonst das spätere in der Liste). Verdeckte Teile fallen weg.
                 let audible = t.audible_parts();
                 let mut events = Vec::new();

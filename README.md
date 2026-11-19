@@ -1,10 +1,10 @@
 # StudioCraft
 
-Plattformübergreifende DAW in Rust für Linux, Windows, macOS, FreeBSD und das Web. Teil der Craft-Familie. Das Bedienkonzept orientiert sich an klassischen DAWs und wird im Cleanroom-Verfahren nachgebaut.
+Plattformübergreifende DAW in Rust für Linux, Windows, macOS, FreeBSD und das Web. Teil der Craft-Familie. Das Bedienkonzept folgt bewährter DAW-Bedienung und entsteht im Cleanroom-Verfahren.
 
 - **Plattformen und Pakete:** [`docs/plattformen.md`](docs/plattformen.md)
 - **Spezifikation:** [`docs/spec.md`](docs/spec.md)
-- **Cleanroom-Regel:** Implementiert wird nur gegen die Spec. Kein Dekompilieren, kein Reverse Engineering von fremder Programme oder fremden Projektdateien, keine fremde Marken oder -Grafiken.
+- **Cleanroom-Regel:** Implementiert wird nur gegen die Spec. Kein Dekompilieren, kein Reverse Engineering fremder Programme oder Projektformate, keine fremden Marken oder Grafiken.
 
 ## Aufbau
 
@@ -35,7 +35,7 @@ Mit dem Auswahl-Werkzeug hat jedes Event Smart-Bereiche: am Rand in der unteren 
 
 **Projekte:** Strg+N neu, Strg+O öffnen, Strg+S speichern, Strg+Umschalt+S speichern unter, Strg+Alt+S neue Version (`Song-01`, `Song-02` …). Ein Projekt ist ein Ordner mit `<Name>.studiocraft` (offenes JSON) und `Audio/`; importierte Dateien werden beim Speichern dorthin kopiert. Vor dem Verwerfen ungesicherter Änderungen fragt StudioCraft nach. *Datei → Audio-Mixdown exportieren* schreibt den Bereich zwischen den Locatoren als WAV, FLAC oder AIFF (24 Bit, je nach Dateiendung).
 
-**Aufnahme:** R im Spurkopf macht eine Audio-Spur aufnahmebereit, im Inspector wählt man den Eingang (Stereopaar oder Mono-Kanal des Interfaces). ⏺ in der Transportleiste oder `*` startet und stoppt. Jede Spur bekommt eine eigene WAV-Datei in `Audio/` (vor dem ersten Speichern im temporären Ordner). Mit Cycle wird jeder Durchgang ein eigener Take, der jüngste liegt oben; Punch-In (I) und Punch-Out (O) beschränken die Aufnahme auf die Locatoren. Bei überlappenden Events klingt wie in klassischen DAWs nur das oberste. Aufnahmen werden automatisch um die vom Treiber gemeldete Ein- und Ausgabelatenz verschoben, sodass sie zum Gehörten passen.
+**Aufnahme:** R im Spurkopf macht eine Audio-Spur aufnahmebereit, im Inspector wählt man den Eingang (Stereopaar oder Mono-Kanal des Interfaces). ⏺ in der Transportleiste oder `*` startet und stoppt. Jede Spur bekommt eine eigene WAV-Datei in `Audio/` (vor dem ersten Speichern im temporären Ordner). Mit Cycle wird jeder Durchgang ein eigener Take, der jüngste liegt oben; Punch-In (I) und Punch-Out (O) beschränken die Aufnahme auf die Locatoren. Bei überlappenden Events klingt nur das oberste. Aufnahmen werden automatisch um die vom Treiber gemeldete Ein- und Ausgabelatenz verschoben, sodass sie zum Gehörten passen.
 
 **Plugins (CLAP):** Im Inspector unter *Inserts* lassen sich bis zu acht Effekte je Audio-Spur einfügen, sortiert nach Hersteller. Gesucht wird in `CLAP_PATH` und den Standardorten (`~/.clap`, `/usr/lib/clap`, `/usr/local/lib/clap`; unter Windows und macOS die dortigen CLAP-Ordner). Jeder Insert lässt sich umgehen, entfernen und über Regler je Parameter einstellen; alles wird im Projekt gespeichert und ist rückgängig zu machen. *Fenster* öffnet das eigene Fenster des Plugins (schwebend, sonst unter Linux eingebettet in ein X11-Fenster, unter Wayland über XWayland). Der komplette Plugin-Zustand (Presets, interne Einstellungen) wird mit dem Projekt gespeichert.
 
@@ -45,7 +45,7 @@ Mit dem Auswahl-Werkzeug hat jedes Event Smart-Bereiche: am Rand in der unteren 
 
 **MIDI-Keyboard:** Alle MIDI-Eingänge werden beim Start geöffnet. Gespielt wird auf der aufnahmebereiten Instrument-Spur, sonst auf der ausgewählten; die Noten gehen direkt in den Audio-Thread. Mit R auf einer Instrument-Spur nimmt ⏺ bzw. `*` MIDI auf (auch zusammen mit Audio): daraus wird ein Part auf Taktgrenzen, im Cycle über den Cycle-Bereich mit allen Durchgängen, Punch wirkt wie bei Audio. Controller, Pitchbend und Aftertouch gehen live ans Instrument; das Haltepedal wird bei der Aufnahme in die Notenlängen übernommen (eigene Controller-Spuren folgen).
 
-**Tempo und Metronom:** In der Transportleiste lassen sich Tempo und Taktart einstellen (rückgängig zu machen). Wie in klassischen DAWs behalten Audio-Events ihre Zeitposition, MIDI-Parts ihre Taktposition. *Klick* bzw. C schaltet das Metronom (Takt-Eins betont).
+**Tempo und Metronom:** In der Transportleiste lassen sich Tempo und Taktart einstellen (rückgängig zu machen). Audio-Events behalten ihre Zeitposition, MIDI-Parts ihre Taktposition. *Klick* bzw. C schaltet das Metronom (Takt-Eins betont).
 
 **Gruppen, FX-Kanäle, Sends:** *Projekt → Gruppen-Spur / FX-Kanal hinzufügen*. Im Inspector legt *Ausgang* fest, ob eine Spur auf die Summe oder eine Gruppe geht; unter *Sends* gehen bis zu acht Sends (Pre/Post, ein/aus, Pegel) an FX-Kanäle oder Gruppen. Schleifen werden gar nicht erst angeboten. Gruppen und FX-Kanäle haben eigene Inserts und bleiben bei Solo hörbar.
 

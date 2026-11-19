@@ -1,6 +1,6 @@
 //! Projekt speichern, öffnen, neu anlegen und als Mixdown exportieren.
 //!
-//! Aufbau auf der Platte (Spec „Bewusste Abweichungen“, Projektformat):
+//! Aufbau auf der Platte (Spec „Grundsatzentscheidungen“, Projektformat):
 //!
 //! ```text
 //! Mein Song/

@@ -25,7 +25,7 @@ body:
     id: system
     attributes:
       label: Operating system, audio backend and device
-      placeholder: "Arch Linux, PipeWire, USB Audio Interface"
+      placeholder: "Arch Linux, PipeWire, USB audio interface"
   - type: textarea
     id: logs
     attributes:

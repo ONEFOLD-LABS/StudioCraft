@@ -1,4 +1,4 @@
-//! Projektdatei: offenes, versioniertes JSON (Spec „Bewusste Abweichungen“:
+//! Projektdatei: offenes, versioniertes JSON (Spec „Grundsatzentscheidungen“:
 //! diff- und git-freundlich). Audio liegt daneben im Ordner `Audio/`.
 
 use std::fmt;

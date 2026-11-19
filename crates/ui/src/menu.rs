@@ -218,7 +218,7 @@ impl ProjectWindow {
         }
     }
 
-    /// „Speichern unter“: legt wie klassischen DAWs einen Projektordner mit dem Namen an.
+    /// „Speichern unter“: legt einen Projektordner mit dem Namen an.
     /// `Ok(false)`, wenn der Dialog abgebrochen wurde.
     fn save_as_dialog(&mut self) -> Result<bool, String> {
         let default = self

@@ -12,6 +12,6 @@
 
 ## Checklist
 
-- [ ] Clean room: nothing copied from other DAWs or GPL projects
+- [ ] Clean room: nothing copied from other DAWs (proprietary or GPL)
 - [ ] New dependencies/assets are permissively licensed and credited
 - [ ] No new `unwrap`/`expect`/`panic!` outside tests; no allocation/locks on the audio thread

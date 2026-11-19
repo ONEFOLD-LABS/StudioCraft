@@ -6,7 +6,7 @@ Stand: 2026-11-18
 
 ## Zweck und Cleanroom-Regeln
 
-Diese Spezifikation beschreibt das Bedienkonzept von StudioCraft, einer plattformübergreifenden DAW in Rust, deren Workflow sich an klassischen DAWs orientiert. Sie ist die einzige Vorlage für die Implementierung: Wer Code schreibt, arbeitet nur gegen dieses Dokument.
+Diese Spezifikation beschreibt das Bedienkonzept von StudioCraft, einer plattformübergreifenden DAW in Rust, die bewährter DAW-Bedienung folgt. Sie ist die einzige Vorlage für die Implementierung: Wer Code schreibt, arbeitet nur gegen dieses Dokument.
 
 **Erlaubte Quellen**
 
@@ -16,19 +16,19 @@ Diese Spezifikation beschreibt das Bedienkonzept von StudioCraft, einer plattfor
 
 **Tabu**
 
-- Dekompilieren, Disassemblieren oder Debuggen der fremder Programme
-- Reverse Engineering des fremder Projektformate
-- Name, Logo, Icons, Skins, Farbschemata und Sounds von anderer Hersteller
+- Dekompilieren, Disassemblieren oder Debuggen fremder Programme
+- Reverse Engineering fremder Projektformate
+- Namen, Logos, Icons, Skins, Farbschemata und Sounds anderer Hersteller; fremde Produktnamen im Projekt
 - Wörtlich übernommene Handbuchtexte und Screenshots im Repo
 
 **Rollen**
 
-| Rolle | Darf klassischen DAWs ansehen | Schreibt |
+| Rolle | Darf andere DAWs ansehen | Schreibt |
 | --- | --- | --- |
 | Spec-Autor | ja | dieses Dokument |
 | Implementierer | nein, nur die Spec | Code und Tests |
 
-Begriffe wie Inspector, Insert oder Send sind allgemeine Fachsprache und dürfen verwendet werden. Für Fenster mit markenähnlichen Namen (etwa Mixer-Fenster) wählt das Projekt eigene Namen; siehe Abschnitt Abweichungen.
+Begriffe wie Inspector, Insert oder Send sind allgemeine Fachsprache und dürfen verwendet werden. Für Fenster mit markenähnlichen Namen wählt das Projekt eigene, allgemeine Namen; siehe Abschnitt Grundsatzentscheidungen.
 
 ## Begriffe und Datenmodell
 
@@ -332,20 +332,20 @@ Alle Befehle laufen über eine zentrale Befehlsliste mit frei belegbaren Tasten;
 
 **Fokus-Regel:** Tasten wirken auf das Fenster unter dem Fokus. Hat ein Editor in der unteren Zone den Fokus, beziehen sich Bearbeitungsbefehle auf seine Noten, nicht auf die Events im Projektfenster. Ein schmaler Rahmen zeigt, welche Zone den Fokus hat.
 
-## Abweichungen, MVP und offene Fragen
+## Grundsatzentscheidungen, MVP und offene Fragen
 
 Der MVP ist erreicht, wenn man ein Lied mit Audio- und Instrument-Spuren aufnehmen, arrangieren, mischen und als WAV exportieren kann. Alles mit „später“ in den Tabellen oben gehört nicht dazu.
 
-**Bewusste Abweichungen**
+**Grundsatzentscheidungen**
 
-| Thema | Vorbild | Hier |
-| --- | --- | --- |
-| Fensternamen | Mixer-Fenster, Medien-Browser, Inspector | Mixer, Browser, Inspector (allgemeiner Begriff, bleibt) |
-| Plugin-Formate | VST2/VST3 | CLAP zuerst, dann VST3, AU (nur macOS) und LV2; kein VST2 |
-| Audio-Backend | ASIO | cpal: PipeWire, ALSA, JACK (Linux, FreeBSD), WASAPI, ASIO (Windows), CoreAudio (macOS), Web Audio (WASM) |
-| Lizenzierung | Online-Aktivierung | keine |
-| Projektformat | binär, proprietär | offenes, versioniertes Textformat plus Audio-Ordner; diff- und git-freundlich |
-| Plattform | Windows, macOS | Linux, Windows, macOS, FreeBSD und Web (WASM), Pakete wie die Craft-Familie |
+| Thema | Entscheidung |
+| --- | --- |
+| Fensternamen | allgemeine Begriffe: Mixer, Browser, Inspector |
+| Plugin-Formate | CLAP zuerst, dann VST3, AU (nur macOS) und LV2; kein VST2 |
+| Audio-Backend | cpal: PipeWire, ALSA, JACK (Linux, FreeBSD), WASAPI, ASIO (Windows), CoreAudio (macOS), Web Audio (WASM) |
+| Lizenzierung | keine Aktivierung |
+| Projektformat | offenes, versioniertes Textformat plus Audio-Ordner; diff- und git-freundlich |
+| Plattform | Linux, Windows, macOS, FreeBSD und Web (WASM), Pakete wie die Craft-Familie |
 
 **MVP-Umfang**
 

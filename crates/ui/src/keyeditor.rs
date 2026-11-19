@@ -94,7 +94,7 @@ fn is_black(pitch: i32) -> bool {
     matches!(pitch.rem_euclid(12), 1 | 3 | 6 | 8 | 10)
 }
 
-/// Tonname nach Yamaha-Zählung wie in klassischen DAWs (C3 = 60).
+/// Tonname mit mittlerem C als C3 (C3 = 60).
 pub(crate) fn note_name(pitch: u8) -> String {
     format!(
         "{}{}",

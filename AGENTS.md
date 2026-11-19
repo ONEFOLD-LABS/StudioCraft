@@ -4,9 +4,9 @@ This file is for AI coding agents (Claude Code, Codex, Copilot, Cursor, …) and
 run them. `CLAUDE.md` points here. Read it fully before the first change; [CONTRIBUTING.md](CONTRIBUTING.md)
 applies to agents as well.
 
-StudioCraft is a clean-room, pure-Rust digital audio workstation whose workflow and design
-language follow the operating concept of classic DAWs, without any of its code, assets or
-texts. It belongs to the Craft family of open apps and follows its conventions
+StudioCraft is a clean-room, pure-Rust digital audio workstation with the established
+operating concept of classic DAWs, as described in `docs/spec.md`, without code, assets or texts
+from any other product. It belongs to the Craft family of open apps and follows its conventions
 ([storytold/craft-contrib](https://github.com/storytold/craft-contrib) house rules).
 
 ## Rules that are never bent
@@ -16,10 +16,11 @@ texts. It belongs to the Craft family of open apps and follows its conventions
 2. **`main` changes only through a pull request** with green CI. Never push to `main`, never
    force-push a shared branch. Branch protection enforces this.
 3. **Clean room.** Learn from observed behaviour (running the product, its public manual and
-   videos) and public specifications. Never decompile, disassemble or copy anything from klassischen DAWs or
-   other anderer Hersteller software: no code, icons, images, sounds, presets, templates, wording beyond
-   generic feature names. No anderer Hersteller marks in the UI. Do not copy GPL/LGPL/AGPL code (Ardour,
-   Audacity, LMMS, …) either; permissive sources (MIT, Apache-2.0, BSD) only, credited in `NOTICE`.
+   videos) and public specifications. Never decompile, disassemble or copy anything from other
+   DAWs: no code, icons, images, sounds, presets, templates, wording beyond generic feature
+   names. Do not name other DAWs or their vendors anywhere in the project (UI, code, comments,
+   docs, commits, issues, pull requests). Do not copy GPL/LGPL/AGPL code either; permissive
+   sources (MIT, Apache-2.0, BSD) only, credited in `NOTICE`.
 4. **Licences.** Dependencies and assets must be MIT, Apache-2.0, BSD-2/3-Clause, ISC, Zlib,
    OFL-1.1, CC0-1.0 or CC-BY-4.0. Anything else: stop and ask a maintainer. Every bundled asset is
    original or openly licensed and credited (see `assets/app-icon/README.md`, `NOTICE`).
@@ -102,7 +103,7 @@ A crash loses takes, so this outranks features.
 
 ## UI and design language
 
-- Follow classic DAWs' operating concept as described in `docs/spec.md`: project window with
+- Follow the operating concept described in `docs/spec.md`: project window with
   inspector, track list, event display, lower zone (mixer, key editor), toolbar tools on keys 1–0,
   transport bar, the same shortcuts where the spec lists them.
 - Colours come from `crates/ui/src/theme.rs` tokens (`theme::tokens(ctx)`); do not hard-code

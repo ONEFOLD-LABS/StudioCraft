@@ -1,6 +1,7 @@
 # Contributing to StudioCraft
 
-Thanks for helping. StudioCraft is a clean-room Rust DAW that follows classic DAWs' operating concept.
+Thanks for helping. StudioCraft is a clean-room Rust DAW with the operating concept described in
+`docs/spec.md`.
 Contributions of code, tests, documentation, translations, bug reports and observations of how
 things should behave are all welcome.
 
@@ -8,8 +9,9 @@ Working with an AI agent? Read [AGENTS.md](AGENTS.md) too; its rules apply to ev
 
 ## Ground rules
 
-- **Clean room.** Never copy code, icons, images, sounds, presets or text from klassischen DAWs, other
-  anderer Hersteller products or GPL-licensed DAWs. Describing observed behaviour ("Alt-click with the
+- **Clean room.** Never copy code, icons, images, sounds, presets or text from other DAWs,
+  proprietary or GPL-licensed, and do not name other DAWs or their vendors anywhere in the
+  project. Describing observed behaviour ("Alt-click with the
   split tool splits the event at every bar") is fine and helpful; copying resources is not.
 - **Licence.** By contributing you agree that your work is licensed under MIT OR Apache-2.0, like
   the rest of the project. New dependencies and assets must be permissively licensed (see AGENTS.md).
