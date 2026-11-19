@@ -164,6 +164,18 @@ impl Project {
                     clamp!(n.pitch, n.pitch.min(127));
                     clamp!(n.velocity, n.velocity.clamp(1, 127));
                 }
+                if e.controllers.len() > crate::controllers::MAX_CTRL_POINTS {
+                    e.controllers.truncate(crate::controllers::MAX_CTRL_POINTS);
+                    fix(true);
+                }
+                for c in &mut e.controllers {
+                    let max = MAX_TICKS as i64;
+                    clamp!(c.start, c.start.clamp(-max, max));
+                    clamp!(c.value, c.value.min(c.kind.max()));
+                    if let crate::CtrlKind::Cc(n) = c.kind {
+                        clamp!(c.kind, crate::CtrlKind::Cc(n.min(127)));
+                    }
+                }
             }
         }
         fixed += self.fix_ids();

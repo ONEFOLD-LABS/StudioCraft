@@ -77,6 +77,9 @@ pub struct Event {
     /// MIDI-Parts: Noten, Position relativ zum Part-Anfang.
     #[serde(default)]
     pub notes: Vec<Note>,
+    /// MIDI-Parts: Controller-Werte (Pitchbend, CC, Aftertouch), relativ zum Part-Anfang.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub controllers: Vec<crate::CtrlPoint>,
     /// Feste Lane (Takes); `None`: wird aus der Reihenfolge verteilt ([`Track::lanes`]).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub lane: Option<u32>,
@@ -666,6 +669,7 @@ impl Project {
                         fade_in: 0,
                         fade_out: 0,
                         notes: Vec::new(),
+                        controllers: Vec::new(),
                         lane: None,
                         comp: 0,
                         color: None,
@@ -754,6 +758,16 @@ impl Project {
             })
             .collect();
         ev.notes.retain(|n| n.start < cut);
+        right.controllers = ev
+            .controllers
+            .iter()
+            .filter(|c| c.start >= cut)
+            .map(|c| crate::CtrlPoint {
+                start: c.start - cut,
+                ..*c
+            })
+            .collect();
+        ev.controllers.retain(|c| c.start < cut);
         // Fade-In bleibt links, Fade-Out wandert nach rechts.
         right.fade_in = 0;
         ev.fade_out = 0;
@@ -865,6 +879,7 @@ impl Project {
                 fade_in: 0,
                 fade_out: 0,
                 notes: Vec::new(),
+                controllers: Vec::new(),
                 lane: None,
                 comp: 0,
                 color: None,
@@ -1060,10 +1075,13 @@ impl Project {
                     .saturating_sub(tempo.frames(old_start - start, rate));
             }
         }
-        // Noten bleiben an ihrer Stelle im Projekt.
+        // Noten und Controller bleiben an ihrer Stelle im Projekt.
         let shift = start as i64 - ev.start.0 as i64;
         for n in &mut ev.notes {
             n.start -= shift;
+        }
+        for c in &mut ev.controllers {
+            c.start -= shift;
         }
         ev.start = Position(start);
         ev.length = end - start;
@@ -1127,6 +1145,9 @@ impl Project {
         for n in &mut ev.notes {
             n.start += shift;
         }
+        for c in &mut ev.controllers {
+            c.start += shift;
+        }
         ev.length = end - start;
         ev.fade_in = ev.fade_in.min(ev.length);
         ev.fade_out = ev.fade_out.min(ev.length - ev.fade_in);
@@ -1149,6 +1170,9 @@ impl Project {
         for n in &mut ev.notes {
             n.start = (n.start as f64 * f).round() as i64;
             n.length = ((n.length as f64 * f).round() as u64).max(1);
+        }
+        for c in &mut ev.controllers {
+            c.start = (c.start as f64 * f).round() as i64;
         }
         ev.fade_in = (ev.fade_in as f64 * f).round() as u64;
         ev.fade_out = (ev.fade_out as f64 * f).round() as u64;
@@ -1250,6 +1274,7 @@ impl Project {
                 fade_in: 0,
                 fade_out: 0,
                 notes: Vec::new(),
+                controllers: Vec::new(),
                 lane: None,
                 comp: 0,
                 color: None,
@@ -1310,6 +1335,7 @@ impl Project {
             fade_in: 0,
             fade_out: 0,
             notes: Vec::new(),
+            controllers: Vec::new(),
             lane: None,
             comp: 0,
             color: None,
@@ -1368,6 +1394,12 @@ impl Project {
             start: n.start + shift,
             ..*n
         }));
+        ev.controllers
+            .extend(b.controllers.iter().map(|c| crate::CtrlPoint {
+                start: c.start + shift,
+                ..*c
+            }));
+        ev.controllers.sort_by_key(|c| c.start);
         self.delete(next);
         Ok(id)
     }
@@ -1745,6 +1777,60 @@ mod tests {
         assert_eq!(e.end(), total + q);
         // Stretching audio is not possible yet.
         assert!(!p.stretch_to(id, 0, 2 * total));
+    }
+
+    #[test]
+    fn controllers_follow_split_trim_stretch_and_glue() {
+        use crate::{CtrlKind, CtrlPoint};
+        let q = TICKS_PER_QUARTER;
+        let (mut p, id) = one_event();
+        let at = |start: u64, value| CtrlPoint {
+            kind: CtrlKind::Cc(1),
+            start: start as i64,
+            value,
+        };
+        p.event_mut(id).unwrap().controllers = vec![at(0, 10), at(q, 20), at(3 * q, 30)];
+        // Split at two quarters: the third point moves to the right part.
+        let right = p.split(id, 2 * q).unwrap();
+        assert_eq!(p.event(id).unwrap().controllers.len(), 2);
+        assert_eq!(p.event(right).unwrap().controllers, vec![at(q, 30)]);
+        // Glue brings it back to its old place.
+        p.glue(id).unwrap();
+        assert_eq!(p.event(id).unwrap().controllers[2], at(3 * q, 30));
+        // Trimming the start keeps the points at their project position.
+        p.trim_start(id, q);
+        assert_eq!(p.event(id).unwrap().controllers[1].start, 0);
+        // Stretching a part scales the points.
+        let (mut p, id) = one_event();
+        p.event_mut(id).unwrap().controllers = vec![at(q, 1)];
+        p.stretch_to(id, 0, 8 * q);
+        assert_eq!(p.event(id).unwrap().controllers[0].start, 2 * q as i64);
+    }
+
+    #[test]
+    fn hostile_controller_values_are_clamped() {
+        use crate::{CtrlKind, CtrlPoint};
+        let (mut p, id) = one_event();
+        p.event_mut(id).unwrap().controllers = vec![
+            CtrlPoint {
+                kind: CtrlKind::Cc(200),
+                start: i64::MIN,
+                value: 999,
+            },
+            CtrlPoint {
+                kind: CtrlKind::PitchBend,
+                start: 0,
+                value: u16::MAX,
+            },
+        ];
+        assert!(p.sanitize() > 0);
+        let c = &p.event(id).unwrap().controllers;
+        assert_eq!(c[0].kind, CtrlKind::Cc(127));
+        assert_eq!(c[0].value, 127);
+        assert_eq!(c[1].value, 16_383);
+        // Unknown in older files: a part without controllers still loads.
+        let json = crate::file::to_json(&p);
+        assert!(crate::file::from_json(&json).is_ok());
     }
 
     #[test]

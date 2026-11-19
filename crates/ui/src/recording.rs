@@ -311,7 +311,15 @@ impl ProjectWindow {
         // Noten aus An/Aus-Paaren; offene Noten enden beim Stopp.
         let mut open: [Option<(u64, u8)>; 128] = [None; 128];
         let mut notes: Vec<(u64, u64, u8, u8)> = Vec::new();
-        for m in take {
+        // Controller (Pitchbend, CC, Aftertouch) mit ihrer Position in Frames.
+        let ctrls: Vec<(u64, studiocraft_project::CtrlKind, u16)> = take
+            .iter()
+            .filter_map(|m| {
+                let (kind, value) = studiocraft_project::CtrlKind::from_midi(m.ctrl?)?;
+                Some((m.pos, kind, value))
+            })
+            .collect();
+        for m in take.iter().filter(|m| m.ctrl.is_none()) {
             let k = usize::from(m.key);
             if m.on {
                 if let Some((s, v)) = open[k].take() {
@@ -333,7 +341,7 @@ impl ProjectWindow {
                 notes.push((s, stop.max(s + 1), k as u8, v));
             }
         }
-        if notes.is_empty() {
+        if notes.is_empty() && ctrls.is_empty() {
             return;
         }
         let bar = self.bar_ticks();
@@ -341,8 +349,20 @@ impl ProjectWindow {
         {
             (self.left_locator, self.right_locator)
         } else {
-            let first = notes.iter().map(|n| n.0).min().unwrap_or(start).min(start);
-            let last = notes.iter().map(|n| n.1).max().unwrap_or(stop).max(stop);
+            let first = notes
+                .iter()
+                .map(|n| n.0)
+                .chain(ctrls.iter().map(|c| c.0))
+                .min()
+                .unwrap_or(start)
+                .min(start);
+            let last = notes
+                .iter()
+                .map(|n| n.1)
+                .chain(ctrls.iter().map(|c| c.0 + 1))
+                .max()
+                .unwrap_or(stop)
+                .max(stop);
             (ticks(first) / bar * bar, ticks(last).div_ceil(bar) * bar)
         };
         if self.punch_in && self.right_locator > self.left_locator {
@@ -379,6 +399,16 @@ impl ProjectWindow {
             })
             .filter(|n| n.start >= 0 && n.start < (part_end - part_start) as i64)
             .collect();
+        ev.controllers = ctrls
+            .into_iter()
+            .map(|(at, kind, value)| studiocraft_project::CtrlPoint {
+                kind,
+                start: ticks(at) as i64 - part_start as i64,
+                value,
+            })
+            .filter(|c| c.start >= 0 && c.start < (part_end - part_start) as i64)
+            .collect();
+        ev.controllers.sort_by_key(|c| c.start);
         self.project.tracks[track].events.push(ev);
         self.selection = vec![id];
         self.checkpoint(before);
