@@ -113,5 +113,7 @@ Die Positionsanzeige hat einen dunklen Hintergrund (`counter_bg`) mit heller Sch
 8. ✅ Quantisierungswert in der Werkzeugzeile, Taste Q, Panel für Swing und Stärke (#21)
 9. ✅ Snap-Modi, Raster-Typen Sekunden/Frames/Samples, „An Zoom anpassen“ (#12)
 10. ✅ Spurkopf und Inspector: Monitor (Eingang mithören) und Automation R/W (#19)
+11. ✅ Fokusrahmen: Klick gibt einer Zone den Fokus, schmaler Rahmen in Akzentfarbe
 
-**Als Nächstes:** Fokusrahmen der Zonen (Spec „Fokus-Regel“).
+**Als Nächstes:** Lanes und Zeitbasis im Spurkopf (#19), Rasterlinien für feinere Raster,
+Automation (#34).

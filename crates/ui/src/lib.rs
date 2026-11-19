@@ -4,6 +4,7 @@
 //! Prototyp-Stand: Projektfenster mit Werkzeugzeile, Inspector, Spurliste,
 //! Lineal, Event-Anzeige und Transportleiste.
 
+mod focus;
 mod icons;
 mod infoline;
 mod inserts;
@@ -51,6 +52,8 @@ pub struct ProjectWindow {
     /// Text für die Statuszeile (Audio-Gerät oder Fehler).
     pub audio_status: String,
     tool: Tool,
+    /// Zone mit dem Tastaturfokus (Fokus-Regel).
+    focus: focus::Zone,
     snap: bool,
     snap_mode: tools::SnapMode,
     grid: Grid,
@@ -157,6 +160,7 @@ impl ProjectWindow {
             transport,
             audio_status,
             tool: Tool::Select,
+            focus: focus::Zone::Project,
             snap: true,
             snap_mode: tools::SnapMode::Grid,
             grid: Grid::Beat,
@@ -656,8 +660,9 @@ impl ProjectWindow {
         if self.show_transport {
             egui::Panel::bottom("transportleiste").show(ui, |ui| self.transport_bar(ui));
         }
+        let mut zones = focus::ZoneRects::default();
         if self.show_lower {
-            egui::Panel::bottom("untere-zone")
+            let r = egui::Panel::bottom("untere-zone")
                 .resizable(true)
                 .default_size(300.0)
                 .min_size(200.0)
@@ -684,22 +689,27 @@ impl ProjectWindow {
                         });
                     });
                 });
+            zones.lower = Some(r.response.rect);
         }
         if self.show_right {
-            egui::Panel::right("rechte-zone")
+            let r = egui::Panel::right("rechte-zone")
                 .resizable(true)
                 .default_size(240.0)
                 .show(ui, |ui| rightzone::show(self, ui));
+            zones.right = Some(r.response.rect);
         }
         if self.show_inspector {
-            egui::Panel::left("inspector")
+            let r = egui::Panel::left("inspector")
                 .resizable(true)
                 .default_size(200.0)
                 .show(ui, |ui| {
                     egui::ScrollArea::vertical().show(ui, |ui| self.inspector(ui));
                 });
+            zones.left = Some(r.response.rect);
         }
-        egui::CentralPanel::default().show(ui, |ui| timeline::show(self, ui));
+        let r = egui::CentralPanel::default().show(ui, |ui| timeline::show(self, ui));
+        zones.project = Some(r.response.rect);
+        self.update_focus(ui.ctx(), zones);
         quantize::panel(self, ui.ctx());
 
         self.sync_tempo();
@@ -1415,6 +1425,50 @@ mod tests {
             w.project.tracks[0].read = true;
             w.project.tracks[1].write = true;
             w.project.tracks[2].record = true;
+        });
+    }
+
+    #[test]
+    fn clicking_a_zone_moves_the_focus() {
+        let (mut w, _) = one_event_window();
+        w.show_lower = true;
+        w.lower = LowerZone::Editor;
+        let mut h = window_harness(w);
+        let press = |h: &mut Harness<'_, ProjectWindow>, pos: egui::Pos2| {
+            h.event(egui::Event::PointerMoved(pos));
+            h.run_steps(1);
+            for pressed in [true, false] {
+                h.event(egui::Event::PointerButton {
+                    pos,
+                    button: egui::PointerButton::Primary,
+                    pressed,
+                    modifiers: egui::Modifiers::NONE,
+                });
+            }
+            h.run_steps(2);
+        };
+        assert_eq!(h.state().focus, focus::Zone::Project);
+        // Lower zone: just above the tab row at the bottom of the window.
+        let lanes = h.state().lanes_rect;
+        let lower = egui::pos2(lanes.center().x, 780.0);
+        press(&mut h, lower);
+        assert_eq!(h.state().focus, focus::Zone::Lower);
+        assert!(h.state().key_editor.focused);
+        press(&mut h, egui::pos2(lanes.right() - 20.0, lanes.top() + 5.0));
+        assert_eq!(h.state().focus, focus::Zone::Project);
+        assert!(!h.state().key_editor.focused);
+        press(&mut h, egui::pos2(20.0, lanes.top() + 200.0));
+        assert_eq!(h.state().focus, focus::Zone::Left);
+        // Hiding the focused zone hands the focus back to the event display.
+        h.state_mut().show_inspector = false;
+        h.run_steps(2);
+        assert_eq!(h.state().focus, focus::Zone::Project);
+    }
+
+    #[test]
+    fn renders_focus_frame_on_the_lower_zone() {
+        shot("fokus-untere-zone", |w| {
+            w.focus = focus::Zone::Lower;
         });
     }
 
