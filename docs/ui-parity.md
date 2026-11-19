@@ -102,11 +102,15 @@ Inhalt oben, eine schmale Reiterleiste am **unteren** Rand der Zone: Mixer, Edit
 
 ## Rechte Zone
 
-Reiter oben: Medien (Pool), Dateien (Dateibrowser: Ordner öffnen, ein Klick hört vor, Doppelklick
+Reiter oben: **Start** (Standard), Medien (Pool), Dateien (Dateibrowser: Ordner öffnen, ein Klick hört vor, Doppelklick
 oder Ziehen legt die Datei ins Projekt), Plugins (Doppelklick oder Ziehen: Instrument auf eine
 leere Fläche gibt eine neue Instrument-Spur, auf eine Instrument-Spur ersetzt es deren Instrument;
-Effekt auf eine Spur wird Insert). Ein-/ausblendbar über Alt+R und den
-Zonen-Schalter.
+Effekt auf eine Spur wird Insert; oben ein Filter Alle/Instrumente/Effekte). Ein-/ausblendbar
+über Alt+R und den Zonen-Schalter.
+
+Die Startseite zeigt große Kacheln mit eigenen Symbolen, je zwei nebeneinander: Instrumente,
+Effekte, Medien, Dateien. Ein Klick öffnet den passenden Reiter; „Instrumente“ und „Effekte“
+zeigen die Plugin-Liste schon gefiltert. Auf der Startseite gibt es kein Suchfeld.
 
 ## Transportleiste
 
@@ -160,6 +164,7 @@ Die Positionsanzeige hat einen dunklen Hintergrund (`counter_bg`) mit heller Sch
 20. ✅ Spurkopf zweizeilig mit Farbleiste, Spurnummer und Lautstärkeregler
 21. ✅ Inspector: Sektionen mit Titelleiste, Eingang und Ausgang unter „Routing“
 22. ✅ Werkzeugzeile: globale Zustände links, Werkzeuge zentriert, Zonen-Schalter rechts
+23. ✅ Rechte Zone: Startseite mit Kacheln, Plugin-Filter Instrumente/Effekte
 
 **Als Nächstes:** Aus dieser Liste ist nichts mehr offen. Weitere Angleichungen ergeben sich aus
 `docs/spec.md`.

@@ -51,10 +51,21 @@ pub enum Icon {
     Metronome,
     PunchIn,
     PunchOut,
+    // right zone
+    /// Startseite der rechten Zone: Haus.
+    Home,
+    /// Instrumente: Klaviertasten.
+    Instruments,
+    /// Effekte: Drehregler mit Skala.
+    Effects,
+    /// Medien (Pool): Wellenform.
+    Media,
+    /// Dateien: Ordner.
+    Folder,
 }
 
 impl Icon {
-    pub const ALL: [Icon; 29] = [
+    pub const ALL: [Icon; 34] = [
         Icon::Select,
         Icon::Range,
         Icon::Split,
@@ -84,6 +95,11 @@ impl Icon {
         Icon::Metronome,
         Icon::PunchIn,
         Icon::PunchOut,
+        Icon::Home,
+        Icon::Instruments,
+        Icon::Effects,
+        Icon::Media,
+        Icon::Folder,
     ];
 }
 
@@ -374,6 +390,76 @@ pub fn shapes(rect: Rect, icon: Icon, color: Color32) -> Vec<Shape> {
                 vec![g.p(3.0, 5.0), g.p(9.0, 8.0), g.p(3.0, 11.0)]
             };
             out.push(fill(tri));
+        }
+        Icon::Home => {
+            out.push(line(vec![g.p(1.5, 8.0), g.p(8.0, 2.0), g.p(14.5, 8.0)]));
+            out.push(Shape::closed_line(
+                vec![
+                    g.p(3.5, 7.0),
+                    g.p(12.5, 7.0),
+                    g.p(12.5, 14.0),
+                    g.p(3.5, 14.0),
+                ],
+                s,
+            ));
+            out.push(Shape::rect_filled(g.r(6.5, 9.5, 9.5, 14.0), 0.0, color));
+        }
+        Icon::Instruments => {
+            // keyboard: four white keys, three black keys on top
+            out.push(Shape::rect_stroke(
+                g.r(1.5, 2.5, 14.5, 13.5),
+                CornerRadius::same(1),
+                s,
+                StrokeKind::Middle,
+            ));
+            for x in [4.75, 8.0, 11.25] {
+                out.push(line(vec![g.p(x, 9.0), g.p(x, 13.5)]));
+                out.push(Shape::rect_filled(
+                    g.r(x - 1.2, 2.5, x + 1.2, 9.0),
+                    0.0,
+                    color,
+                ));
+            }
+        }
+        Icon::Effects => {
+            // knob with pointer and scale ticks
+            out.push(Shape::circle_stroke(g.p(8.0, 9.0), g.len(4.5), s));
+            out.push(line(vec![g.p(8.0, 9.0), g.p(10.6, 6.4)]));
+            for (a, b) in [
+                ((2.0, 13.5), (3.2, 12.5)),
+                ((8.0, 1.5), (8.0, 3.0)),
+                ((14.0, 13.5), (12.8, 12.5)),
+            ] {
+                out.push(line(vec![g.p(a.0, a.1), g.p(b.0, b.1)]));
+            }
+        }
+        Icon::Media => {
+            // waveform: bars of different heights around a centre line
+            for (x, h) in [
+                (2.0, 2.0),
+                (4.0, 4.5),
+                (6.0, 6.0),
+                (8.0, 3.5),
+                (10.0, 5.5),
+                (12.0, 3.0),
+                (14.0, 1.5),
+            ] {
+                out.push(line(vec![g.p(x, 8.0 - h), g.p(x, 8.0 + h)]));
+            }
+        }
+        Icon::Folder => {
+            out.push(Shape::closed_line(
+                vec![
+                    g.p(1.5, 3.5),
+                    g.p(6.0, 3.5),
+                    g.p(7.5, 5.0),
+                    g.p(14.5, 5.0),
+                    g.p(14.5, 13.0),
+                    g.p(1.5, 13.0),
+                ],
+                s,
+            ));
+            out.push(line(vec![g.p(1.5, 7.0), g.p(14.5, 7.0)]));
         }
     }
     out

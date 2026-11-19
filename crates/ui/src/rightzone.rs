@@ -1,5 +1,6 @@
 //! Rechte Zone (Spec „Fenster-Architektur“, docs/ui-parity.md „Rechte Zone“):
-//! Reiter „Medien“ mit dem Pool des Projekts, „Dateien“ als Dateibrowser mit Vorhören und
+//! Reiter „Start“ mit großen Kacheln, die in die anderen Reiter springen,
+//! „Medien“ mit dem Pool des Projekts, „Dateien“ als Dateibrowser mit Vorhören und
 //! „Plugins“ mit den gefundenen CLAP-Plugins. Ein- und ausblenden mit Alt+R oder dem
 //! Zonen-Schalter rechts in der Werkzeugzeile.
 //!
@@ -21,10 +22,21 @@ use crate::ProjectWindow;
 /// Welcher Reiter der rechten Zone offen ist.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub(crate) enum Tab {
+    /// Startseite mit Kacheln.
     #[default]
+    Home,
     Media,
     Files,
     Plugins,
+}
+
+/// Welche Plugins der Reiter „Plugins“ zeigt.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) enum PluginKind {
+    #[default]
+    All,
+    Instruments,
+    Effects,
 }
 
 /// Eine Datei, die aus dem Browser in die Event-Anzeige gezogen wird.
@@ -50,6 +62,8 @@ type Loaded = Result<Arc<[f32]>, String>;
 #[derive(Debug)]
 pub(crate) struct RightZone {
     pub tab: Tab,
+    /// Filter des Reiters „Plugins“ (von den Kacheln „Instrumente“ und „Effekte“ gesetzt).
+    pub plugin_kind: PluginKind,
     pub filter: String,
     /// Dateibrowser: aktueller Ordner (beim ersten Öffnen gesetzt), Inhalt, Auswahl.
     pub dir: Option<PathBuf>,
@@ -65,6 +79,7 @@ impl Default for RightZone {
     fn default() -> Self {
         Self {
             tab: Tab::default(),
+            plugin_kind: PluginKind::default(),
             filter: String::new(),
             dir: None,
             entries: Vec::new(),
@@ -116,22 +131,102 @@ fn start_dir(w: &ProjectWindow) -> PathBuf {
 
 pub(crate) fn show(w: &mut ProjectWindow, ui: &mut Ui) {
     ui.horizontal(|ui| {
+        ui.selectable_value(&mut w.right.tab, Tab::Home, "Start");
         ui.selectable_value(&mut w.right.tab, Tab::Media, "Medien");
         ui.selectable_value(&mut w.right.tab, Tab::Files, "Dateien");
         ui.selectable_value(&mut w.right.tab, Tab::Plugins, "Plugins");
     });
-    ui.horizontal(|ui| {
-        let l = ui.weak("Suche");
-        ui.add(egui::TextEdit::singleline(&mut w.right.filter).desired_width(f32::INFINITY))
-            .labelled_by(l.id);
-    });
+    if w.right.tab != Tab::Home {
+        ui.horizontal(|ui| {
+            let l = ui.weak("Suche");
+            ui.add(egui::TextEdit::singleline(&mut w.right.filter).desired_width(f32::INFINITY))
+                .labelled_by(l.id);
+        });
+    }
     ui.separator();
     match w.right.tab {
+        Tab::Home => home(w, ui),
         Tab::Media => media(w, ui),
         Tab::Files => files(w, ui),
         Tab::Plugins => plugins(w, ui),
     }
     poll_preview(w, ui);
+}
+
+/// Startseite: große Kacheln, je zwei nebeneinander. Ein Klick öffnet den passenden Reiter;
+/// „Instrumente“ und „Effekte“ zeigen die Plugins schon gefiltert.
+fn home(w: &mut ProjectWindow, ui: &mut Ui) {
+    use crate::icons::Icon;
+    let tiles = [
+        (
+            Icon::Instruments,
+            "Instrumente",
+            "Instrument-Plugins: neue Instrument-Spur anlegen",
+        ),
+        (
+            Icon::Effects,
+            "Effekte",
+            "Effekt-Plugins: als Insert auf eine Spur legen",
+        ),
+        (Icon::Media, "Medien", "Audio-Dateien des Projekts (Pool)"),
+        (Icon::Folder, "Dateien", "Dateibrowser mit Vorhören"),
+    ];
+    let mut picked = None;
+    let size = egui::vec2(84.0, 84.0);
+    ui.add_space(6.0);
+    for row in tiles.chunks(2) {
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 10.0;
+            for &(icon, label, hint) in row {
+                if tile(ui, size, icon, label).on_hover_text(hint).clicked() {
+                    picked = Some(label);
+                }
+            }
+        });
+        ui.add_space(8.0);
+    }
+    match picked {
+        Some("Instrumente") => {
+            w.right.tab = Tab::Plugins;
+            w.right.plugin_kind = PluginKind::Instruments;
+        }
+        Some("Effekte") => {
+            w.right.tab = Tab::Plugins;
+            w.right.plugin_kind = PluginKind::Effects;
+        }
+        Some("Medien") => w.right.tab = Tab::Media,
+        Some("Dateien") => w.right.tab = Tab::Files,
+        _ => {}
+    }
+}
+
+/// Eine Kachel: großes Symbol auf hinterlegter Fläche, darunter die Beschriftung.
+fn tile(ui: &mut Ui, size: egui::Vec2, icon: crate::icons::Icon, label: &str) -> egui::Response {
+    let t = crate::theme::tokens(ui.ctx());
+    let (rect, resp) = ui.allocate_exact_size(size, Sense::click());
+    resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, label));
+    if ui.is_rect_visible(rect) {
+        let p = ui.painter();
+        let bg = if resp.hovered() {
+            t.button_hi
+        } else {
+            t.button
+        };
+        p.rect_filled(rect, 6.0, bg);
+        let icon_rect = egui::Rect::from_center_size(
+            rect.center() - egui::vec2(0.0, 9.0),
+            egui::vec2(40.0, 40.0),
+        );
+        crate::icons::paint(p, icon_rect, icon, t.text);
+        p.text(
+            rect.center_bottom() - egui::vec2(0.0, 10.0),
+            egui::Align2::CENTER_CENTER,
+            label,
+            egui::FontId::proportional(12.0),
+            t.text,
+        );
+    }
+    resp
 }
 
 /// Wechselt in `dir` und liest es ein.
@@ -398,9 +493,24 @@ fn plugins(w: &mut ProjectWindow, ui: &mut Ui) {
             .get(i)
             .is_some_and(|t| crate::mixer::has_channel(t.kind))
     });
+    ui.horizontal(|ui| {
+        let k = &mut w.right.plugin_kind;
+        ui.selectable_value(k, PluginKind::All, "Alle");
+        ui.selectable_value(k, PluginKind::Instruments, "Instrumente");
+        ui.selectable_value(k, PluginKind::Effects, "Effekte");
+    });
+    let kind = w.right.plugin_kind;
     let mut action: Option<PluginInfo> = None;
     egui::ScrollArea::vertical().show(ui, |ui| {
         for (title, instruments) in [("Instrumente", true), ("Effekte", false)] {
+            let shown = match kind {
+                PluginKind::All => true,
+                PluginKind::Instruments => instruments,
+                PluginKind::Effects => !instruments,
+            };
+            if !shown {
+                continue;
+            }
             egui::CollapsingHeader::new(title)
                 .default_open(true)
                 .show(ui, |ui| {

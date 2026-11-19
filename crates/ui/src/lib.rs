@@ -3887,7 +3887,36 @@ mod tests {
             w.import_clip("Gitarre", None, tone_clip(6.0, 196.0), None)
                 .unwrap();
             w.show_right = true;
+            w.right.tab = rightzone::Tab::Media;
         });
+    }
+
+    #[test]
+    fn renders_right_zone_start_page() {
+        shot("rechte-zone-start", |w| {
+            w.show_right = true;
+        });
+    }
+
+    #[test]
+    fn start_page_tiles_open_the_filtered_plugin_list() {
+        let (mut w, _) = one_event_window();
+        w.show_right = true;
+        let mut h = window_harness(w);
+        assert_eq!(h.state().right.tab, rightzone::Tab::Home);
+        h.get_by_label("Effekte").click();
+        h.run_steps(2);
+        assert_eq!(h.state().right.tab, rightzone::Tab::Plugins);
+        assert_eq!(h.state().right.plugin_kind, rightzone::PluginKind::Effects);
+        h.get_by_label("Start").click();
+        h.run_steps(2);
+        h.get_by_label("Instrumente").click();
+        h.run_steps(2);
+        assert_eq!(h.state().right.tab, rightzone::Tab::Plugins);
+        assert_eq!(
+            h.state().right.plugin_kind,
+            rightzone::PluginKind::Instruments
+        );
     }
 
     #[test]
