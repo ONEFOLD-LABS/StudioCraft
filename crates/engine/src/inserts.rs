@@ -2,10 +2,10 @@
 
 use std::fmt;
 
-use studiocraft_plugin_host::ClapInstance;
+use studiocraft_plugin_host::PluginInstance;
 
 pub struct Insert {
-    pub instance: ClapInstance,
+    pub instance: PluginInstance,
     pub bypass: bool,
     /// Slot im Projektmodell (`usize::MAX` = Instrument). Fehlt ein Plugin, weicht er vom
     /// Platz in der Kette ab; Automation adressiert Inserts über ihn.
@@ -23,7 +23,11 @@ pub struct InsertChain {
 impl fmt::Debug for InsertChain {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_list()
-            .entries(self.slots.iter().map(|s| (&s.instance.info.name, s.bypass)))
+            .entries(
+                self.slots
+                    .iter()
+                    .map(|s| (&s.instance.info().name, s.bypass)),
+            )
             .finish()
     }
 }

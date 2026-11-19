@@ -7,9 +7,17 @@ use std::{
 
 use crate::clap::Library;
 
+/// Plugin-Format.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum PluginFormat {
+    #[default]
+    Clap,
+}
+
 /// Beschreibung eines gefundenen Plugins.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct PluginInfo {
+    pub format: PluginFormat,
     pub id: String,
     pub name: String,
     pub vendor: String,

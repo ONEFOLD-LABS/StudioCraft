@@ -14,7 +14,7 @@ use clap_sys::ext::{
     timer_support::{CLAP_EXT_TIMER_SUPPORT, clap_plugin_timer_support},
 };
 
-use crate::{clap::PluginHandle, host::on_main_thread};
+use crate::{clap::ClapHandle, host::on_main_thread};
 
 fn window_api() -> Option<&'static CStr> {
     if cfg!(target_os = "macos") {
@@ -36,9 +36,9 @@ pub(crate) struct GuiState {
     window: Option<x11win::HostWindow>,
 }
 
-impl PluginHandle {
+impl ClapHandle {
     fn gui_ext(&self) -> Option<clap_plugin_gui> {
-        // SAFETY: Plugin lebt (Vertrag von PluginHandle); Ergebnis null oder gültig.
+        // SAFETY: Plugin lebt (Vertrag von ClapHandle); Ergebnis null oder gültig.
         unsafe {
             (self.extension::<clap_plugin_gui>(CLAP_EXT_GUI))
                 .as_ref()

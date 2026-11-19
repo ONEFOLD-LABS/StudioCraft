@@ -10,7 +10,7 @@ use std::collections::HashMap;
 use base64::Engine as _;
 use egui::Ui;
 use studiocraft_engine::{Command, Insert, InsertChain};
-use studiocraft_plugin_host::{ClapInstance, ParamInfo, PluginHandle, PluginInfo};
+use studiocraft_plugin_host::{ParamInfo, PluginHandle, PluginInfo, PluginInstance};
 use studiocraft_project::InsertSlot;
 
 use crate::ProjectWindow;
@@ -149,11 +149,11 @@ impl ProjectWindow {
         }
     }
 
-    pub(crate) fn instantiate(&mut self, slot: &InsertSlot) -> Result<ClapInstance, String> {
+    pub(crate) fn instantiate(&mut self, slot: &InsertSlot) -> Result<PluginInstance, String> {
         let info = self
             .find_plugin(&slot.plugin_id)
             .ok_or_else(|| format!("{}: nicht installiert", slot.name))?;
-        let mut inst = ClapInstance::new(&info, self.sample_rate, MAX_BLOCK)?;
+        let mut inst = PluginInstance::new(&info, self.sample_rate, MAX_BLOCK)?;
         if let Some(state) = slot.state.as_deref().and_then(|s| B64.decode(s).ok())
             && !inst.handle().load_state(&state)
         {
@@ -168,7 +168,7 @@ impl ProjectWindow {
         self.plugins
             .params
             .entry(slot.plugin_id.clone())
-            .or_insert_with(|| inst.params.clone());
+            .or_insert_with(|| inst.params().to_vec());
         Ok(inst)
     }
 

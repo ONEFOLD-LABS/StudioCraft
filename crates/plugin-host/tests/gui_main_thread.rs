@@ -7,7 +7,7 @@
 
 use std::time::{Duration, Instant};
 
-use studiocraft_plugin_host::{ClapInstance, default_paths, scan};
+use studiocraft_plugin_host::{PluginInstance, default_paths, scan};
 
 fn main() {
     if std::env::var_os("STUDIOCRAFT_GUI_TEST").is_none() {
@@ -24,7 +24,7 @@ fn main() {
             println!("{name}: nicht installiert");
             continue;
         };
-        let inst = ClapInstance::new(info, 48_000, 512).expect("Instanz");
+        let inst = PluginInstance::new(info, 48_000, 512).expect("Instanz");
         let mut h = inst.handle();
         assert!(h.has_gui(), "{name} hat ein Fenster");
         match h.open_gui(&format!("StudioCraft-Test – {name}")) {
