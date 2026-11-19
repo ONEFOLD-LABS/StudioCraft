@@ -1,0 +1,67 @@
+# Flatpak manifest for the single-file bundle (studiocraft-<version>-linux-<arch>.flatpak).
+# Build it with packaging/linux/flatpak-bundle.sh.
+#
+# It repackages the release's own Linux tarball from package.sh instead of compiling Rust inside
+# flatpak-builder: no network or vendored crates during the build, and the same binaries as the
+# AppImage, deb and rpm. The binaries link glibc, libasound and libpipewire-0.3 and load X11,
+# Wayland, xkbcommon and Vulkan/GL at run time; the freedesktop runtime has all of them, the GPU
+# driver comes from its GL extension. Layout adapted from SoundCraft (Apache-2.0), see NOTICE.
+id: io.github.xxcrusaderxx.studiocraft
+runtime: org.freedesktop.Platform
+runtime-version: '25.08'
+sdk: org.freedesktop.Sdk
+command: studiocraft
+finish-args:
+  # Display: Wayland first; X11 only when no Wayland compositor runs.
+  - --socket=wayland
+  - --socket=fallback-x11
+  # X11 shared memory (MIT-SHM); without it the X11 fallback is slow.
+  - --share=ipc
+  # GPU for the wgpu UI.
+  - --device=dri
+  # Audio: cpal talks to PipeWire directly (preferred host) and to ALSA, which the runtime routes
+  # through its PulseAudio plugin. JACK clients reach PipeWire's JACK server through the same socket.
+  - --filesystem=xdg-run/pipewire-0
+  - --socket=pulseaudio
+  # MIDI keyboards and outputs: midir uses the ALSA sequencer (/dev/snd/seq), which only
+  # --device=all exposes in the sandbox. It also allows direct ALSA hardware access.
+  - --device=all
+  # Projects and audio files are opened by path (command line, recent files, autosave next to
+  # the project), so the home directory is needed; the file chooser alone is not enough.
+  - --filesystem=home
+  # Plugins: the per-user CLAP, VST3 and LV2 folders, read-only. System folders (/usr/lib/...)
+  # are not reachable from the sandbox and their plugins link against host libraries; sandboxed
+  # plugins come from the shared Flathub plugin extensions (add-extensions below). LV2 also needs
+  # lilv, which the runtime does not ship, so LV2 is unavailable in the Flatpak for now.
+  - --filesystem=~/.clap:ro
+  - --filesystem=~/.vst3:ro
+  - --filesystem=~/.lv2:ro
+  - --env=CLAP_PATH=/app/extensions/Plugins/clap
+  - --env=VST3_PATH=/app/extensions/Plugins/vst3
+  - --env=LV2_PATH=/app/extensions/Plugins/lv2
+# Flathub's shared audio-plugin extension point (org.freedesktop.LinuxAudio.Plugins.*). Optional:
+# nothing is downloaded unless the user installs a plugin extension.
+add-extensions:
+  org.freedesktop.LinuxAudio.Plugins:
+    directory: extensions/Plugins
+    version: '25.08'
+    add-ld-path: lib
+    merge-dirs: clap;vst3;lv2
+    subdirectories: true
+    no-autodownload: true
+modules:
+  - name: studiocraft
+    buildsystem: simple
+    build-commands:
+      - install -Dm755 bin/studiocraft /app/bin/studiocraft
+      - install -Dm755 bin/studiocraft-cli /app/bin/studiocraft-cli
+      - install -Dm644 share/applications/io.github.xxcrusaderxx.studiocraft.desktop /app/share/applications/io.github.xxcrusaderxx.studiocraft.desktop
+      - install -Dm644 share/mime/packages/io.github.xxcrusaderxx.studiocraft.xml /app/share/mime/packages/io.github.xxcrusaderxx.studiocraft.xml
+      # package.sh has already substituted version and date.
+      - install -Dm644 share/metainfo/io.github.xxcrusaderxx.studiocraft.metainfo.xml /app/share/metainfo/io.github.xxcrusaderxx.studiocraft.metainfo.xml
+      - mkdir -p /app/share/icons /app/share/doc && cp -R share/icons/hicolor /app/share/icons/ && cp -R share/doc/studiocraft /app/share/doc/
+      # Mount point for the plugin extensions.
+      - install -d /app/extensions/Plugins
+    sources:
+      - type: dir
+        path: stage
