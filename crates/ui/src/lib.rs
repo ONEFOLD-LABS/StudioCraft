@@ -4,6 +4,7 @@
 //! Prototyp-Stand: Projektfenster mit Werkzeugzeile, Inspector, Spurliste,
 //! Lineal, Event-Anzeige und Transportleiste.
 
+mod automation_panel;
 mod focus;
 mod icons;
 mod infoline;
@@ -990,6 +991,11 @@ impl ProjectWindow {
                 .default_open(true)
                 .show(ui, |ui| self.sends_ui(ui, idx));
         }
+        if crate::mixer::has_channel(self.project.tracks[idx].kind) {
+            egui::CollapsingHeader::new("Automation")
+                .default_open(false)
+                .show(ui, |ui| self.automation_ui(ui, idx));
+        }
         for section in ["EQ", "Notizen"] {
             egui::CollapsingHeader::new(section)
                 .default_open(false)
@@ -1555,6 +1561,98 @@ mod tests {
         shot("raster-frames", |w| {
             w.grid = Grid::Frames;
             w.view.zoom(6.0, None);
+        });
+    }
+
+    #[test]
+    fn automation_lane_opens_from_the_arrow_and_points_are_edited_with_the_mouse() {
+        use studiocraft_project::AutoParam;
+        let (w, id) = one_event_window();
+        let mut h = window_harness(w);
+        let at = |h: &Harness<'_, ProjectWindow>, x: f32, rows: f32| {
+            let w = h.state();
+            egui::pos2(x, w.lanes_rect.top() + rows * w.view.row_h)
+        };
+        let press = |h: &mut Harness<'_, ProjectWindow>, from: egui::Pos2, to: egui::Pos2| {
+            h.event(egui::Event::PointerMoved(from));
+            h.run_steps(1);
+            h.event(egui::Event::PointerButton {
+                pos: from,
+                button: egui::PointerButton::Primary,
+                pressed: true,
+                modifiers: egui::Modifiers::NONE,
+            });
+            h.run_steps(1);
+            for i in 1..=4 {
+                h.event(egui::Event::PointerMoved(
+                    from + (to - from) * (i as f32 / 4.0),
+                ));
+                h.run_steps(1);
+            }
+            h.event(egui::Event::PointerButton {
+                pos: to,
+                button: egui::PointerButton::Primary,
+                pressed: false,
+                modifiers: egui::Modifiers::NONE,
+            });
+            h.run_steps(2);
+        };
+        // Arrow left of the track name.
+        let left = h.state().lanes_rect.left();
+        let arrow = at(&h, left - 290.0 + 14.0, 0.5);
+        press(&mut h, arrow, arrow);
+        let lanes = &h.state().project.tracks[0].automation;
+        assert_eq!(lanes.len(), 1);
+        assert_eq!(lanes[0].param, AutoParam::Volume);
+        // Click high up in the automation lane (second row): a point near the top of the range.
+        let x = left + 200.0;
+        let p = at(&h, x, 1.0 + 6.0 / 52.0);
+        press(&mut h, p, p);
+        let pts = h.state().project.tracks[0].automation[0].points.clone();
+        assert_eq!(pts.len(), 1);
+        assert!(pts[0].value > 3.0, "{}", pts[0].value);
+        assert!(
+            h.state().selection.is_empty(),
+            "the event behind stays unselected"
+        );
+        // Drag the point down to the bottom: the lowest value.
+        let to = at(&h, x, 1.0 + 46.0 / 52.0);
+        press(&mut h, p, to);
+        let pts = h.state().project.tracks[0].automation[0].points.clone();
+        assert_eq!(pts.len(), 1);
+        assert!(pts[0].value < -55.0, "{}", pts[0].value);
+        // Erase tool removes it (click where the snapped point is); undo brings it back.
+        h.state_mut().tool = Tool::Erase;
+        let px = {
+            let w = h.state();
+            left + ((pts[0].tick as f64 - w.view.scroll_ticks) / TPQ) as f32 * w.view.px_per_quarter
+        };
+        let on_point = egui::pos2(px, to.y);
+        press(&mut h, on_point, on_point);
+        assert!(h.state().project.tracks[0].automation[0].points.is_empty());
+        h.state_mut().undo();
+        assert_eq!(h.state().project.tracks[0].automation[0].points.len(), 1);
+        assert!(h.state().project.event(id).is_some());
+    }
+
+    #[test]
+    fn renders_automation_lanes() {
+        use studiocraft_project::AutoParam;
+        shot("automation", |w| {
+            let bar = w.bar_ticks();
+            let t = &mut w.project.tracks[0];
+            t.read = true;
+            let vol = t.automation_lane_mut(AutoParam::Volume);
+            for (k, v) in [(0, 0.0), (2, -20.0), (3, -20.0), (5, 3.0), (8, -6.0)] {
+                vol.set_point(k * bar, v);
+            }
+            let pan = t.automation_lane_mut(AutoParam::Pan);
+            pan.set_point(bar, -1.0);
+            pan.set_point(6 * bar, 1.0);
+            pan.muted = true;
+            w.project.tracks[1]
+                .automation_lane_mut(AutoParam::Mute)
+                .visible = false;
         });
     }
 

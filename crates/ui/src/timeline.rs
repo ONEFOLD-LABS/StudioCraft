@@ -9,6 +9,8 @@ use studiocraft_project::{Event, EventId, TimeBase, Track, TrackKind};
 use crate::icons::Icon;
 use crate::{ProjectWindow, TPQ, Tool};
 
+mod automation;
+
 const HEADER_W: f32 = 290.0;
 /// Anzahl der Schalter im Spurkopf.
 const HEADER_BUTTONS: usize = 8;
@@ -48,6 +50,18 @@ impl View {
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum Drag {
+    /// Punkt `idx` der Automationsspur `lane` (Index in `Track::automation`) ziehen.
+    AutoPoint {
+        row: usize,
+        lane: usize,
+        idx: usize,
+    },
+    /// Automation frei zeichnen; `last` = zuletzt gezeichneter Tick.
+    AutoDraw {
+        row: usize,
+        lane: usize,
+        last: u64,
+    },
     /// Auswahl verschieben; `grab` = Abstand Mauszeiger zu Event-Start in Ticks.
     Move {
         id: EventId,
@@ -149,7 +163,7 @@ fn row_tops(w: &ProjectWindow) -> Vec<f32> {
     let mut y = 0.0;
     tops.push(y);
     for t in &w.project.tracks {
-        let lanes = if t.show_lanes { t.lanes().1 } else { 1 };
+        let lanes = automation::rows_of(t);
         y += w.view.row_h * lanes as f32;
         tops.push(y);
     }
@@ -174,10 +188,14 @@ fn lane_of(track: &Track, id: EventId) -> usize {
 /// unter `y`, sonst das oberste (klingende).
 fn hit_event(w: &ProjectWindow, g: &Geo, row: usize, y: f32, ticks: u64) -> Option<EventId> {
     let track = w.project.tracks.get(row)?;
+    let lane = ((y - g.row_top(row)) / g.view.row_h).floor().max(0.0) as usize;
+    // Darunter liegen die Automationsspuren.
+    if lane >= automation::take_lanes(track) {
+        return None;
+    }
     if !track.show_lanes {
         return w.project.event_at(row, ticks);
     }
-    let lane = ((y - g.row_top(row)) / g.view.row_h).floor().max(0.0) as usize;
     let (lanes, _) = track.lanes();
     track
         .events
@@ -424,7 +442,7 @@ fn interact(w: &mut ProjectWindow, ui: &Ui, resp: &egui::Response, g: &Geo) {
         && let Some(p) = press
     {
         w.drag_before = Some(w.project.clone());
-        w.drag = start_drag(w, g, p);
+        w.drag = start_drag(w, g, p, mods.alt);
     }
     if resp.dragged()
         && let (Some(d), Some(p)) = (w.drag, now)
@@ -515,12 +533,16 @@ fn live_drag(w: &mut ProjectWindow, g: &Geo, d: Drag, p: Pos2, mods: egui::Modif
             ));
             return;
         }
+        Drag::AutoPoint { .. } | Drag::AutoDraw { .. } => {
+            w.drag = Some(automation::live_drag(w, g, d, p, mods.alt));
+            return;
+        }
         Drag::Move { .. } | Drag::Draw { .. } => return,
     }
     w.dirty = true;
 }
 
-fn start_drag(w: &mut ProjectWindow, g: &Geo, p: Pos2) -> Option<Drag> {
+fn start_drag(w: &mut ProjectWindow, g: &Geo, p: Pos2, alt: bool) -> Option<Drag> {
     if g.ruler.contains(p) {
         return Some(Drag::Ruler {
             start: w.snap_ticks(g.ticks(p.x)),
@@ -528,6 +550,9 @@ fn start_drag(w: &mut ProjectWindow, g: &Geo, p: Pos2) -> Option<Drag> {
     }
     if !g.lanes.contains(p) {
         return None;
+    }
+    if let Some(d) = automation::start_drag(w, g, p, alt) {
+        return d;
     }
     let row = g.row_at(p.y)?;
     let ticks = g.ticks(p.x);
@@ -602,7 +627,9 @@ fn finish_drag(w: &mut ProjectWindow, g: &Geo, d: Drag, p: Pos2, mods: egui::Mod
         Drag::TrimStart { .. }
         | Drag::TrimEnd { .. }
         | Drag::FadeIn { .. }
-        | Drag::FadeOut { .. } => {}
+        | Drag::FadeOut { .. }
+        | Drag::AutoPoint { .. }
+        | Drag::AutoDraw { .. } => {}
         Drag::Draw { row, start } => {
             let end = w.snap_ticks(g.ticks(p.x));
             let min = w.grid_ticks();
@@ -671,6 +698,15 @@ fn click(w: &mut ProjectWindow, g: &Geo, p: Pos2, mods: egui::Modifiers) {
         return;
     }
     if g.header.contains(p) {
+        if automation::header_click(w, g, p) {
+            return;
+        }
+        if let Some(row) = g.row_at(p.y)
+            && automation::arrow_rect(g, row).expand(3.0).contains(p)
+        {
+            automation::toggle(&mut w.project.tracks[row]);
+            return;
+        }
         if let Some(row) = g.row_at(p.y) {
             let [m, s, r, mon, read, write, base, lanes] = g.header_buttons(row);
             let track = &mut w.project.tracks[row];
@@ -702,6 +738,9 @@ fn click(w: &mut ProjectWindow, g: &Geo, p: Pos2, mods: egui::Modifiers) {
         return;
     }
     if !g.lanes.contains(p) {
+        return;
+    }
+    if automation::click(w, g, p, mods.alt) {
         return;
     }
     let Some(row) = g.row_at(p.y) else { return };
@@ -901,6 +940,7 @@ fn paint_lanes(w: &ProjectWindow, painter: &Painter, g: &Geo) {
             paint_event(w, painter, g, track, ev, rect);
         }
     }
+    automation::paint(w, painter, g);
     paint_recording(w, painter, g);
     if let Some((r0, r1, a, b)) = w.range {
         let rect = Rect::from_min_max(
@@ -1229,6 +1269,12 @@ fn paint_headers(w: &ProjectWindow, painter: &Painter, g: &Geo) {
         );
         // Name und Schalter stehen in der obersten Lane.
         let head = Rect::from_min_size(rect.min, vec2(rect.width(), g.view.row_h));
+        // Platz für den Automationspfeil vor dem Namen.
+        let name_x = if crate::mixer::has_channel(track.kind) {
+            24.0
+        } else {
+            12.0
+        };
         if w.selected_track == Some(row) {
             // Gewählte Spur: heller hinterlegt, nicht vollflächig in Akzentfarbe (ui-parity.md).
             painter.rect_filled(rect, 0.0, crate::theme::tokens(painter.ctx()).row_selected);
@@ -1244,14 +1290,14 @@ fn paint_headers(w: &ProjectWindow, painter: &Painter, g: &Geo) {
             pos2(g.header_buttons(row)[0].left() - 4.0, rect.max.y),
         );
         painter.with_clip_rect(name_clip.intersect(g.header)).text(
-            head.left_center() + vec2(12.0, -6.0),
+            head.left_center() + vec2(name_x, -6.0),
             Align2::LEFT_CENTER,
             &track.name,
             FontId::proportional(13.0),
             crate::theme::tokens(painter.ctx()).text,
         );
         painter.text(
-            head.left_center() + vec2(12.0, 8.0),
+            head.left_center() + vec2(name_x, 8.0),
             Align2::LEFT_CENTER,
             track.kind.label(),
             FontId::proportional(10.0),
@@ -1330,6 +1376,7 @@ fn paint_headers(w: &ProjectWindow, painter: &Painter, g: &Geo) {
                 }
             }
         }
+        automation::paint_headers(w, painter, g, row);
         painter.hline(
             rect.x_range(),
             rect.bottom(),
