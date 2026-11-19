@@ -18,6 +18,7 @@
 
 mod automation_panel;
 mod automation_write;
+mod autosave;
 mod colors;
 mod devices;
 mod eq_ui;
@@ -184,6 +185,8 @@ pub struct ProjectWindow {
     lanes_rect: egui::Rect,
     /// Projektdatei, unter der zuletzt gespeichert oder geöffnet wurde.
     project_path: Option<PathBuf>,
+    /// Automatische Sicherung und Wiederherstellung (Issue #52).
+    autosave: autosave::Autosave,
     /// Zuletzt gespeicherter Stand, um ungesicherte Änderungen zu erkennen.
     saved: Option<Project>,
     /// Befehl, der auf die Rückfrage „Speichern?“ wartet.
@@ -316,6 +319,7 @@ impl ProjectWindow {
             drag_before: None,
             lanes_rect: egui::Rect::NOTHING,
             project_path: None,
+            autosave: autosave::Autosave::new(prefs.autosave_minutes, prefs.autosave_keep),
             saved: None,
             pending: None,
             allow_close: false,
@@ -596,6 +600,8 @@ impl ProjectWindow {
             audio: self.audio_choice.clone(),
             midi_inputs: self.midi_inputs_on,
             windows: self.windows.rects,
+            autosave_minutes: self.autosave.minutes,
+            autosave_keep: self.autosave.keep,
         };
         if let Err(e) = s.save() {
             self.message = Some(format!("Einstellung nicht gespeichert: {e}"));
@@ -830,6 +836,10 @@ impl ProjectWindow {
             t.collect_garbage();
         }
         self.sync_midi();
+        // Automatische Sicherung nur in einer Sitzung der App (`begin_session`), nicht in Tests.
+        if self.autosave.dir.is_some() {
+            self.tick_autosave(std::time::Instant::now());
+        }
         if self.idle_plugins() {
             // Plugin-Fenster brauchen ihre Timer auch ohne Mausbewegung.
             ui.ctx()
@@ -957,6 +967,7 @@ impl ProjectWindow {
         self.tool_palette(ui.ctx());
         self.key_commands_dialog(ui.ctx());
         self.repeat_dialog(ui.ctx());
+        self.recovery_dialog(ui.ctx());
         self.fade_editor_dialog(ui.ctx());
         self.crossfade_editor_dialog(ui.ctx());
         self.device_dialog(ui.ctx());
