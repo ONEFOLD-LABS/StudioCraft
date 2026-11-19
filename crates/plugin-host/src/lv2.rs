@@ -28,9 +28,9 @@ use crate::{
 type RawHandle = *mut c_void;
 
 #[repr(C)]
-struct Lv2Feature {
-    uri: *const c_char,
-    data: *mut c_void,
+pub(crate) struct Lv2Feature {
+    pub(crate) uri: *const c_char,
+    pub(crate) data: *mut c_void,
 }
 
 #[repr(C)]
@@ -109,6 +109,7 @@ const URI_MIN_BLOCK: &str = "http://lv2plug.in/ns/ext/buf-size#minBlockLength";
 const URI_NOMINAL_BLOCK: &str = "http://lv2plug.in/ns/ext/buf-size#nominalBlockLength";
 const URI_SAMPLE_RATE: &str = "http://lv2plug.in/ns/ext/parameters#sampleRate";
 const URI_PRESET: &str = "http://lv2plug.in/ns/ext/presets#Preset";
+const URI_X11_UI: &str = "http://lv2plug.in/ns/extensions/ui#X11UI";
 const URI_LABEL: &str = "http://www.w3.org/2000/01/rdf-schema#label";
 const URI_ATOM_DOUBLE: &str = "http://lv2plug.in/ns/ext/atom#Double";
 const URI_ATOM_BOOL: &str = "http://lv2plug.in/ns/ext/atom#Bool";
@@ -275,6 +276,17 @@ lilv_api! {
     lilv_state_restore: fn(Ptr, *mut LilvInstance, Option<SetPortValue>, *mut c_void, u32, *const *const Lv2Feature);
     lilv_state_emit_port_values: fn(Ptr, SetPortValue, *mut c_void);
     lilv_state_free: fn(Ptr);
+    lilv_plugin_get_uis: fn(Ptr) -> Ptr;
+    lilv_uis_begin: fn(Ptr) -> Ptr;
+    lilv_uis_is_end: fn(Ptr, Ptr) -> bool;
+    lilv_uis_get: fn(Ptr, Ptr) -> Ptr;
+    lilv_uis_next: fn(Ptr, Ptr) -> Ptr;
+    lilv_uis_free: fn(Ptr);
+    lilv_ui_is_a: fn(Ptr, Ptr) -> bool;
+    lilv_ui_get_uri: fn(Ptr) -> Ptr;
+    lilv_ui_get_binary_uri: fn(Ptr) -> Ptr;
+    lilv_ui_get_bundle_uri: fn(Ptr) -> Ptr;
+    lilv_file_uri_parse: fn(*const c_char, *mut *mut c_char) -> *mut c_char;
 }
 
 type GetPortValue =
@@ -347,6 +359,56 @@ impl World {
         }
     }
 
+    /// Pfad zu einer `file://`-URI (über lilv, das Kodierungen kennt).
+    fn file_path(&self, node: Ptr) -> Option<PathBuf> {
+        if node.is_null() {
+            return None;
+        }
+        // SAFETY: Knoten gültig; das Ergebnis gehört uns und wird freigegeben.
+        unsafe {
+            let p = (self.api.lilv_file_uri_parse)(
+                (self.api.lilv_node_as_string)(node),
+                ptr::null_mut(),
+            );
+            if p.is_null() {
+                return None;
+            }
+            let out = PathBuf::from(cstr(p));
+            (self.api.lilv_free)(p.cast());
+            Some(out)
+        }
+    }
+
+    /// Die eingebettete X11-Oberfläche eines Plugins, falls es eine hat.
+    fn x11_ui(&self, plugin: Ptr) -> Option<crate::lv2_gui::UiInfo> {
+        let mut found = None;
+        // SAFETY: Plugin aus der Welt; die Liste wird am Ende freigegeben.
+        unsafe {
+            let uis = (self.api.lilv_plugin_get_uis)(plugin);
+            if uis.is_null() {
+                return None;
+            }
+            let mut it = (self.api.lilv_uis_begin)(uis);
+            while found.is_none() && !(self.api.lilv_uis_is_end)(uis, it) {
+                let ui = (self.api.lilv_uis_get)(uis, it);
+                if !ui.is_null() && (self.api.lilv_ui_is_a)(ui, self.node(URI_X11_UI)) {
+                    let binary = self.file_path((self.api.lilv_ui_get_binary_uri)(ui));
+                    let bundle = self.file_path((self.api.lilv_ui_get_bundle_uri)(ui));
+                    if let (Some(binary), Some(bundle)) = (binary, bundle) {
+                        found = Some(crate::lv2_gui::UiInfo {
+                            uri: self.string((self.api.lilv_ui_get_uri)(ui)),
+                            binary,
+                            bundle,
+                        });
+                    }
+                }
+                it = (self.api.lilv_uis_next)(uis, it);
+            }
+            (self.api.lilv_uis_free)(uis);
+        }
+        found
+    }
+
     fn info(&self, plugin: Ptr) -> PluginInfo {
         // SAFETY: `plugin` stammt aus dieser Welt.
         unsafe {
@@ -410,6 +472,7 @@ fn world() -> Option<std::sync::MutexGuard<'static, World>> {
                 URI_MIDI_EVENT,
                 URI_PRESET,
                 URI_LABEL,
+                URI_X11_UI,
             ] {
                 let Ok(c) = CString::new(uri) else { continue };
                 // SAFETY: Welt gültig; Knoten leben so lange wie die Welt.
@@ -814,7 +877,11 @@ impl Lv2Instance {
             shared: self.shared.clone(),
             inst: self.inst,
             uri: self.info.id.clone(),
+            title_name: self.info.name.clone(),
             symbols: self.symbols.clone(),
+            features: self._feature_ptrs.to_vec(),
+            ui: OnceLock::new(),
+            gui: None,
         }
     }
 
@@ -976,7 +1043,13 @@ pub struct Lv2Handle {
     shared: Arc<Shared>,
     inst: *mut LilvInstance,
     uri: String,
+    title_name: String,
     symbols: Arc<HashMap<String, u32>>,
+    /// Features der Instanz (URID-Map usw.), auch für die Oberfläche; leben mit der Instanz.
+    features: Vec<*const Lv2Feature>,
+    /// Eingebettete Oberfläche laut Beschreibung (einmal nachgeschlagen).
+    ui: OnceLock<Option<crate::lv2_gui::UiInfo>>,
+    gui: Option<Box<crate::lv2_gui::Lv2Gui>>,
 }
 
 /// Ein Preset eines Plugins: URI und Anzeigename.
@@ -1043,7 +1116,107 @@ unsafe extern "C" fn collect_port_value(
 // lilv parallel zu `run` erlaubt); der Zeiger lebt so lange wie die Instanz.
 unsafe impl Send for Lv2Handle {}
 
+impl Drop for Lv2Handle {
+    fn drop(&mut self) {
+        // Fenster vor der Instanz schließen (Vertrag: Griff stirbt zuerst).
+        self.close_gui();
+    }
+}
+
 impl Lv2Handle {
+    fn ui_info(&self) -> Option<&crate::lv2_gui::UiInfo> {
+        self.ui
+            .get_or_init(|| {
+                if !cfg!(all(unix, not(target_os = "macos"))) {
+                    return None;
+                }
+                let w = world()?;
+                let plugin = w.plugin_by_uri(&self.uri)?;
+                w.x11_ui(plugin)
+            })
+            .as_ref()
+    }
+
+    /// Ob das Plugin eine Oberfläche hat, die sich einbetten lässt.
+    pub fn has_gui(&self) -> bool {
+        self.ui_info().is_some()
+    }
+
+    pub fn gui_open(&self) -> bool {
+        self.gui.is_some()
+    }
+
+    /// Öffnet das Plugin-Fenster. Nur im Hauptthread; danach Werte mit
+    /// [`Self::set_ui_value`] übergeben.
+    pub fn open_gui(&mut self, title: &str) -> Result<(), String> {
+        if self.gui.is_some() {
+            return Ok(());
+        }
+        if !crate::host::on_main_thread() {
+            return Err("Plugin-Fenster nur im Hauptthread".into());
+        }
+        let info = self
+            .ui_info()
+            .cloned()
+            .ok_or("Plugin hat keine passende Oberfläche (X11)")?;
+        let _main = main_thread_lock();
+        // SAFETY: Instanz lebt (Vertrag des Griffs); Beschreibung und Handle sind gültig.
+        let (handle, ext) = unsafe {
+            let d = (*self.inst).descriptor;
+            (
+                (*self.inst).handle,
+                if d.is_null() {
+                    None
+                } else {
+                    (*d).extension_data
+                },
+            )
+        };
+        let title = if title.is_empty() {
+            &self.title_name
+        } else {
+            title
+        };
+        let gui =
+            crate::lv2_gui::Lv2Gui::open(&info, &self.uri, title, handle, ext, &self.features)?;
+        self.gui = Some(Box::new(gui));
+        Ok(())
+    }
+
+    pub fn close_gui(&mut self) {
+        if let Some(g) = self.gui.take() {
+            let _main = main_thread_lock();
+            g.close();
+        }
+    }
+
+    /// Im UI-Takt; `true`, solange das Fenster offen ist.
+    pub fn idle(&mut self) -> bool {
+        let Some(g) = self.gui.as_mut() else {
+            return false;
+        };
+        if g.idle() {
+            return true;
+        }
+        self.close_gui();
+        false
+    }
+
+    /// Reglerbewegungen im Plugin-Fenster seit dem letzten Aufruf: (Parameter-Id, Wert).
+    pub fn take_param_changes(&self) -> Vec<(u32, f64)> {
+        self.gui
+            .as_ref()
+            .map(|g| g.take_param_changes())
+            .unwrap_or_default()
+    }
+
+    /// Einen Parameterwert an das offene Plugin-Fenster geben.
+    pub fn set_ui_value(&self, id: u32, value: f64) {
+        if let Some(g) = &self.gui {
+            g.set_value(id, value);
+        }
+    }
+
     pub fn latency(&self) -> u32 {
         self.shared.latency.load(Ordering::Acquire)
     }

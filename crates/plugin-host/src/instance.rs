@@ -155,14 +155,14 @@ impl PluginHandle {
     pub fn has_gui(&self) -> bool {
         match self {
             Self::Clap(h) => h.has_gui(),
-            Self::Lv2(_) => false,
+            Self::Lv2(h) => h.has_gui(),
         }
     }
 
     pub fn gui_open(&self) -> bool {
         match self {
             Self::Clap(h) => h.gui_open(),
-            Self::Lv2(_) => false,
+            Self::Lv2(h) => h.gui_open(),
         }
     }
 
@@ -177,14 +177,14 @@ impl PluginHandle {
     pub fn open_gui(&mut self, title: &str) -> Result<(), String> {
         match self {
             Self::Clap(h) => h.open_gui(title),
-            Self::Lv2(_) => Err("LV2-Fenster werden noch nicht unterstützt".into()),
+            Self::Lv2(h) => h.open_gui(title),
         }
     }
 
     pub fn close_gui(&mut self) {
         match self {
             Self::Clap(h) => h.close_gui(),
-            Self::Lv2(_) => {}
+            Self::Lv2(h) => h.close_gui(),
         }
     }
 
@@ -192,7 +192,24 @@ impl PluginHandle {
     pub fn idle(&mut self) -> bool {
         match self {
             Self::Clap(h) => h.idle(),
-            Self::Lv2(_) => false,
+            Self::Lv2(h) => h.idle(),
+        }
+    }
+
+    /// Reglerbewegungen im Plugin-Fenster seit dem letzten Aufruf (Id, Wert), die der Host
+    /// wie eigene Parameteränderungen setzt. CLAP-Plugins melden das über ihren Zustand.
+    pub fn take_param_changes(&self) -> Vec<(u32, f64)> {
+        match self {
+            Self::Clap(_) => Vec::new(),
+            Self::Lv2(h) => h.take_param_changes(),
+        }
+    }
+
+    /// Parameterwert an das offene Plugin-Fenster geben (Änderungen vom Host).
+    pub fn set_ui_value(&self, id: u32, value: f64) {
+        match self {
+            Self::Clap(_) => {}
+            Self::Lv2(h) => h.set_ui_value(id, value),
         }
     }
 }
