@@ -739,6 +739,41 @@ impl Project {
         Some(new_id)
     }
 
+    /// Höchstzahl der Stücke bei [`Project::split_equal`]: schützt vor zehntausenden Events
+    /// bei sehr kleinem Abstand.
+    pub const MAX_EQUAL_PIECES: u64 = 1000;
+
+    /// Teilt das Event in gleich lange Stücke; die Länge ist der Abstand von seinem Anfang
+    /// bis `at` (Werkzeug Trennen mit Alt). Gibt die Ids aller Stücke von links nach rechts
+    /// zurück, leer, wenn `at` nicht im Event liegt. Höchstens [`Self::MAX_EQUAL_PIECES`].
+    pub fn split_equal(&mut self, id: EventId, at: u64) -> Vec<EventId> {
+        let Some(ev) = self.event(id) else {
+            return Vec::new();
+        };
+        let (start, end) = (ev.start.0, ev.end());
+        if at <= start || at >= end {
+            return Vec::new();
+        }
+        let piece = at - start;
+        let mut ids = vec![id];
+        let mut current = id;
+        let mut cut = at;
+        while cut < end && (ids.len() as u64) < Self::MAX_EQUAL_PIECES {
+            match self.split(current, cut) {
+                Some(next) => {
+                    ids.push(next);
+                    current = next;
+                }
+                None => break,
+            }
+            cut = match cut.checked_add(piece) {
+                Some(c) => c,
+                None => break,
+            };
+        }
+        ids
+    }
+
     pub fn delete(&mut self, id: EventId) -> bool {
         match self.find(id) {
             Some((t, i)) => {
@@ -1449,6 +1484,37 @@ mod tests {
         assert_eq!(p.event(right).unwrap().start, Position(TICKS_PER_QUARTER));
         assert_eq!(p.event(right).unwrap().length, 3 * TICKS_PER_QUARTER);
         assert_eq!(p.split(id, 0), None, "am Rand wird nicht geteilt");
+    }
+
+    #[test]
+    fn split_equal_cuts_the_whole_event_into_pieces() {
+        let (mut p, id) = one_event();
+        // Four quarters, cut at one quarter: four pieces of one quarter each.
+        let ids = p.split_equal(id, TICKS_PER_QUARTER);
+        assert_eq!(ids.len(), 4);
+        for (k, id) in ids.iter().enumerate() {
+            let e = p.event(*id).unwrap();
+            assert_eq!(e.start, Position(k as u64 * TICKS_PER_QUARTER));
+            assert_eq!(e.length, TICKS_PER_QUARTER);
+        }
+        // A remainder stays as a shorter last piece.
+        let (mut p, id) = one_event();
+        let ids = p.split_equal(id, 3 * TICKS_PER_QUARTER / 2);
+        assert_eq!(ids.len(), 3);
+        assert_eq!(p.event(ids[2]).unwrap().length, TICKS_PER_QUARTER);
+        // Outside the event nothing happens.
+        let (mut p, id) = one_event();
+        assert!(p.split_equal(id, 0).is_empty());
+        assert!(p.split_equal(id, 10 * TICKS_PER_QUARTER).is_empty());
+    }
+
+    #[test]
+    fn split_equal_is_capped() {
+        let (mut p, id) = one_event();
+        let ids = p.split_equal(id, 1);
+        assert_eq!(ids.len() as u64, Project::MAX_EQUAL_PIECES);
+        let total: u64 = ids.iter().map(|i| p.event(*i).unwrap().length).sum();
+        assert_eq!(total, 4 * TICKS_PER_QUARTER, "no time is lost");
     }
 
     #[test]

@@ -252,6 +252,69 @@ impl Grid {
     }
 }
 
+impl crate::ProjectWindow {
+    /// Öffnet die Werkzeugpalette an `pos` (Rechtsklick in die Event-Anzeige, Spec „Werkzeuge“).
+    pub(crate) fn open_tool_palette(&mut self, pos: egui::Pos2) {
+        self.tool_palette = Some(pos);
+        self.tool_palette_age = 0;
+    }
+
+    /// Zeichnet die offene Werkzeugpalette: alle Werkzeuge als Symbolknöpfe in zwei Reihen.
+    /// Ein Klick auf ein Werkzeug wählt es und schließt die Palette, ebenso ein Klick daneben
+    /// oder Esc.
+    pub(crate) fn tool_palette(&mut self, ctx: &egui::Context) {
+        let Some(pos) = self.tool_palette else {
+            return;
+        };
+        let current = self.tool;
+        let resp = egui::Area::new(egui::Id::unique("werkzeugpalette"))
+            .order(egui::Order::Foreground)
+            .fixed_pos(pos)
+            .show(ctx, |ui| {
+                egui::Frame::popup(ui.style())
+                    .show(ui, |ui| {
+                        let mut picked = None;
+                        for row in Tool::TOOLBAR.chunks(6) {
+                            ui.horizontal(|ui| {
+                                ui.spacing_mut().item_spacing.x = 2.0;
+                                for &tool in row {
+                                    let name = format!("{} (Palette)", tool.label());
+                                    if crate::icons::icon_button(
+                                        ui,
+                                        tool.icon(),
+                                        tool == current,
+                                        None,
+                                        &name,
+                                    )
+                                    .clicked()
+                                    {
+                                        picked = Some(tool);
+                                    }
+                                }
+                            });
+                        }
+                        picked
+                    })
+                    .inner
+            });
+        if let Some(tool) = resp.inner {
+            self.tool = tool;
+            self.tool_palette = None;
+            return;
+        }
+        let clicked_outside = ctx.input(|i| i.pointer.any_click())
+            && ctx
+                .input(|i| i.pointer.interact_pos())
+                .is_some_and(|p| !resp.response.rect.contains(p));
+        if (clicked_outside && self.tool_palette_age > 0)
+            || ctx.input(|i| i.key_pressed(Key::Escape))
+        {
+            self.tool_palette = None;
+        }
+        self.tool_palette_age = self.tool_palette_age.saturating_add(1);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
