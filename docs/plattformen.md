@@ -1,6 +1,6 @@
 # Plattformen und Auslieferung
 
-StudioCraft läuft wie die übrigen Craft-Apps auf allen Systemen und wird in denselben Formaten ausgeliefert. Vorbild ist [storytold/soundcraft](https://github.com/storytold/soundcraft) (Release v0.20.1, Stand 2026-11-18). Dessen Konventionen gelten für die ganze Familie.
+StudioCraft ist ein eigenständiges Projekt, kein Teil der Craft-Familie. Es übernimmt aber deren Konventionen: Es soll auf denselben Systemen laufen und in denselben Formaten ausgeliefert werden. Vorbild ist [storytold/soundcraft](https://github.com/storytold/soundcraft) (Release v0.20.1, Stand 2026-11-18).
 
 ## Zielplattformen und Pakete
 
