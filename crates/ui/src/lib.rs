@@ -74,6 +74,8 @@ pub struct ProjectWindow {
     /// Tastaturbelegung (Standard plus eigene Änderungen) und der Dialog dazu.
     keymap: keymap::Keymap,
     key_dialog: keymap::KeyDialog,
+    /// Dialog „Wiederholen“ (Strg+K).
+    repeat_dialog: shortcuts::RepeatDialog,
     /// Sample-Editor in der unteren Zone.
     sample_editor: sampleeditor::SampleEditor,
     /// Globaler Quantisierungswert mit Swing und Stärke (Taste Q).
@@ -196,6 +198,7 @@ impl ProjectWindow {
             color_popup_age: 0,
             keymap: keymap::Keymap::default(),
             key_dialog: keymap::KeyDialog::default(),
+            repeat_dialog: shortcuts::RepeatDialog::default(),
             sample_editor: sampleeditor::SampleEditor::default(),
             quantize: studiocraft_project::Quantize::default(),
             auto_writer: automation_write::AutomationWriter::default(),
@@ -366,6 +369,8 @@ impl ProjectWindow {
 
     /// Legt `before` im Undo-Verlauf ab, falls sich das Projekt seitdem geändert hat.
     pub(crate) fn checkpoint(&mut self, before: Project) {
+        // Geteilte Kopien: geänderten Inhalt an die ganze Gruppe weitergeben.
+        self.project.sync_shared(&before);
         if before == self.project {
             return;
         }
@@ -690,6 +695,7 @@ impl ProjectWindow {
         quantize::panel(self, ui.ctx());
         self.color_popup(ui.ctx());
         self.key_commands_dialog(ui.ctx());
+        self.repeat_dialog(ui.ctx());
 
         self.sync_tempo();
         let playing = self.is_playing();
@@ -2590,6 +2596,138 @@ mod tests {
             w.project.add_cycle_marker(5 * bar, 9 * bar);
             w.selected_track = w.marker_track();
         });
+    }
+
+    /// Zieht von `from` nach `to` (Bildschirm) mit eigenen Modifiern für Drücken, Bewegen und
+    /// Loslassen.
+    fn drag_with(
+        h: &mut Harness<'_, ProjectWindow>,
+        from: egui::Pos2,
+        to: egui::Pos2,
+        press: egui::Modifiers,
+        moving: egui::Modifiers,
+    ) {
+        let button = |pos, pressed, modifiers| egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers,
+        };
+        h.event(egui::Event::PointerMoved(from));
+        h.run_steps(1);
+        h.event(egui::Event::ModifiersChanged(press));
+        h.event(button(from, true, press));
+        h.run_steps(1);
+        // The drag starts with the press modifiers; `moving` applies from the second step.
+        for i in 1..=6 {
+            h.event(egui::Event::PointerMoved(
+                from + (to - from) * (i as f32 / 6.0),
+            ));
+            h.run_steps(1);
+            if i == 1 {
+                h.event(egui::Event::ModifiersChanged(moving));
+            }
+        }
+        h.event(button(to, false, moving));
+        h.run_steps(2);
+        h.event(egui::Event::ModifiersChanged(egui::Modifiers::NONE));
+        h.run_steps(1);
+    }
+
+    fn two_part_window() -> (ProjectWindow, EventId) {
+        let mut p = Project::default();
+        let t = p.add_track(TrackKind::Instrument, "Synth");
+        p.add_track(TrackKind::Instrument, "Bass");
+        let a = p.create_event(t, 0, 3840).unwrap();
+        p.event_mut(a).unwrap().notes = vec![studiocraft_project::Note {
+            pitch: 60,
+            velocity: 100,
+            start: 0,
+            length: 480,
+        }];
+        let mut w = ProjectWindow::new(p, None, String::new());
+        w.view.scroll_ticks = 0.0;
+        w.snap = false;
+        (w, a)
+    }
+
+    fn screen(h: &Harness<'_, ProjectWindow>, ticks: u64, rows: f32) -> egui::Pos2 {
+        let w = h.state();
+        egui::pos2(
+            w.lanes_rect.left()
+                + ((ticks as f64 - w.view.scroll_ticks) / TPQ) as f32 * w.view.px_per_quarter,
+            w.lanes_rect.top() + rows * w.view.row_h,
+        )
+    }
+
+    #[test]
+    fn ctrl_shift_drag_makes_a_shared_copy_that_follows_edits() {
+        let (w, a) = two_part_window();
+        let mut h = window_harness(w);
+        let from = screen(&h, 1920, 0.8);
+        let to = screen(&h, 1920 + 3840, 0.8);
+        let cs = egui::Modifiers::COMMAND.plus(egui::Modifiers::SHIFT);
+        drag_with(&mut h, from, to, cs, cs);
+        let evs = &h.state().project.tracks[0].events;
+        assert_eq!(evs.len(), 2, "copied, not moved");
+        assert!(evs.iter().all(|e| e.shared.is_some()));
+        let copy = evs.iter().find(|e| e.id != a).unwrap().id;
+        // Editing the copy changes the original too (one undo step).
+        let w = h.state_mut();
+        let before = w.project.clone();
+        w.project.event_mut(copy).unwrap().notes[0].pitch = 72;
+        w.checkpoint(before);
+        assert_eq!(w.project.event(a).unwrap().notes[0].pitch, 72);
+    }
+
+    #[test]
+    fn ctrl_pressed_during_a_drag_locks_the_direction() {
+        let (w, a) = two_part_window();
+        let mut h = window_harness(w);
+        // Diagonal drag: one bar right and one track down, Ctrl only while moving.
+        let from = screen(&h, 1920, 0.8);
+        let to = screen(&h, 1920 + 3840, 1.6);
+        drag_with(
+            &mut h,
+            from,
+            to,
+            egui::Modifiers::NONE,
+            egui::Modifiers::COMMAND,
+        );
+        let p = &h.state().project;
+        assert_eq!(p.tracks[0].events.len(), 1, "moved, not copied");
+        assert_eq!(p.find(a).map(|(t, _)| t), Some(0), "stayed on its track");
+        assert_eq!(p.event(a).map(|e| e.start.0), Some(3840));
+    }
+
+    #[test]
+    fn alt_drag_on_the_right_edge_repeats_and_ctrl_k_opens_the_dialog() {
+        let (mut w, a) = two_part_window();
+        w.selection = vec![a];
+        let mut h = window_harness(w);
+        let edge = screen(&h, 3840, 0.8) - egui::vec2(2.0, 0.0);
+        let to = screen(&h, 3 * 3840, 0.8);
+        drag_with(&mut h, edge, to, egui::Modifiers::ALT, egui::Modifiers::ALT);
+        let starts: Vec<u64> = h.state().project.tracks[0]
+            .events
+            .iter()
+            .map(|e| e.start.0)
+            .collect();
+        assert_eq!(starts, [0, 3840, 7680]);
+        // Ctrl+K: repeat the selection twice as shared copies.
+        h.key_press_modifiers(egui::Modifiers::COMMAND, Key::K);
+        h.run_steps(2);
+        assert!(h.state().repeat_dialog.open);
+        h.state_mut().repeat_dialog.count = 2;
+        h.state_mut().repeat_dialog.shared = true;
+        h.get_by_label("Geteilte Kopien");
+        h.get_all_by_label("Wiederholen").last().unwrap().click();
+        h.run_steps(2);
+        // The selection after the drag is both new copies: twice more is four shared copies.
+        let evs = &h.state().project.tracks[0].events;
+        assert_eq!(evs.len(), 7);
+        assert!(!h.state().repeat_dialog.open);
+        assert_eq!(evs.iter().filter(|e| e.shared.is_some()).count(), 6);
     }
 
     #[test]

@@ -76,6 +76,9 @@ pub struct Event {
     /// Eigene Farbe; `None`: die Farbe der Spur (Spec „Farbe“: neue Events erben sie).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub color: Option<[u8; 3]>,
+    /// Geteilte Kopien: Events mit derselben Gruppe teilen ihren Inhalt (Noten, Clip).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shared: Option<u32>,
 }
 
 fn is_zero(v: &u32) -> bool {
@@ -545,6 +548,7 @@ impl Project {
                         lane: None,
                         comp: 0,
                         color: None,
+                        shared: None,
                     });
                     at += len + ((i as u64 + 2 * k) % 3) * bar;
                     k += 1;
@@ -705,6 +709,7 @@ impl Project {
                 lane: None,
                 comp: 0,
                 color: None,
+                shared: None,
             },
         );
         Some(id)
@@ -967,6 +972,7 @@ impl Project {
                 lane: None,
                 comp: 0,
                 color: None,
+                shared: None,
             },
         );
         Some(id)
@@ -1023,6 +1029,7 @@ impl Project {
             lane: None,
             comp: 0,
             color: None,
+            shared: None,
         });
         Some(id)
     }

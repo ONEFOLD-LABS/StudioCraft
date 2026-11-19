@@ -22,6 +22,67 @@ pub(crate) struct Clipboard {
     notes: Vec<Note>,
 }
 
+/// Dialog „Wiederholen“.
+#[derive(Debug, Clone)]
+pub(crate) struct RepeatDialog {
+    pub open: bool,
+    pub count: u32,
+    pub shared: bool,
+}
+
+impl Default for RepeatDialog {
+    fn default() -> Self {
+        Self {
+            open: false,
+            count: 1,
+            shared: false,
+        }
+    }
+}
+
+impl ProjectWindow {
+    /// Wiederholt die Auswahl `count` Mal hintereinander, auf Wunsch als geteilte Kopien.
+    pub(crate) fn repeat_selection(&mut self, count: u32, shared: bool) {
+        let before = self.project.clone();
+        let ids = self.selection.clone();
+        let new = self.project.repeat(&ids, count, shared);
+        if !new.is_empty() {
+            self.selection = new;
+        }
+        self.checkpoint(before);
+    }
+
+    /// Zeichnet den Dialog „Wiederholen“, solange er offen ist.
+    pub(crate) fn repeat_dialog(&mut self, ctx: &egui::Context) {
+        if !self.repeat_dialog.open {
+            return;
+        }
+        let mut open = true;
+        let mut run = false;
+        egui::Window::new("Wiederholen")
+            .open(&mut open)
+            .resizable(false)
+            .collapsible(false)
+            .show(ctx, |ui| {
+                ui.horizontal(|ui| {
+                    let l = ui.label("Anzahl");
+                    ui.add(egui::DragValue::new(&mut self.repeat_dialog.count).range(1..=99))
+                        .labelled_by(l.id);
+                });
+                ui.checkbox(&mut self.repeat_dialog.shared, "Geteilte Kopien");
+                if ui.button("Wiederholen").clicked() {
+                    run = true;
+                }
+            });
+        if run {
+            let (n, shared) = (self.repeat_dialog.count, self.repeat_dialog.shared);
+            self.repeat_selection(n, shared);
+            open = false;
+        }
+        self.repeat_dialog.open = open;
+    }
+}
+
 /// Ein Befehl aus der Standardbelegung.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) enum EditCommand {
@@ -43,6 +104,8 @@ pub(crate) enum EditCommand {
     ToggleLeftZone,
     Quantize,
     Crossfade,
+    /// Strg+K: Dialog „Wiederholen“ (Anzahl, geteilte Kopien).
+    Repeat,
     NudgeLeft,
     NudgeRight,
     Shorter,
@@ -71,6 +134,11 @@ impl ProjectWindow {
             EditCommand::Shorter => self.nudge(-1, true),
             EditCommand::Longer => self.nudge(1, true),
             EditCommand::Duplicate => self.duplicate(),
+            EditCommand::Repeat => {
+                if !self.selection.is_empty() {
+                    self.repeat_dialog.open = true;
+                }
+            }
             EditCommand::SplitAtCursor => self.split_at_cursor(),
             EditCommand::SelectAll => {
                 self.selection = self

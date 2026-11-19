@@ -71,6 +71,7 @@ impl ProjectWindow {
                     ("Kopieren", E::Copy, has_sel),
                     ("Einfügen", E::Paste, true),
                     ("Duplizieren", E::Duplicate, has_sel),
+                    ("Wiederholen …", E::Repeat, has_sel),
                     ("Am Cursor teilen", E::SplitAtCursor, true),
                     ("Alles auswählen", E::SelectAll, true),
                     ("Quantisieren", E::Quantize, true),

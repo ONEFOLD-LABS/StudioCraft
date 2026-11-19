@@ -5,6 +5,7 @@
 //! [`TempoMap`] in Sekunden umgerechnet.
 
 pub mod automation;
+pub mod copies;
 pub mod eq;
 pub mod file;
 pub mod folders;

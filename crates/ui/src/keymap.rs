@@ -169,6 +169,13 @@ pub(crate) const COMMANDS: &[CommandInfo] = &[
         [k(C, Key::D)]
     ),
     cmd!(
+        Cmd::Edit(EditCommand::Repeat),
+        "edit.repeat",
+        "Wiederholen …",
+        "Bearbeiten",
+        [k(C, Key::K)]
+    ),
+    cmd!(
         Cmd::Edit(EditCommand::SplitAtCursor),
         "edit.split_at_cursor",
         "Am Cursor teilen",

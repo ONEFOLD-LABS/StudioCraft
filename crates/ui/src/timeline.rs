@@ -80,11 +80,20 @@ pub(crate) enum Drag {
         lane: usize,
         last: u64,
     },
-    /// Auswahl verschieben; `grab` = Abstand Mauszeiger zu Event-Start in Ticks.
+    /// Auswahl verschieben; `grab` = Abstand Mauszeiger zu Event-Start in Ticks. Strg beim
+    /// Anfassen kopiert, Strg+Umschalt macht geteilte Kopien; Strg erst während des Ziehens
+    /// sperrt die Richtung.
     Move {
         id: EventId,
         grab: f64,
         row: usize,
+        copy: bool,
+        shared: bool,
+    },
+    /// Alt+Ziehen am rechten Rand: die Auswahl so oft wiederholen, wie gezogen wird.
+    Repeat {
+        start: u64,
+        end: u64,
     },
     /// Neues Event aufziehen.
     Draw {
@@ -294,6 +303,37 @@ fn paint_markers(w: &ProjectWindow, painter: &Painter, g: &Geo, row: usize) {
             t.text,
         );
     }
+}
+
+/// Anfang und Ende der Auswahl in Ticks.
+fn selection_span(w: &ProjectWindow) -> Option<(u64, u64)> {
+    let evs: Vec<_> = w
+        .selection
+        .iter()
+        .filter_map(|&id| w.project.event(id))
+        .collect();
+    let a = evs.iter().map(|e| e.start.0).min()?;
+    let b = evs.iter().map(|e| e.end()).max()?;
+    (b > a).then_some((a, b))
+}
+
+/// Wie oft Alt+Ziehen am rechten Rand wiederholt: so viele Auswahl-Längen, wie die Maus hinter
+/// dem Ende steht (gerundet).
+fn repeat_count(g: &Geo, start: u64, end: u64, p: Pos2) -> u32 {
+    let span = (end - start).max(1) as f64;
+    let n = ((g.ticks(p.x) - end as f64) / span).round();
+    if n.is_finite() && n > 0.0 {
+        n.min(999.0) as u32
+    } else {
+        0
+    }
+}
+
+/// Richtungssperre: nur die größere Bewegung (waagerecht in Pixeln gegen senkrecht) bleibt.
+fn lock_direction(g: &Geo, drow: isize, dt: i64) -> (isize, i64) {
+    let px_x = (dt as f64 / TPQ).abs() as f32 * g.view.px_per_quarter;
+    let px_y = drow.unsigned_abs() as f32 * g.view.row_h;
+    if px_x >= px_y { (0, dt) } else { (drow, 0) }
 }
 
 /// Lane eines Events in seiner Spur (0 ohne aufgeklappte Lanes).
@@ -697,7 +737,7 @@ fn interact(w: &mut ProjectWindow, ui: &Ui, resp: &egui::Response, g: &Geo) {
         && let Some(p) = press
     {
         w.drag_before = Some(w.project.clone());
-        w.drag = start_drag(w, g, p, mods.alt);
+        w.drag = start_drag(w, g, p, mods);
     }
     if resp.dragged()
         && let (Some(d), Some(p)) = (w.drag, now)
@@ -807,12 +847,13 @@ fn live_drag(w: &mut ProjectWindow, g: &Geo, d: Drag, p: Pos2, mods: egui::Modif
             w.drag = Some(automation::live_drag(w, g, d, p, mods.alt));
             return;
         }
-        Drag::Move { .. } | Drag::Draw { .. } | Drag::Comp { .. } => return,
+        Drag::Move { .. } | Drag::Draw { .. } | Drag::Comp { .. } | Drag::Repeat { .. } => return,
     }
     w.dirty = true;
 }
 
-fn start_drag(w: &mut ProjectWindow, g: &Geo, p: Pos2, alt: bool) -> Option<Drag> {
+fn start_drag(w: &mut ProjectWindow, g: &Geo, p: Pos2, mods: egui::Modifiers) -> Option<Drag> {
+    let alt = mods.alt;
     if g.ruler.contains(p) {
         return Some(Drag::Ruler {
             start: w.snap_ticks(g.ticks(p.x)),
@@ -855,8 +896,14 @@ fn start_drag(w: &mut ProjectWindow, g: &Geo, p: Pos2, alt: bool) -> Option<Drag
                     id,
                     grab: ticks - start,
                     row,
+                    copy: mods.command,
+                    shared: mods.command && mods.shift,
                 },
                 Zone::TrimStart => Drag::TrimStart { id },
+                Zone::TrimEnd if alt => {
+                    let (a, b) = selection_span(w)?;
+                    Drag::Repeat { start: a, end: b }
+                }
                 Zone::TrimEnd => Drag::TrimEnd { id },
                 Zone::FadeIn => Drag::FadeIn { id },
                 Zone::FadeOut => Drag::FadeOut { id },
@@ -966,14 +1013,35 @@ fn finish_drag(w: &mut ProjectWindow, g: &Geo, d: Drag, p: Pos2, mods: egui::Mod
                 w.selection = vec![id];
             }
         }
-        Drag::Move { id, grab, row } => {
+        Drag::Repeat { start, end } => {
+            let n = repeat_count(g, start, end, p);
+            if n > 0 {
+                let sel = w.selection.clone();
+                let new = w.project.repeat(&sel, n, false);
+                if !new.is_empty() {
+                    w.selection = new;
+                }
+            }
+        }
+        Drag::Move {
+            id,
+            grab,
+            row,
+            copy,
+            shared,
+        } => {
             let Some((drow, dt)) = move_delta(w, g, id, grab, row, p, mods.alt) else {
                 return;
+            };
+            // Strg erst während des Ziehens gedrückt: nur waagerecht oder senkrecht.
+            let (drow, dt) = if mods.command && !copy {
+                lock_direction(g, drow, dt)
+            } else {
+                (drow, dt)
             };
             if drow == 0 && dt == 0 {
                 return;
             }
-            let copy = mods.command;
             // Snap-Modus „Schieben“: ein Event innerhalb seiner Spur, die Nachbarn rücken nach.
             if w.snap
                 && w.snap_mode == crate::tools::SnapMode::Shuffle
@@ -998,7 +1066,16 @@ fn finish_drag(w: &mut ProjectWindow, g: &Geo, d: Drag, p: Pos2, mods: egui::Mod
                 let target = g.offset_row(t, drow);
                 let start = (ev.start.0 as i64 + dt).max(0) as u64;
                 match w.project.move_event(sel, target, start, copy) {
-                    Some(nid) => new_sel.push(nid),
+                    Some(nid) => {
+                        if copy {
+                            if shared {
+                                w.project.link_shared(sel, nid);
+                            } else {
+                                w.project.unlink_shared(nid);
+                            }
+                        }
+                        new_sel.push(nid);
+                    }
                     None => new_sel.push(sel),
                 }
             }
@@ -1470,7 +1547,12 @@ fn paint_event(
             .text(
                 pos2(visible.left() + 5.0, head.center().y),
                 Align2::LEFT_CENTER,
-                &ev.name,
+                // Geteilte Kopien: „=“ vor dem Namen.
+                if ev.shared.is_some() {
+                    format!("= {}", ev.name)
+                } else {
+                    ev.name.clone()
+                },
                 FontId::proportional(10.5),
                 if ev.muted {
                     crate::theme::tokens(painter.ctx()).event_text_muted
@@ -1602,12 +1684,44 @@ fn paint_drag_preview(w: &ProjectWindow, painter: &Painter, g: &Geo) {
     let Some(p) = painter.ctx().input(|i| i.pointer.interact_pos()) else {
         return;
     };
-    let alt = painter.ctx().input(|i| i.modifiers.alt);
+    let (alt, ctrl) = painter
+        .ctx()
+        .input(|i| (i.modifiers.alt, i.modifiers.command));
     let ghost = Stroke::new(1.5, Color32::from_white_alpha(200));
     match w.drag {
-        Some(Drag::Move { id, grab, row }) => {
+        Some(Drag::Repeat { start, end }) => {
+            let n = repeat_count(g, start, end, p);
+            let span = end - start;
+            for k in 1..=u64::from(n) {
+                for &sel in &w.selection {
+                    let (Some((t, _)), Some(ev)) = (w.project.find(sel), w.project.event(sel))
+                    else {
+                        continue;
+                    };
+                    let s = (ev.start.0 + span * k) as f64;
+                    let top = g.row_top(t) + 2.0;
+                    let rect = Rect::from_min_max(
+                        pos2(g.x(s), top),
+                        pos2(g.x(s + ev.length as f64), top + g.view.row_h - 4.0),
+                    );
+                    painter.rect_stroke(rect, 3.0, ghost, StrokeKind::Inside);
+                }
+            }
+        }
+        Some(Drag::Move {
+            id,
+            grab,
+            row,
+            copy,
+            ..
+        }) => {
             let Some((drow, dt)) = move_delta(w, g, id, grab, row, p, alt) else {
                 return;
+            };
+            let (drow, dt) = if ctrl && !copy {
+                lock_direction(g, drow, dt)
+            } else {
+                (drow, dt)
             };
             for &sel in &w.selection {
                 let (Some((t, _)), Some(ev)) = (w.project.find(sel), w.project.event(sel)) else {
