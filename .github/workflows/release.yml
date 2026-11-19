@@ -36,15 +36,76 @@ jobs:
         run: |
           echo 'deb [trusted=yes] https://repo.goreleaser.com/apt/ /' | sudo tee /etc/apt/sources.list.d/goreleaser.list
           sudo apt-get update
-          sudo apt-get install -y nfpm zsync desktop-file-utils appstream pkg-config \
+          sudo apt-get install -y nfpm zsync desktop-file-utils appstream pkg-config flatpak flatpak-builder \
             libasound2-dev libpipewire-0.3-dev libclang-dev libxkbcommon-dev libwayland-dev \
             libx11-dev libxcb1-dev libxcursor-dev libxrandr-dev libxi-dev libfontconfig1-dev \
             libfreetype-dev libgl1-mesa-dev
       - run: packaging/linux/package.sh
+      # Repackages the tarball above; installs it in the runner's user Flatpak as a smoke test.
+      - run: packaging/linux/flatpak-bundle.sh
       - uses: actions/upload-artifact@v7
         with:
           name: linux-${{ matrix.runner }}
           path: dist/release/*
+
+  # Arch Linux package from the x86_64 tarball (Arch's official images are x86_64 only).
+  arch:
+    needs: linux
+    runs-on: ubuntu-24.04
+    container: archlinux:latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          name: linux-ubuntu-24.04
+          path: dist/release
+      - name: Build and install the package
+        run: |
+          pacman -Syu --noconfirm --needed base-devel git
+          useradd -m builder
+          chown -R builder: "$GITHUB_WORKSPACE"
+          # makepkg refuses to run as root.
+          su builder -c "cd '$GITHUB_WORKSPACE' && CARGO_TARGET_DIR=/tmp/target DIST=/tmp/out packaging/linux/arch-package.sh dist/release/studiocraft-*-linux-x86_64.tar.gz"
+          pacman -U --noconfirm /tmp/out/studiocraft-*.pkg.tar.zst
+          studiocraft-cli --version
+          studiocraft --version
+          mkdir -p dist/arch && cp /tmp/out/studiocraft-*.pkg.tar.zst dist/arch/
+      - uses: actions/upload-artifact@v7
+        with:
+          name: linux-arch
+          path: dist/arch/*
+
+  # Install the deb and rpm on the distributions they target and start both programs.
+  install-test:
+    needs: linux
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: debian:13
+            kind: deb
+          - image: ubuntu:24.04
+            kind: deb
+          - image: fedora:latest
+            kind: rpm
+    runs-on: ubuntu-24.04
+    container: ${{ matrix.image }}
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: linux-ubuntu-24.04
+          path: pkgs
+      - name: Install and start
+        run: |
+          if [ "${{ matrix.kind }}" = deb ]; then
+            apt-get update
+            apt-get install -y ./pkgs/studiocraft-*-linux-x86_64.deb
+          else
+            dnf install -y ./pkgs/studiocraft-*-linux-x86_64.rpm
+          fi
+          studiocraft-cli --version
+          studiocraft --version
+          test -f /usr/share/mime/packages/io.github.xxcrusaderxx.studiocraft.xml
 
   windows:
     strategy:
@@ -105,7 +166,7 @@ jobs:
 
   publish:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [linux, windows, macos]
+    needs: [linux, arch, install-test, windows, macos]
     runs-on: ubuntu-latest
     permissions:
       contents: write
