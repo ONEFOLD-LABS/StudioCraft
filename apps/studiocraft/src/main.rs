@@ -1,6 +1,8 @@
 //! StudioCraft – Desktop-App (Prototyp des Projektfensters).
 //!
 //! Aufruf: `studiocraft [datei.wav …] [--tracks <n>] [--audio-host <name>]`
+// Unter Windows ohne Konsolenfenster starten (die Kommandozeile ist studiocraft-cli).
+#![cfg_attr(all(windows, not(test)), windows_subsystem = "windows")]
 // Kein unwrap/expect/panic außerhalb von Tests (AGENTS.md „Robustness“, Issue #49).
 #![cfg_attr(
     not(test),
@@ -253,9 +255,11 @@ fn main() -> ExitCode {
         } else {
             window.import_audio(path, None).map(|_| ())
         };
+        // Fehler im Fenster zeigen: unter Windows gibt es keine Konsole (Doppelklick im
+        // Explorer), das Programm soll nicht wortlos enden.
         if let Err(e) = result {
             eprintln!("Fehler: {e}");
-            return ExitCode::FAILURE;
+            window.notify(format!("{f}: {e}"));
         }
     }
     window.clear_history();

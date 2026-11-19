@@ -39,7 +39,7 @@ apps/studiocraft-cli    Kommandozeile        (vorhanden)
 apps/studiocraft-web    WASM-Build           (geplant)
 crates/*                Bibliotheken         (vorhanden)
 xtask/                  cargo xtask ci, version, layers  (geplant)
-packaging/{linux,macos,windows,freebsd,web}  (geplant)
+packaging/{linux,windows} vorhanden; {macos,freebsd,web} geplant
 .github/workflows/      ci.yml, release.yml über storytold/craft-common-actions  (geplant)
 ```
 
@@ -50,7 +50,7 @@ Releases laufen über den gemeinsamen Workflow `storytold/craft-common-actions/.
 | System | Hosts | Auswahl |
 | --- | --- | --- |
 | Linux, FreeBSD | PipeWire (Standard), ALSA; JACK mit `--features jack` | `--audio-host <name>` |
-| Windows | WASAPI; ASIO mit `--features asio` | ebenso |
+| Windows | WASAPI (Shared Mode, Low-Latency geplant: Issue #110); ASIO nur im Selbstbau mit `--features asio`, nicht in den Paketen (Lizenz des SDK, Issue #107) | ebenso |
 | macOS | CoreAudio; JACK mit `--features jack` | ebenso |
 | Web | Web Audio | automatisch |
 
@@ -59,3 +59,7 @@ Releases laufen über den gemeinsamen Workflow `storytold/craft-common-actions/.
 ## Abgrenzung zu SoundCraft
 
 SoundCraft und StudioCraft haben jeweils ein eigenes Bedienkonzept. Gemeinsame Bausteine (craft-libs) werden geteilt, die Bedienung bleibt getrennt.
+
+## Windows-Pakete
+
+`packaging/windows/package.ps1 -Arch x64|arm64` baut mit statischer C-Laufzeit (kein VC++-Redistributable) und erzeugt das MSI (WiX v5, Installation für alle Benutzer) und ein portables zip. Das MSI legt einen Startmenü-Eintrag an, macht StudioCraft zur Standard-App für `.studiocraft` und bietet sich für WAV, FLAC, AIFF und MP3 unter „Öffnen mit“ an. `studiocraft.exe` ist ein GUI-Programm ohne Konsolenfenster (Symbol und Versionsangaben über `apps/studiocraft/build.rs`); Ausgaben auf der Kommandozeile liefert `studiocraft-cli.exe`. Signiert wird nur, wenn das Secret `WINDOWS_CERTIFICATE` gesetzt ist.

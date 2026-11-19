@@ -542,6 +542,11 @@ impl ProjectWindow {
         Ok(ev)
     }
 
+    /// Zeigt `text` in der Meldungszeile (etwa einen Fehler beim Öffnen über die Kommandozeile).
+    pub fn notify(&mut self, text: String) {
+        self.message = Some(text);
+    }
+
     /// Legt `before` im Undo-Verlauf ab, falls sich das Projekt seitdem geändert hat.
     pub(crate) fn checkpoint(&mut self, before: Project) {
         // Geteilte Kopien: geänderten Inhalt an die ganze Gruppe weitergeben.

@@ -16,3 +16,7 @@ App icon: assets/app-icon is original StudioCraft artwork (see its README).
 Window frame: crates/ui uses craft-window from storytold/craft-libs (MIT OR
 Apache-2.0) to decide per desktop whether StudioCraft draws its own title bar,
 in which order the window buttons sit, and to make the bar move the window.
+
+Windows packaging: packaging/windows (package.ps1, sign.ps1, studiocraft.wxs) and
+apps/studiocraft/build.rs are adapted from SoundCraft (storytold/soundcraft,
+packaging/windows and apps/soundcraft/build.rs), licensed under Apache-2.0.
