@@ -624,6 +624,33 @@ impl ClapInstance {
         }
     }
 
+    /// Parameteränderung an Frame `time` des nächsten Blocks (Automation). Anders als
+    /// [`Self::set_param`] bleiben frühere Werte stehen, damit eine Kurve im Block mehrere
+    /// Stützpunkte hat. Echtzeitsicher; ist der Vorrat voll, fällt das Ereignis weg.
+    pub fn set_param_at(&mut self, time: u32, id: u32, value: f64) {
+        if self.pending.events.len() >= MAX_EVENTS || !value.is_finite() {
+            return;
+        }
+        self.pending.events.push(AnyEvent {
+            param: clap_event_param_value {
+                header: clap_event_header {
+                    size: std::mem::size_of::<clap_event_param_value>() as u32,
+                    time,
+                    space_id: CLAP_CORE_EVENT_SPACE_ID,
+                    type_: CLAP_EVENT_PARAM_VALUE,
+                    flags: 0,
+                },
+                param_id: id,
+                cookie: ptr::null_mut(),
+                note_id: -1,
+                port_index: -1,
+                channel: -1,
+                key: -1,
+                value,
+            },
+        });
+    }
+
     /// Rohe MIDI-Nachricht (Controller, Pitchbend, Aftertouch). Echtzeitsicher.
     pub fn midi(&mut self, time: u32, data: [u8; 3]) {
         if self.pending.events.len() >= MAX_EVENTS {

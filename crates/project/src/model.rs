@@ -117,6 +117,9 @@ pub struct Track {
     /// Lanes aufgeklappt: überlappende Events (Takes) liegen untereinander.
     #[serde(default)]
     pub show_lanes: bool,
+    /// Automationsspuren (Spec „Automation“).
+    #[serde(default)]
+    pub automation: Vec<crate::AutomationLane>,
     /// Fader in dB; [`MIN_DB`] und darunter gilt als −∞.
     pub volume_db: f32,
     /// Panorama: −1 links, 0 Mitte, +1 rechts (Stereo-Balance).
@@ -409,6 +412,7 @@ impl Project {
                 write: false,
                 time_base: None,
                 show_lanes: false,
+                automation: Vec::new(),
                 volume_db: 0.0,
                 pan: 0.0,
                 input: TrackInput::default(),
@@ -718,6 +722,7 @@ impl Project {
             write: false,
             time_base: None,
             show_lanes: false,
+            automation: Vec::new(),
             volume_db: 0.0,
             pan: 0.0,
             input: TrackInput::default(),

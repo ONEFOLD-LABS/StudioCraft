@@ -218,6 +218,7 @@ impl ProjectWindow {
                         chain.instrument = Some(Insert {
                             instance: inst,
                             bypass: slot.bypass,
+                            model: INSTRUMENT,
                         });
                         instrument_ok = true;
                     }
@@ -233,6 +234,7 @@ impl ProjectWindow {
                         chain.slots.push(Insert {
                             instance: inst,
                             bypass: slot.bypass,
+                            model: map.len() - 1,
                         });
                     }
                     Err(e) => {

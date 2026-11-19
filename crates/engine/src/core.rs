@@ -171,6 +171,8 @@ pub struct EngineCore {
     inserts: Vec<Option<Box<InsertChain>>>,
     /// Getrennte Kanäle für die Insert-Verarbeitung.
     planar: [Box<[f32]>; 2],
+    /// Faktoren links/rechts pro Frame bei automatisierter Lautstärke, Pan oder Mute.
+    auto_gain: [Box<[f32]>; 2],
     /// Gehaltene Noten je Spur (Bit = Tonhöhe), für „alle Noten aus“.
     held: Vec<u128>,
     /// Beim nächsten Block alle gehaltenen Noten beenden (Stopp, Sprung, Cycle).
@@ -234,6 +236,10 @@ pub fn engine(sample_rate: u32, tempo: TempoMap) -> (EngineCore, EngineControl) 
         held: vec![0; MAX_METERED_TRACKS],
         panic: false,
         planar: [
+            vec![0.0; SCRATCH_FRAMES].into(),
+            vec![0.0; SCRATCH_FRAMES].into(),
+        ],
+        auto_gain: [
             vec![0.0; SCRATCH_FRAMES].into(),
             vec![0.0; SCRATCH_FRAMES].into(),
         ],
@@ -548,6 +554,14 @@ impl EngineCore {
                             }
                         }
                     }
+                    // Automation: Plugin-Parameter als zeitgestempelte Ereignisse.
+                    if running && let Some(auto) = &track.auto {
+                        auto.param_events(pos, frames, |slot, time, id, value| {
+                            if let Some(ins) = chain.by_model(slot) {
+                                ins.instance.set_param_at(time, id, value);
+                            }
+                        });
+                    }
                     let [pl, pr] = &mut self.planar;
                     for (i, f) in tmp.chunks_exact(2).enumerate() {
                         pl[i] = f[0];
@@ -567,11 +581,23 @@ impl EngineCore {
                 }
                 // Fader und Panorama an Ort und Stelle; Pegel messen.
                 let (mut pl, mut pr) = (0.0f32, 0.0f32);
-                for t in tmp.chunks_exact_mut(2) {
-                    t[0] *= track.gain_l;
-                    t[1] *= track.gain_r;
-                    pl = pl.max(t[0].abs());
-                    pr = pr.max(t[1].abs());
+                if let Some(auto) = track.auto.as_deref().filter(|a| running && a.has_gain()) {
+                    // Automation: Faktor pro Frame (sample-genau).
+                    let [gl, gr] = &mut self.auto_gain;
+                    auto.fill_gains(pos, &mut gl[..frames], &mut gr[..frames]);
+                    for (i, t) in tmp.chunks_exact_mut(2).enumerate() {
+                        t[0] *= gl[i];
+                        t[1] *= gr[i];
+                        pl = pl.max(t[0].abs());
+                        pr = pr.max(t[1].abs());
+                    }
+                } else {
+                    for t in tmp.chunks_exact_mut(2) {
+                        t[0] *= track.gain_l;
+                        t[1] *= track.gain_r;
+                        pl = pl.max(t[0].abs());
+                        pr = pr.max(t[1].abs());
+                    }
                 }
                 self.meters.feed_track(track.slot, pl, pr);
                 // Sends nach dem Fader.
@@ -636,6 +662,38 @@ mod tests {
 
     fn left(out: &[f32]) -> Vec<f32> {
         out.chunks(2).map(|c| c[0]).collect()
+    }
+
+    #[test]
+    fn automation_shapes_the_track_while_playing_only() {
+        use studiocraft_project::{AutoParam, Project, TrackKind};
+        let mut p = Project::default();
+        let t = p.add_track(TrackKind::Audio, "A");
+        p.tracks[t].read = true;
+        p.tracks[t].volume_db = 0.0;
+        // -6 dB from the start; mute from tick 1 (= frame 25 at 120 bpm, 48 kHz) on.
+        p.tracks[t]
+            .automation_lane_mut(AutoParam::Volume)
+            .set_point(0, -6.0);
+        let mute = p.tracks[t].automation_lane_mut(AutoParam::Mute);
+        mute.set_point(0, 0.0);
+        mute.set_point(1, 0.0);
+        mute.set_point(2, 1.0);
+        let auto = crate::automation::TrackAuto::build(&p.tracks[t], &p.tempo, 48_000);
+        let mut song = Song::single(vec![1.0f32; 200].into());
+        song.tracks[0].auto = auto;
+        let (mut core, mut ctl) = engine(48_000, TempoMap::default());
+        ctl.send(Command::SetSong(Arc::new(song)));
+        ctl.send(Command::Play);
+        let mut out = [0.0f32; 160];
+        core.process(&mut out);
+        let g = studiocraft_project::db_to_gain(-6.0);
+        assert!((out[0] - g).abs() < 1e-6, "{}", out[0]);
+        assert!((out[2 * 24] - g).abs() < 1e-6);
+        // The mute curve crosses 0.5 at frame 37.5: silent from frame 38.
+        assert!(out[2 * 37] > 0.0);
+        assert_eq!(out[2 * 38], 0.0);
+        assert_eq!(out[2 * 79 + 1], 0.0);
     }
 
     #[test]

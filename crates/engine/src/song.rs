@@ -72,6 +72,8 @@ pub struct PlayTrack {
     pub sends: Vec<PlaySend>,
     /// Audio-Spuren mit Monitor: Eingangskanal und ob Stereo (`first`, `first + 1`).
     pub monitor: Option<(u16, bool)>,
+    /// Automation (nur mit R und wirksamen Kurven).
+    pub auto: Option<Box<crate::automation::TrackAuto>>,
 }
 
 /// Ziel des Ausgangs einer Spur.
@@ -211,7 +213,9 @@ impl Song {
                 let (gain_l, gain_r) = t.gains();
                 let monitor = (t.monitor && t.kind == TrackKind::Audio)
                     .then_some((t.input.first, t.input.stereo));
+                let auto = crate::automation::TrackAuto::build(t, tempo, rate);
                 let keep = monitor.is_some()
+                    || auto.is_some()
                     || !events.is_empty()
                     || !t.inserts.is_empty()
                     || t.instrument.is_some()
@@ -225,6 +229,7 @@ impl Song {
                         events,
                         notes,
                         monitor,
+                        auto,
                         ..Default::default()
                     },
                 )

@@ -7,6 +7,9 @@ use studiocraft_plugin_host::ClapInstance;
 pub struct Insert {
     pub instance: ClapInstance,
     pub bypass: bool,
+    /// Slot im Projektmodell (`usize::MAX` = Instrument). Fehlt ein Plugin, weicht er vom
+    /// Platz in der Kette ab; Automation adressiert Inserts über ihn.
+    pub model: usize,
 }
 
 /// Die Inserts einer Spur in Signalfluss-Reihenfolge.
@@ -36,6 +39,15 @@ impl InsertChain {
             self.instrument.as_mut()
         } else {
             self.slots.get_mut(slot)
+        }
+    }
+
+    /// Insert mit Modell-Slot `model` (`usize::MAX` = Instrument). Echtzeitsicher.
+    pub fn by_model(&mut self, model: usize) -> Option<&mut Insert> {
+        if model == usize::MAX {
+            self.instrument.as_mut()
+        } else {
+            self.slots.iter_mut().find(|s| s.model == model)
         }
     }
 

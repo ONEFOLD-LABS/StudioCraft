@@ -4,6 +4,7 @@
 //! Locks, keine Systemaufrufe. GUI und Engine sprechen nur über
 //! Message-Queues ([`Command`]) und atomare Statuswerte ([`EngineStatus`]).
 
+pub mod automation;
 pub mod clip;
 pub mod clock;
 pub mod core;
