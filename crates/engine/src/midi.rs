@@ -27,6 +27,9 @@ pub struct RecordedMidi {
     pub key: u8,
     pub velocity: u8,
     pub on: bool,
+    /// Aufgenommener Controller (Pitchbend, CC außer Haltepedal, Aftertouch) als rohe
+    /// MIDI-Nachricht; dann gelten `key`, `velocity` und `on` nicht.
+    pub ctrl: Option<[u8; 3]>,
 }
 
 /// Wertet eine MIDI-Nachricht aus: Noten (Note-On mit Velocity 0 = Off),

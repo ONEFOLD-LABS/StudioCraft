@@ -4978,7 +4978,47 @@ mod tests {
             key,
             velocity: 100,
             on,
+            ctrl: None,
         }
+    }
+
+    #[test]
+    fn recorded_controllers_land_in_the_part_without_the_sustain_pedal() {
+        let mut p = Project::default();
+        let t = p.add_track(TrackKind::Instrument, "Synth");
+        let mut w = ProjectWindow::new(p, None, String::new());
+        let ctrl = |pos: u64, data: [u8; 3]| studiocraft_engine::midi::RecordedMidi {
+            pos,
+            key: 0,
+            velocity: 0,
+            on: false,
+            ctrl: Some(data),
+        };
+        // Half a second at 48 kHz = one quarter at 120 BPM.
+        let take = [
+            rec(0, 60, true),
+            ctrl(24_000, [0xb0, 1, 90]),
+            ctrl(48_000, [0xe0, 0, 64]),
+            rec(96_000, 60, false),
+        ];
+        w.place_midi_take(t, &take, 0, 96_000);
+        let ev = &w.project.tracks[t].events[0];
+        assert_eq!(ev.notes.len(), 1);
+        let c: Vec<(studiocraft_project::CtrlKind, i64, u16)> = ev
+            .controllers
+            .iter()
+            .map(|c| (c.kind, c.start, c.value))
+            .collect();
+        assert_eq!(
+            c,
+            [
+                (studiocraft_project::CtrlKind::Cc(1), 960, 90),
+                (studiocraft_project::CtrlKind::PitchBend, 1920, 8192),
+            ]
+        );
+        // Controllers alone also make a part.
+        w.place_midi_take(t, &[ctrl(0, [0xd0, 50, 0])], 0, 48_000);
+        assert_eq!(w.project.tracks[t].events.len(), 2);
     }
 
     #[test]

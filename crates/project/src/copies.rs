@@ -28,8 +28,10 @@ impl Project {
         };
         let content = self
             .event(original)
-            .map(|e| (e.notes.clone(), e.clip, e.offset));
-        let (Some((notes, clip, offset)), true) = (content, self.event(copy).is_some()) else {
+            .map(|e| (e.notes.clone(), e.controllers.clone(), e.clip, e.offset));
+        let (Some((notes, controllers, clip, offset)), true) =
+            (content, self.event(copy).is_some())
+        else {
             return false;
         };
         if let Some(e) = self.event_mut(original) {
@@ -38,6 +40,7 @@ impl Project {
         if let Some(e) = self.event_mut(copy) {
             e.shared = Some(group);
             e.notes = notes;
+            e.controllers = controllers;
             e.clip = clip;
             e.offset = offset;
         }
@@ -58,15 +61,25 @@ impl Project {
         for t in &self.tracks {
             for e in &t.events {
                 let Some(g) = e.shared else { continue };
-                let differs = before
-                    .event(e.id)
-                    .is_none_or(|b| b.notes != e.notes || b.clip != e.clip || b.offset != e.offset);
+                let differs = before.event(e.id).is_none_or(|b| {
+                    b.notes != e.notes
+                        || b.controllers != e.controllers
+                        || b.clip != e.clip
+                        || b.offset != e.offset
+                });
                 if differs && before.event(e.id).is_some() {
-                    changed.push((g, e.id, e.notes.clone(), e.clip, e.offset));
+                    changed.push((
+                        g,
+                        e.id,
+                        e.notes.clone(),
+                        e.controllers.clone(),
+                        e.clip,
+                        e.offset,
+                    ));
                 }
             }
         }
-        for (g, src, notes, clip, offset) in changed {
+        for (g, src, notes, controllers, clip, offset) in changed {
             for t in &mut self.tracks {
                 for e in t
                     .events
@@ -74,6 +87,7 @@ impl Project {
                     .filter(|e| e.shared == Some(g) && e.id != src)
                 {
                     e.notes.clone_from(&notes);
+                    e.controllers.clone_from(&controllers);
                     e.clip = clip;
                     e.offset = offset;
                 }

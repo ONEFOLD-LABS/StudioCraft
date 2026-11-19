@@ -503,6 +503,7 @@ impl EngineCore {
                                 key,
                                 velocity,
                                 on,
+                                ctrl: None,
                             });
                         }
                     }
@@ -510,6 +511,20 @@ impl EngineCore {
                 MidiMsg::Other(data) => {
                     if let Some(chain) = chain {
                         chain.midi(0, data);
+                    }
+                    // Controller mitschreiben; das Haltepedal steckt schon in den Notenlängen.
+                    let sustain = data[0] & 0xf0 == 0xb0 && data[1] == crate::midi::SUSTAIN;
+                    if recording
+                        && !sustain
+                        && studiocraft_project::CtrlKind::from_midi(data).is_some()
+                    {
+                        let _ = self.midi_rec.push(RecordedMidi {
+                            pos,
+                            key: 0,
+                            velocity: 0,
+                            on: false,
+                            ctrl: Some(data),
+                        });
                     }
                     if data[0] & 0xf0 == 0xb0 && data[1] == crate::midi::SUSTAIN {
                         let down = data[2] >= 64;
@@ -521,6 +536,7 @@ impl EngineCore {
                                         key,
                                         velocity: 0,
                                         on: false,
+                                        ctrl: None,
                                     });
                                 }
                             }
@@ -613,6 +629,15 @@ impl EngineCore {
                                 chain.note((nt.end - pos) as u32, nt.key, 0.0, false);
                                 *held &= !(1 << nt.key);
                             }
+                        }
+                    }
+                    // Controller-Werte (Pitchbend, CC, Aftertouch) zeitgenau an das Instrument.
+                    if running && !track.ctrls.is_empty() {
+                        let end = pos + run;
+                        let first = track.ctrls.partition_point(|c| c.at < pos);
+                        let last = track.ctrls.partition_point(|c| c.at < end);
+                        for c in &track.ctrls[first..last] {
+                            chain.midi((c.at - pos) as u32, c.data);
                         }
                     }
                     // Automation: Plugin-Parameter als zeitgestempelte Ereignisse.
