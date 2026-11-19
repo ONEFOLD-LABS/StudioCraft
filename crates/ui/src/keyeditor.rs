@@ -237,6 +237,11 @@ pub(crate) fn show(w: &mut ProjectWindow, ui: &mut Ui) {
             .on_hover_text("Angeklickte und verschobene Noten erklingen");
         ui.toggle_value(&mut w.follow_playback, "Folgen (F)")
             .on_hover_text("Die Ansicht folgt dem Cursor während der Wiedergabe");
+        // Info-Zeile der gewählten Noten (noteinfo.rs).
+        if !w.key_editor.selection.is_empty() {
+            ui.separator();
+            w.note_info(ui, part);
+        }
     });
     let (resp, painter) = ui.allocate_painter(ui.available_size(), Sense::click_and_drag());
     let r = resp.rect;
