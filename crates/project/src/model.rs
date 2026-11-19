@@ -27,6 +27,8 @@ pub enum TrackKind {
     Folder,
     /// Marker-Spur: zeigt die Marker des Projekts (eine je Projekt).
     Marker,
+    /// Tempospur: zeigt und bearbeitet die Tempowechsel der Tempo-Map (eine je Projekt).
+    Tempo,
 }
 
 impl TrackKind {
@@ -39,6 +41,7 @@ impl TrackKind {
             Self::Fx => "FX-Kanal",
             Self::Folder => "Ordner",
             Self::Marker => "Marker",
+            Self::Tempo => "Tempo",
         }
     }
 
@@ -1404,29 +1407,65 @@ impl Project {
     /// (lineare Zeitbasis), MIDI-Parts ihre Taktposition (musikalisch).
     pub fn set_tempo(&mut self, bpm: f64) {
         let bpm = bpm.clamp(20.0, 300.0);
-        let f = bpm / self.tempo.bpm;
-        if (f - 1.0).abs() < 1e-12 {
+        if (bpm - self.tempo.bpm).abs() < 1e-12 {
             return;
         }
-        let scale = |t: u64| (t as f64 * f).round() as u64;
+        let mut map = self.tempo.clone();
+        map.bpm = bpm;
+        self.set_tempo_map(map);
+    }
+
+    /// Neue Tempo-Map (Tempospur, festes Tempo, Taktart): Events auf Spuren mit linearer
+    /// Zeitbasis behalten ihre Zeit in Sekunden, musikalische ihre Ticks.
+    pub fn set_tempo_map(&mut self, new: crate::TempoMap) {
+        if new == self.tempo {
+            return;
+        }
+        let old = std::mem::replace(&mut self.tempo, new);
+        let new = &self.tempo;
+        let conv = |t: u64| {
+            let x = new.ticks_at_seconds(old.seconds(Position(t))).round();
+            if x.is_finite() && x > 0.0 {
+                x as u64
+            } else {
+                0
+            }
+        };
+        // Negative Notenstarts (ausgeblendete Noten vor dem Part) mit dem Anfangstempo.
+        let ratio = new.bpm_at(0) / old.bpm_at(0);
+        let conv_i = |t: i64| {
+            if t >= 0 {
+                i64::try_from(conv(t.unsigned_abs())).unwrap_or(i64::MAX)
+            } else {
+                (t as f64 * ratio).round() as i64
+            }
+        };
         for t in self
             .tracks
             .iter_mut()
             .filter(|t| t.time_base() == TimeBase::Linear)
         {
             for e in &mut t.events {
-                e.start = Position(scale(e.start.0));
-                e.length = scale(e.length).max(1);
-                e.fade_in = scale(e.fade_in).min(e.length);
-                e.fade_out = scale(e.fade_out).min(e.length - e.fade_in);
+                let (s0, e0) = (e.start.0, e.end());
+                let (s1, e1) = (conv(s0), conv(e0));
+                let fin_end = conv(s0.saturating_add(e.fade_in));
+                let fout_start = conv(e0.saturating_sub(e.fade_out));
+                e.start = Position(s1);
+                e.length = e1.saturating_sub(s1).max(1);
+                e.fade_in = fin_end.saturating_sub(s1).min(e.length);
+                e.fade_out = e1.saturating_sub(fout_start).min(e.length - e.fade_in);
                 // Noten linearer Parts behalten ihre Zeit in Sekunden.
+                let base = i64::try_from(s0).unwrap_or(i64::MAX);
+                let base1 = i64::try_from(s1).unwrap_or(i64::MAX);
                 for n in &mut e.notes {
-                    n.start = (n.start as f64 * f).round() as i64;
-                    n.length = scale(n.length).max(1);
+                    let a = base.saturating_add(n.start);
+                    let b = a.saturating_add(i64::try_from(n.length).unwrap_or(i64::MAX));
+                    let (a1, b1) = (conv_i(a), conv_i(b));
+                    n.start = a1.saturating_sub(base1);
+                    n.length = u64::try_from(b1.saturating_sub(a1)).unwrap_or(0).max(1);
                 }
             }
         }
-        self.tempo.bpm = bpm;
     }
 
     /// Ob eine Spur zu hören ist: nicht stumm, und bei aktivem Solo selbst Solo.
@@ -1945,6 +1984,52 @@ mod tests {
             "MIDI-Part bleibt bei Takt 2"
         );
         assert_eq!(secs(&p, part), (4.0, 4.0), "… und dauert nun 4 s");
+    }
+
+    #[test]
+    fn a_tempo_track_keeps_audio_in_seconds_and_midi_in_bars() {
+        let (mut p, c) = pool_project(); // 2 s audio = one bar at 120 BPM
+        let bar = p.tempo.signature.bar_ticks();
+        let a = p.add_audio_event(0, 2 * bar, c).unwrap(); // at 4 s
+        p.set_fades(a, bar / 4, bar / 2);
+        let m = p.add_track(TrackKind::Instrument, "Synth");
+        let part = p.create_event(m, 3 * bar, bar).unwrap();
+        let span = |p: &Project, id| {
+            let e = p.event(id).unwrap();
+            (p.tempo.seconds(e.start), p.tempo.seconds(Position(e.end())))
+        };
+        let fade_secs = |p: &Project| {
+            let e = p.event(a).unwrap();
+            (
+                p.tempo.seconds(Position(e.start.0 + e.fade_in)) - p.tempo.seconds(e.start),
+                p.tempo.seconds(Position(e.end()))
+                    - p.tempo.seconds(Position(e.end() - e.fade_out)),
+            )
+        };
+        let (audio, fades) = (span(&p, a), fade_secs(&p));
+        // From bar 2 on, ramp from 120 up to 180 at bar 3, then jump to 90.
+        let mut map = p.tempo.clone();
+        map.use_track = true;
+        map.set_event(bar, 120.0, false);
+        map.set_event(2 * bar, 180.0, true);
+        map.set_event(3 * bar, 90.0, false);
+        p.set_tempo_map(map);
+        let close =
+            |x: (f64, f64), y: (f64, f64)| (x.0 - y.0).abs() < 1e-3 && (x.1 - y.1).abs() < 1e-3;
+        assert!(close(span(&p, a), audio), "{:?} vs {audio:?}", span(&p, a));
+        assert!(close(fade_secs(&p), fades), "fades keep their seconds");
+        assert_eq!(
+            p.event(part).unwrap().start.0,
+            3 * bar,
+            "MIDI stays in bar 4"
+        );
+        assert_eq!(p.event(part).unwrap().length, bar);
+        // Switching the track off goes back to the fixed tempo, audio still in place.
+        let mut off = p.tempo.clone();
+        off.use_track = false;
+        p.set_tempo_map(off);
+        assert!(close(span(&p, a), audio));
+        assert_eq!(p.tempo.events.len(), 3, "points are kept");
     }
 
     #[test]

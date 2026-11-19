@@ -45,6 +45,7 @@ mod session;
 pub mod settings;
 mod shortcuts;
 mod snap;
+mod tempo_ui;
 pub mod theme;
 mod timeline;
 pub mod titlebar;
@@ -238,6 +239,8 @@ pub struct ProjectWindow {
     sent_tempo: Option<studiocraft_project::TempoMap>,
     /// Projektstand vor einer laufenden Tempo-Eingabe (ein Undo-Schritt pro Eingabe).
     tempo_before: Option<Project>,
+    /// Stand vor einer Eingabe im Inspector der Tempospur (ein Undo-Schritt je Eingabe).
+    tempo_track_before: Option<Project>,
 }
 
 /// Inhalt der unteren Zone (Spec „Fenster-Architektur“).
@@ -349,6 +352,7 @@ impl ProjectWindow {
             theme_installed: false,
             sent_tempo: None,
             tempo_before: None,
+            tempo_track_before: None,
         };
         w.apply_layout(w.project.layout.clone());
         w.saved = Some(w.project.clone());
@@ -637,7 +641,7 @@ impl ProjectWindow {
         if let Some(t) = &mut self.transport {
             t.tempo = tempo.clone();
         }
-        self.send(Command::SetTempo(tempo));
+        // Das Metronom bekommt die Tempo-Map mit dem neu gebauten Song (`dirty`).
         self.send_locators();
         self.dirty = true;
     }
@@ -648,17 +652,34 @@ impl ProjectWindow {
         let mut editing = false;
         let mut changed = false;
         let l = ui.label("Tempo");
-        let r = ui
-            .add(
-                egui::DragValue::new(&mut tempo.bpm)
-                    .range(20.0..=300.0)
-                    .speed(0.2)
-                    .fixed_decimals(1),
-            )
+        if self.project.tempo.varies() {
+            // Tempospur aktiv: das Tempo am Cursor, bearbeitet wird in der Tempospur.
+            let bpm = self.project.tempo.bpm_at(self.cursor);
+            ui.add(egui::Label::new(
+                egui::RichText::new(format!("{bpm:.1}")).monospace(),
+            ))
             .labelled_by(l.id)
-            .on_hover_text("Tempo in BPM (ziehen oder eintippen)");
-        changed |= r.changed();
-        editing |= r.dragged() || r.has_focus();
+            .on_hover_text("Tempo am Cursor (aus der Tempospur)");
+        } else {
+            let r = ui
+                .add(
+                    egui::DragValue::new(&mut tempo.bpm)
+                        .range(20.0..=300.0)
+                        .speed(0.2)
+                        .fixed_decimals(1),
+                )
+                .labelled_by(l.id)
+                .on_hover_text("Tempo in BPM (ziehen oder eintippen)");
+            changed |= r.changed();
+            editing |= r.dragged() || r.has_focus();
+        }
+        if ui
+            .selectable_label(self.project.tempo.use_track, "Spur")
+            .on_hover_text("Tempospur an/aus (aus: festes Tempo)")
+            .clicked()
+        {
+            self.toggle_tempo_track();
+        }
         let takt = ui.label("Takt");
         let r = ui
             .add(egui::DragValue::new(&mut tempo.signature.numerator).range(1..=16))
@@ -679,11 +700,17 @@ impl ProjectWindow {
             .response
             .labelled_by(takt.id);
         if changed {
-            if self.tempo_before.is_none() {
-                self.tempo_before = Some(self.project.clone());
-            }
-            self.project.set_tempo(tempo.bpm);
-            self.project.tempo.signature = tempo.signature;
+            // Immer vom Stand vor der Eingabe aus umrechnen: kein Rundungsfehler beim Ziehen.
+            let base = self
+                .tempo_before
+                .get_or_insert_with(|| self.project.clone())
+                .clone();
+            let mut map = base.tempo.clone();
+            map.bpm = tempo.bpm.clamp(20.0, 300.0);
+            map.signature = tempo.signature;
+            let mut project = base;
+            project.set_tempo_map(map);
+            self.project = project;
         }
         if !editing && let Some(before) = self.tempo_before.take() {
             self.checkpoint(before);
@@ -1261,22 +1288,25 @@ impl ProjectWindow {
                 ui.checkbox(&mut track.show_lanes, "Lanes");
             });
         }
-        ui.horizontal(|ui| {
-            let r = ui.add(
-                egui::Slider::new(
-                    &mut track.volume_db,
-                    studiocraft_project::MIN_DB..=studiocraft_project::MAX_DB,
-                )
-                .text("dB")
-                .custom_formatter(|v, _| mixer::db_label(v as f32)),
-            );
-            self.dirty |= r.changed();
-        });
-        ui.horizontal(|ui| {
-            let r = ui.add(egui::Slider::new(&mut track.pan, -1.0..=1.0).text("Pan"));
-            self.dirty |= r.changed();
-        });
-        ui.label(format!("{} Events", track.events.len()));
+        // Marker- und Tempospur haben keinen Klang: keine Lautstärke, kein Panorama.
+        if !matches!(track.kind, TrackKind::Marker | TrackKind::Tempo) {
+            ui.horizontal(|ui| {
+                let r = ui.add(
+                    egui::Slider::new(
+                        &mut track.volume_db,
+                        studiocraft_project::MIN_DB..=studiocraft_project::MAX_DB,
+                    )
+                    .text("dB")
+                    .custom_formatter(|v, _| mixer::db_label(v as f32)),
+                );
+                self.dirty |= r.changed();
+            });
+            ui.horizontal(|ui| {
+                let r = ui.add(egui::Slider::new(&mut track.pan, -1.0..=1.0).text("Pan"));
+                self.dirty |= r.changed();
+            });
+            ui.label(format!("{} Events", track.events.len()));
+        }
         ui.add_space(4.0);
         // Sektionen mit Titelleiste (docs/ui-parity.md, „Linke Zone“): Routing zuerst,
         // dann Instrument, Inserts, Sends, EQ, Automation, Notizen.
@@ -1307,6 +1337,9 @@ impl ProjectWindow {
         }
         if kind == TrackKind::Marker {
             inspector_section(ui, "Marker", true, |ui| self.markers_ui(ui));
+        }
+        if kind == TrackKind::Tempo {
+            inspector_section(ui, "Tempo", true, |ui| self.tempo_track_ui(ui));
         }
         if kind == TrackKind::Instrument {
             inspector_section(ui, "Instrument", true, |ui| self.instrument_ui(ui, idx));
@@ -2935,6 +2968,25 @@ mod tests {
     }
 
     #[test]
+    fn render_tempo_track() {
+        shot("tempo", |w| {
+            let t = w.add_tempo_track();
+            let bar = w.bar_ticks();
+            let mut map = w.project.tempo.clone();
+            map.set_event(2 * bar, 140.0, false);
+            map.set_event(4 * bar, 90.0, true);
+            map.set_event(6 * bar, 120.0, false);
+            w.project.set_tempo_map(map);
+            // Tempo track at the top, selected, so that the curve and the inspector show.
+            let track = w.project.tracks.remove(t);
+            w.project.tracks.insert(0, track);
+            w.selected_track = Some(0);
+            w.view.scroll_ticks = 0.0;
+            w.cursor = 5 * bar;
+        });
+    }
+
+    #[test]
     fn double_click_on_a_crossfade_opens_the_crossfade_editor() {
         let (mut w, a) = one_event_window();
         w.view.scroll_ticks = 0.0;
@@ -2970,6 +3022,73 @@ mod tests {
         assert_eq!(
             p.event(b).unwrap().fade_in_curve,
             studiocraft_project::FadeCurve::Linear
+        );
+    }
+
+    #[test]
+    fn tempo_track_points_are_drawn_dragged_and_ramped() {
+        let (mut w, id) = one_event_window();
+        w.view.scroll_ticks = 0.0;
+        let bar = w.bar_ticks();
+        let audio_secs = w.project.tempo.seconds(w.project.event(id).unwrap().start);
+        let mut h = window_harness(w);
+        h.get_by_label("Projekt").click();
+        h.run_steps(2);
+        h.get_by_label("Tempospur hinzufügen").click();
+        h.run_steps(2);
+        let row = h.state().tempo_track().unwrap();
+        assert!(h.state().project.tempo.use_track);
+        // Fixed view, so that screen positions match the drawing.
+        h.state_mut().view.scroll_ticks = 0.0;
+        h.state_mut().view.px_per_quarter = 24.0;
+        h.run_steps(2);
+        // Pencil: a point at bar 3, at the height of the start tempo (middle of the lane).
+        h.state_mut().tool = Tool::Draw;
+        let at = screen(&h, 2 * bar, row as f32 + 0.5);
+        h.event(egui::Event::PointerMoved(at));
+        h.run_steps(1);
+        for pressed in [true, false] {
+            h.event(egui::Event::PointerButton {
+                pos: at,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            });
+            h.run_steps(1);
+        }
+        let ev = h.state().project.tempo.events.clone();
+        assert_eq!(ev.len(), 1);
+        assert_eq!(ev[0].tick, 2 * bar);
+        assert!((ev[0].bpm - 120.0).abs() < 1.0, "{}", ev[0].bpm);
+        // Select tool: drag the point up; the tempo rises. The left zone grows once to the
+        // width of the tempo table in the inspector: let the layout settle before measuring.
+        h.state_mut().tool = Tool::Select;
+        h.run_steps(4);
+        let w = h.state();
+        let p = egui::pos2(
+            screen(&h, 2 * bar, 0.0).x,
+            w.lanes_rect.top() + w.view.row_h * row as f32 + w.view.row_h / 2.0,
+        );
+        let none = egui::Modifiers::NONE;
+        drag_with(&mut h, p, p - egui::vec2(0.0, 15.0), none, none);
+        let bpm = h.state().project.tempo.events[0].bpm;
+        assert!(bpm > 125.0, "{bpm}");
+        // Audio stays at its time in seconds.
+        let p = &h.state().project;
+        let now = p.tempo.seconds(p.event(id).unwrap().start);
+        assert!((now - audio_secs).abs() < 1e-3);
+        // Inspector: ramp on.
+        h.state_mut().selected_track = Some(row);
+        h.run_steps(2);
+        h.get_by_label("Rampe").click();
+        h.run_steps(3);
+        assert!(h.state().project.tempo.events[0].ramp);
+        // The transport shows the tempo at the cursor and the track switch.
+        h.get_by_label("Spur");
+        h.state_mut().undo();
+        assert!(
+            !h.state().project.tempo.events[0].ramp,
+            "ramp is one undo step"
         );
     }
 
@@ -3485,6 +3604,86 @@ mod tests {
             w.open_key_editor(part);
             w.key_editor.selection = vec![0];
         });
+    }
+
+    #[test]
+    fn renders_key_editor_with_several_parts() {
+        shot("key-editor-parts", |w| {
+            let row = w
+                .project
+                .add_track(TrackKind::Instrument, String::from("Synth"));
+            let mut ids = Vec::new();
+            for (k, name) in ["Strophe", "Refrain"].iter().enumerate() {
+                let id = w.project.create_event(row, k as u64 * 3840, 3840).unwrap();
+                let ev = w.project.event_mut(id).unwrap();
+                ev.name = (*name).into();
+                ev.notes = (0..4)
+                    .map(|i| studiocraft_project::Note {
+                        pitch: 60 + 2 * i as u8 + 5 * k as u8,
+                        velocity: 100,
+                        start: i * 960,
+                        length: 720,
+                    })
+                    .collect();
+                ids.push(id);
+            }
+            w.open_key_editor_parts(&ids);
+        });
+    }
+
+    #[test]
+    fn several_parts_open_together_one_active() {
+        let mut p = Project::default();
+        let t = p.add_track(TrackKind::Instrument, "Synth");
+        let a = p.create_event(t, 0, 3840).unwrap();
+        let b = p.create_event(t, 3840, 3840).unwrap();
+        p.event_mut(a).unwrap().name = "Strophe".into();
+        p.event_mut(b).unwrap().name = "Refrain".into();
+        for (id, pitch) in [(a, 60), (b, 67)] {
+            p.event_mut(id).unwrap().notes = vec![studiocraft_project::Note {
+                pitch,
+                velocity: 100,
+                start: 0,
+                length: 960,
+            }];
+        }
+        let mut w = ProjectWindow::new(p, None, String::new());
+        w.selection = vec![a, b];
+        w.open_key_editor_from_selection(b);
+        assert_eq!(w.key_editor.part, Some(b), "the clicked part is active");
+        assert_eq!(w.key_editor.open.len(), 2);
+        let mut h = window_harness(w);
+        h.run_steps(2);
+        // Tabs switch the active part.
+        h.get_by_label("Strophe").click();
+        h.run_steps(2);
+        assert_eq!(h.state().key_editor.part, Some(a));
+        // A click on the dimmed note of the other part makes that part active and selects it.
+        let pos = {
+            let s = h.state();
+            let g = s.key_editor.grid_rect;
+            let v = s.key_editor.view;
+            let x = g.left() + ((3840.0 + 480.0 - v.scroll_ticks) / TPQ) as f32 * v.px_per_quarter;
+            let y = g.top() + (127 - 67) as f32 * v.key_h - v.scroll_y + v.key_h / 2.0;
+            egui::pos2(x, y)
+        };
+        h.event(egui::Event::PointerMoved(pos));
+        h.run_steps(1);
+        for pressed in [true, false] {
+            h.event(egui::Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            });
+        }
+        h.run_steps(2);
+        assert_eq!(h.state().key_editor.part, Some(b));
+        assert_eq!(h.state().key_editor.selection, vec![0]);
+        // A single part opens alone again.
+        h.state_mut().selection = vec![a];
+        h.state_mut().open_key_editor_from_selection(a);
+        assert_eq!(h.state().key_editor.open, vec![a]);
     }
 
     #[test]
