@@ -103,6 +103,49 @@ impl ProjectWindow {
             map.use_track = true;
             changed = true;
         }
+        ui.separator();
+        ui.strong("Taktart");
+        let mut remove_sig = None;
+        egui::Grid::new("taktwechsel")
+            .num_columns(3)
+            .striped(true)
+            .show(ui, |ui| {
+                ui.label("Takt 1");
+                changed |= signature_fields(ui, "Taktart Takt 1", &mut map.signature);
+                ui.label("");
+                ui.end_row();
+                for (i, e) in map.signatures.iter_mut().enumerate() {
+                    ui.label(format!("Takt {}", e.bar));
+                    let mut sig = e.signature();
+                    if signature_fields(ui, &format!("Taktart Takt {}", e.bar), &mut sig) {
+                        e.numerator = sig.numerator;
+                        e.denominator = sig.denominator;
+                        changed = true;
+                    }
+                    if ui.small_button("Löschen").clicked() {
+                        remove_sig = Some(i);
+                    }
+                    ui.end_row();
+                }
+            });
+        if let Some(i) = remove_sig {
+            map.signatures.remove(i);
+            changed = true;
+        }
+        if ui
+            .button("Taktwechsel am Cursor")
+            .on_hover_text(
+                "Ab dem Takt am Cursor (bzw. dem nächsten, wenn der Cursor im Takt steht)",
+            )
+            .clicked()
+        {
+            let (bar, start, sig) = map.bar_at(self.cursor);
+            let bar = if self.cursor > start { bar + 1 } else { bar };
+            if bar >= 2 {
+                map.set_signature(bar, sig);
+                changed = true;
+            }
+        }
         if changed {
             // Vom Stand vor der Eingabe aus umrechnen (kein Rundungsfehler beim Ziehen) …
             let base = self
@@ -119,4 +162,36 @@ impl ProjectWindow {
             self.checkpoint(before);
         }
     }
+}
+
+/// Zähler und Nenner einer Taktart; `true` bei Änderung.
+fn signature_fields(
+    ui: &mut Ui,
+    label: &str,
+    sig: &mut studiocraft_project::TimeSignature,
+) -> bool {
+    let mut changed = false;
+    ui.horizontal(|ui| {
+        let r = ui.add(egui::DragValue::new(&mut sig.numerator).range(1..=32));
+        r.widget_info(|| {
+            egui::WidgetInfo::labeled(egui::Role::SpinButton, true, format!("{label} Zähler"))
+        });
+        changed |= r.changed();
+        ui.label("/");
+        egui::ComboBox::from_id_salt(label)
+            .width(40.0)
+            .selected_text(sig.denominator.to_string())
+            .show_ui(ui, |ui| {
+                for d in [2u32, 4, 8, 16] {
+                    changed |= ui
+                        .selectable_value(&mut sig.denominator, d, d.to_string())
+                        .changed();
+                }
+            })
+            .response
+            .widget_info(|| {
+                egui::WidgetInfo::labeled(egui::Role::ComboBox, true, format!("{label} Nenner"))
+            });
+    });
+    changed
 }

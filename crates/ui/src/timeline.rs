@@ -1716,27 +1716,27 @@ fn paint_grid(w: &ProjectWindow, painter: &Painter, g: &Geo, rect: Rect, labels:
             .color
             .gamma_multiply(0.45),
     );
-    let mut b = t0 / bar;
-    while b * bar <= t1 {
-        let x = g.x((b * bar) as f64);
-        if b % step == 0 {
-            painter.vline(x, rect.y_range(), strong);
-            if labels {
-                painter.text(
-                    pos2(x + 3.0, rect.bottom() - 4.0),
-                    Align2::LEFT_BOTTOM,
-                    (b + 1).to_string(),
-                    FontId::proportional(11.0),
-                    visuals.text_color(),
-                );
+    // Takt- und Zählzeitlinien entlang der Taktwechsel.
+    for (t, bar_no) in w.meter_lines(t0, t1, beat_px >= 10.0 && !labels) {
+        let x = g.x(t as f64);
+        match bar_no {
+            Some(n) if (n - 1) % step == 0 => {
+                painter.vline(x, rect.y_range(), strong);
+                if labels {
+                    painter.text(
+                        pos2(x + 3.0, rect.bottom() - 4.0),
+                        Align2::LEFT_BOTTOM,
+                        n.to_string(),
+                        FontId::proportional(11.0),
+                        visuals.text_color(),
+                    );
+                }
+            }
+            Some(_) => {}
+            None => {
+                painter.vline(x, rect.y_range(), weak);
             }
         }
-        if beat_px >= 10.0 && !labels {
-            for k in 1..(bar / beat) {
-                painter.vline(g.x((b * bar + k * beat) as f64), rect.y_range(), weak);
-            }
-        }
-        b += 1;
     }
     // Feines Snap-Raster (z. B. 1/16, Frames, „An Zoom anpassen“) zwischen den Zählzeiten.
     if !labels {

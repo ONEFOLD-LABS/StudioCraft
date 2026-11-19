@@ -43,6 +43,39 @@ impl TimeSignature {
     }
 }
 
+/// Taktwechsel: ab Takt `bar` (1-basiert, ≥ 2) gilt die Taktart.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct SignatureEvent {
+    pub bar: u64,
+    pub numerator: u32,
+    pub denominator: u32,
+}
+
+impl SignatureEvent {
+    pub fn signature(self) -> TimeSignature {
+        TimeSignature {
+            numerator: self.numerator,
+            denominator: self.denominator,
+        }
+    }
+}
+
+impl TimeSignature {
+    /// Gültige Taktart (Zähler 1–64, Nenner Zweierpotenz bis 64); sonst 4/4.
+    pub fn sane(self) -> Self {
+        let n = self.numerator.clamp(1, 64);
+        let d = if self.denominator.is_power_of_two() && self.denominator <= 64 {
+            self.denominator
+        } else {
+            4
+        };
+        Self {
+            numerator: n,
+            denominator: d,
+        }
+    }
+}
+
 /// Tempowechsel auf der Tempospur.
 #[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct TempoEvent {
@@ -69,6 +102,9 @@ pub struct TempoMap {
     /// Tempospur aktiv (sonst festes Tempo `bpm`, die Punkte bleiben erhalten).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub use_track: bool,
+    /// Taktwechsel nach Takt sortiert; Takt 1 hat `signature`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub signatures: Vec<SignatureEvent>,
 }
 
 impl Default for TempoMap {
@@ -78,6 +114,7 @@ impl Default for TempoMap {
             signature: TimeSignature::COMMON,
             events: Vec::new(),
             use_track: false,
+            signatures: Vec::new(),
         }
     }
 }
@@ -299,21 +336,128 @@ impl TempoMap {
         self.events.len() != before
     }
 
+    /// Ruft `f(start_tick, start_bar, signature)` für jeden Abschnitt gleicher Taktart auf, bis
+    /// es `false` liefert (Takte 1-basiert). Keine Allokation.
+    fn for_meter(&self, mut f: impl FnMut(u64, u64, TimeSignature) -> bool) {
+        let mut sig = self.signature.sane();
+        let (mut tick, mut bar) = (0u64, 1u64);
+        for e in &self.signatures {
+            if e.bar <= bar {
+                // Doppelt oder unsortiert (fremde Datei): gilt ab hier.
+                sig = e.signature().sane();
+                continue;
+            }
+            if !f(tick, bar, sig) {
+                return;
+            }
+            tick = tick.saturating_add((e.bar - bar).saturating_mul(sig.bar_ticks()));
+            bar = e.bar;
+            sig = e.signature().sane();
+        }
+        f(tick, bar, sig);
+    }
+
+    /// Takt (1-basiert), sein Anfang in Ticks und seine Taktart an Position `tick`.
+    pub fn bar_at(&self, tick: u64) -> (u64, u64, TimeSignature) {
+        let mut out = (1, 0, self.signature.sane());
+        let mut first = true;
+        self.for_meter(|start, bar, sig| {
+            if !first && tick < start {
+                return false;
+            }
+            first = false;
+            let n = (tick - start) / sig.bar_ticks();
+            out = (bar + n, start + n * sig.bar_ticks(), sig);
+            true
+        });
+        out
+    }
+
+    /// Taktart an Position `tick`.
+    pub fn signature_at(&self, tick: u64) -> TimeSignature {
+        self.bar_at(tick).2
+    }
+
+    /// Anfang von Takt `bar` (1-basiert) in Ticks.
+    pub fn bar_start(&self, bar: u64) -> u64 {
+        let bar = bar.max(1);
+        let mut out = 0;
+        self.for_meter(|start, first_bar, sig| {
+            if bar < first_bar {
+                return false;
+            }
+            out = start.saturating_add((bar - first_bar).saturating_mul(sig.bar_ticks()));
+            true
+        });
+        out
+    }
+
+    /// Taktlinien in `t0..=t1`: (Tick, Taktnummer, Taktart).
+    pub fn bar_lines(&self, t0: u64, t1: u64) -> Vec<(u64, u64, TimeSignature)> {
+        let mut out = Vec::new();
+        let (mut bar, mut at, mut sig) = self.bar_at(t0);
+        while at <= t1 && out.len() < 100_000 {
+            out.push((at, bar, sig));
+            bar += 1;
+            at = self.bar_start(bar);
+            sig = self.signature_at(at);
+        }
+        out
+    }
+
+    /// Nächste Zählzeit ab `tick` (einschließlich) und ob sie eine Takt-Eins ist. Keine
+    /// Allokation (Metronom im Audio-Thread).
+    pub fn next_beat(&self, tick: u64) -> (u64, bool) {
+        let (bar, start, sig) = self.bar_at(tick);
+        let beat = sig.beat_ticks().max(1);
+        let k = (tick - start).div_ceil(beat);
+        if k >= u64::from(sig.numerator) {
+            (self.bar_start(bar + 1), true)
+        } else {
+            (start + k * beat, k == 0)
+        }
+    }
+
+    /// Setzt einen Taktwechsel ab Takt `bar` (Takt 1 ändert die Grundtaktart).
+    pub fn set_signature(&mut self, bar: u64, sig: TimeSignature) {
+        let sig = sig.sane();
+        if bar <= 1 {
+            self.signature = sig;
+            return;
+        }
+        let e = SignatureEvent {
+            bar,
+            numerator: sig.numerator,
+            denominator: sig.denominator,
+        };
+        match self.signatures.binary_search_by_key(&bar, |e| e.bar) {
+            Ok(i) => self.signatures[i] = e,
+            Err(i) => self.signatures.insert(i, e),
+        }
+    }
+
+    /// Entfernt den Taktwechsel ab Takt `bar`.
+    pub fn remove_signature(&mut self, bar: u64) -> bool {
+        let before = self.signatures.len();
+        self.signatures.retain(|e| e.bar != bar);
+        self.signatures.len() != before
+    }
+
     /// Position aus Takt und Schlag, beide ab 1 gezählt wie im Lineal (1.1 = Anfang).
     pub fn position(&self, bar: u64, beat: u64) -> Position {
-        let sig = self.signature;
-        Position((bar - 1) * sig.bar_ticks() + (beat - 1) * sig.beat_ticks())
+        let start = self.bar_start(bar);
+        let sig = self.signature_at(start);
+        Position(start + beat.saturating_sub(1) * sig.beat_ticks())
     }
 
     /// Takt.Schlag.Sechzehntel.Ticks für die Anzeige im Lineal.
     pub fn bars_beats(&self, pos: Position) -> (u64, u64, u64, u64) {
-        let sig = self.signature;
+        let (bar, start, sig) = self.bar_at(pos.0);
         let sixteenth = TICKS_PER_QUARTER / 4;
-        let bar = pos.0 / sig.bar_ticks();
-        let rest = pos.0 % sig.bar_ticks();
+        let rest = pos.0 - start;
         let beat = rest / sig.beat_ticks();
         let rest = rest % sig.beat_ticks();
-        (bar + 1, beat + 1, rest / sixteenth + 1, rest % sixteenth)
+        (bar, beat + 1, rest / sixteenth + 1, rest % sixteenth)
     }
 
     /// Position als Text wie im Lineal: `Takt.Zählzeit.Sechzehntel.Ticks`, z. B. `3.2.1.000`.
@@ -322,10 +466,20 @@ impl TempoMap {
         format!("{bar}.{beat}.{six}.{tick:03}")
     }
 
-    /// Dauer als Text, jede Stelle ab 0 gezählt: ein Takt in 4/4 ist `1.0.0.000`.
+    /// Dauer als Text, jede Stelle ab 0 gezählt: ein Takt in 4/4 ist `1.0.0.000`. Dauern
+    /// zählen in der Grundtaktart (Takt 1).
     pub fn format_length(&self, ticks: u64) -> String {
-        let (bar, beat, six, tick) = self.bars_beats(Position(ticks));
-        format!("{}.{}.{}.{tick:03}", bar - 1, beat - 1, six - 1)
+        let sig = self.signature.sane();
+        let sixteenth = TICKS_PER_QUARTER / 4;
+        let bars = ticks / sig.bar_ticks();
+        let rest = ticks % sig.bar_ticks();
+        let beats = rest / sig.beat_ticks();
+        let rest = rest % sig.beat_ticks();
+        format!(
+            "{bars}.{beats}.{}.{:03}",
+            rest / sixteenth,
+            rest % sixteenth
+        )
     }
 
     /// Liest eine Position im Format von [`Self::format_position`]. Fehlende Stellen hinten
@@ -333,10 +487,17 @@ impl TempoMap {
     /// Zählzeiten und Sechzehntel dürfen überlaufen (`1.5` in 4/4 = `2.1`).
     pub fn parse_position(&self, text: &str) -> Option<Position> {
         let [bar, beat, six, tick] = parse_parts(text, [1, 1, 1, 0])?;
-        if bar == 0 || beat == 0 || six == 0 {
+        if bar == 0 || beat == 0 || six == 0 || bar > 1_000_000 {
             return None;
         }
-        self.parts_to_ticks([bar - 1, beat - 1, six - 1, tick])
+        // Takt über die Taktwechsel, Rest in der Taktart dieses Takts.
+        let start = self.bar_start(bar);
+        let sig = self.signature_at(start);
+        beat.checked_sub(1)?
+            .checked_mul(sig.beat_ticks())?
+            .checked_add((six - 1).checked_mul(TICKS_PER_QUARTER / 4)?)?
+            .checked_add(tick)?
+            .checked_add(start)
             .map(Position)
     }
 
@@ -504,6 +665,82 @@ mod tests {
             map.seconds(Position(u64::MAX / 2)),
             map.ticks(u64::MAX / 2, 48_000),
         );
+    }
+
+    #[test]
+    fn signature_changes_move_bar_lines_and_numbering() {
+        let mut map = TempoMap::default();
+        let q = TICKS_PER_QUARTER;
+        // Bars 1-2 in 4/4, from bar 3 in 3/4, from bar 5 in 6/8.
+        map.set_signature(
+            3,
+            TimeSignature {
+                numerator: 3,
+                denominator: 4,
+            },
+        );
+        map.set_signature(
+            5,
+            TimeSignature {
+                numerator: 6,
+                denominator: 8,
+            },
+        );
+        assert_eq!(map.bar_start(3), 8 * q);
+        assert_eq!(map.bar_start(4), 11 * q);
+        assert_eq!(map.bar_start(5), 14 * q);
+        assert_eq!(map.bar_start(6), 17 * q, "6/8 bar = three quarters");
+        assert_eq!(map.bars_beats(Position(12 * q)), (4, 2, 1, 0));
+        assert_eq!(map.format_position(Position(14 * q + q / 2)), "5.2.1.000");
+        assert_eq!(map.parse_position("4.2"), Some(Position(12 * q)));
+        assert_eq!(map.position(5, 1), Position(14 * q));
+        let lines: Vec<u64> = map.bar_lines(0, 17 * q).iter().map(|l| l.0).collect();
+        assert_eq!(lines, [0, 4 * q, 8 * q, 11 * q, 14 * q, 17 * q]);
+        // Beats: a downbeat at bar 4, then plain beats.
+        assert_eq!(map.next_beat(11 * q), (11 * q, true));
+        assert_eq!(map.next_beat(11 * q + 1), (12 * q, false));
+        assert_eq!(
+            map.next_beat(13 * q + 1),
+            (14 * q, true),
+            "after the last beat of 3/4"
+        );
+        assert_eq!(
+            map.next_beat(14 * q + 1),
+            (14 * q + q / 2, false),
+            "eighth beats in 6/8"
+        );
+        // Lengths count in the base signature.
+        assert_eq!(map.format_length(4 * q), "1.0.0.000");
+        assert!(map.remove_signature(3));
+        assert_eq!(map.bar_start(5), 16 * q, "bars 1-4 are 4/4 again");
+        assert_eq!(
+            map.signature_at(16 * q).numerator,
+            6,
+            "bar 5 keeps its own change"
+        );
+        // Broken events from a file never panic.
+        map.signatures = vec![
+            SignatureEvent {
+                bar: 9,
+                numerator: 0,
+                denominator: 3,
+            },
+            SignatureEvent {
+                bar: 1,
+                numerator: 7,
+                denominator: 8,
+            },
+            SignatureEvent {
+                bar: u64::MAX,
+                numerator: 4,
+                denominator: 4,
+            },
+        ];
+        let _ = (
+            map.bar_lines(0, 100 * q),
+            map.bars_beats(Position(u64::MAX / 4)),
+        );
+        let _ = map.next_beat(u64::MAX / 4);
     }
 
     #[test]

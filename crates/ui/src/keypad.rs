@@ -147,11 +147,18 @@ impl crate::ProjectWindow {
             KeypadKey::Digit(2) => self.locate(self.right_locator),
             KeypadKey::Digit(d) => self.locate_marker(u32::from(d)),
             KeypadKey::Subtract => {
-                let to = self.cursor.saturating_sub(self.bar_ticks());
+                // Zum Anfang dieses Takts bzw. des vorigen (Taktwechsel beachtet).
+                let (bar, start, _) = self.project.tempo.bar_at(self.cursor);
+                let to = if self.cursor > start {
+                    start
+                } else {
+                    self.project.tempo.bar_start(bar.saturating_sub(1))
+                };
                 self.locate(to);
             }
             KeypadKey::Add => {
-                let to = self.cursor.saturating_add(self.bar_ticks());
+                let (bar, _, _) = self.project.tempo.bar_at(self.cursor);
+                let to = self.project.tempo.bar_start(bar + 1);
                 self.locate(to);
             }
             KeypadKey::Divide => self.toggle_cycle(),

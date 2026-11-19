@@ -2951,6 +2951,13 @@ mod tests {
             map.set_event(2 * bar, 140.0, false);
             map.set_event(4 * bar, 90.0, true);
             map.set_event(6 * bar, 120.0, false);
+            map.set_signature(
+                5,
+                studiocraft_project::TimeSignature {
+                    numerator: 3,
+                    denominator: 4,
+                },
+            );
             w.project.set_tempo_map(map);
             // Tempo track at the top, selected, so that the curve and the inspector show.
             let track = w.project.tracks.remove(t);
@@ -3025,6 +3032,72 @@ mod tests {
         assert!(
             !h.state().project.tempo.events[0].ramp,
             "ramp is one undo step"
+        );
+    }
+
+    #[test]
+    fn signature_changes_drive_snap_keypad_and_the_inspector() {
+        use studiocraft_project::TimeSignature;
+        let q = studiocraft_project::TICKS_PER_QUARTER;
+        let (mut w, _) = one_event_window();
+        // From bar 3 on 3/4: bar 4 starts at 11 quarters.
+        w.project.tempo.set_signature(
+            3,
+            TimeSignature {
+                numerator: 3,
+                denominator: 4,
+            },
+        );
+        w.snap = true;
+        w.grid = tools::Grid::Bar;
+        w.grid_zoom = false;
+        assert_eq!(w.snap_ticks((11 * q) as f64 + 300.0), 11 * q);
+        assert_eq!(
+            w.snap_ticks((12 * q) as f64 + 600.0),
+            14 * q,
+            "next 3/4 bar"
+        );
+        w.grid = tools::Grid::Beat;
+        assert_eq!(w.snap_ticks((11 * q) as f64 + 700.0), 12 * q);
+        // Keypad minus/plus step along the real bar lines.
+        w.cursor = 11 * q + 10;
+        w.run_keypad(keypad::KeypadPress {
+            key: keypad::KeypadKey::Subtract,
+            shift: false,
+            repeat: false,
+        });
+        assert_eq!(w.cursor, 11 * q, "to the start of this bar");
+        w.run_keypad(keypad::KeypadPress {
+            key: keypad::KeypadKey::Add,
+            shift: false,
+            repeat: false,
+        });
+        assert_eq!(w.cursor, 14 * q);
+        // Inspector of the tempo track: a new change at the cursor's bar, one undo step.
+        let t = w.add_tempo_track();
+        w.selected_track = Some(t);
+        w.clear_history();
+        let mut h = window_harness(w);
+        h.get_by_label("Taktwechsel am Cursor").click();
+        h.run_steps(3);
+        let bars: Vec<u64> = h
+            .state()
+            .project
+            .tempo
+            .signatures
+            .iter()
+            .map(|e| e.bar)
+            .collect();
+        assert_eq!(bars, [3, 5]);
+        h.state_mut().undo();
+        assert_eq!(h.state().project.tempo.signatures.len(), 1);
+        // The position display uses the changed bars.
+        assert_eq!(
+            h.state()
+                .project
+                .tempo
+                .format_position(studiocraft_project::Position(14 * q)),
+            "5.1.1.000"
         );
     }
 

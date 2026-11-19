@@ -149,6 +149,25 @@ pub(super) fn paint(w: &ProjectWindow, painter: &Painter, g: &Geo, row: usize) {
             t.text,
         );
     }
+    // Taktwechsel unten in der Spur.
+    for e in &map.signatures {
+        let x = g.x(map.bar_start(e.bar) as f64);
+        if x < g.lanes.left() - 40.0 || x > right {
+            continue;
+        }
+        painter.vline(
+            x,
+            g.row_top(row) + g.row_height(row) * 0.6..=g.row_top(row) + g.row_height(row),
+            Stroke::new(1.0, t.text_dim),
+        );
+        painter.text(
+            pos2(x + 3.0, g.row_top(row) + g.row_height(row) - 2.0),
+            Align2::LEFT_BOTTOM,
+            format!("{}/{}", e.numerator, e.denominator),
+            font.clone(),
+            t.text,
+        );
+    }
     if !map.use_track {
         painter.text(
             pos2(
