@@ -181,6 +181,11 @@ pub struct ProjectWindow {
     range: Option<(usize, usize, u64, u64)>,
     /// Erscheinungsbild (Dunkel/Hell/System); installiert beim ersten Frame.
     theme: egui::ThemePreference,
+    /// Stopp-Verhalten (Einstellungen): zurück zur Startposition, Ziel von zweimal Stopp.
+    return_on_stop: bool,
+    stop_twice: settings::StopTarget,
+    /// Position, an der die Wiedergabe zuletzt begann.
+    play_from: u64,
     theme_installed: bool,
     /// Zuletzt an die Engine gemeldetes Tempo.
     sent_tempo: Option<studiocraft_project::TempoMap>,
@@ -200,6 +205,7 @@ impl ProjectWindow {
     pub fn new(project: Project, transport: Option<EngineControl>, audio_status: String) -> Self {
         let bar = project.tempo.signature.bar_ticks();
         let sample_rate = transport.as_ref().map_or(48_000, |t| t.sample_rate);
+        let prefs = settings::Settings::load();
         let mut w = Self {
             project,
             transport,
@@ -273,7 +279,10 @@ impl ProjectWindow {
             audio_recording: false,
             metronome: false,
             range: None,
-            theme: settings::Settings::load().theme,
+            theme: prefs.theme,
+            return_on_stop: prefs.return_on_stop,
+            stop_twice: prefs.stop_twice,
+            play_from: 0,
             theme_installed: false,
             sent_tempo: None,
             tempo_before: None,
@@ -313,9 +322,9 @@ impl ProjectWindow {
 
     fn toggle_play(&mut self) {
         if self.is_playing() || self.recording {
-            self.stop_transport();
+            self.stop();
         } else {
-            self.send(Command::Play);
+            self.play();
         }
     }
 
@@ -427,8 +436,45 @@ impl ProjectWindow {
     pub(crate) fn set_theme(&mut self, ctx: &egui::Context, pref: egui::ThemePreference) {
         self.theme = pref;
         theme::install(ctx, pref);
-        if let Err(e) = (settings::Settings { theme: pref }).save() {
+        self.save_settings();
+    }
+
+    /// Einstellungen für den nächsten Start merken (nur in der App, nicht in Tests: dort ist
+    /// `persist` aus, wie bei der Tastaturbelegung).
+    pub(crate) fn save_settings(&mut self) {
+        if !self.key_dialog.persist {
+            return;
+        }
+        let s = settings::Settings {
+            theme: self.theme,
+            return_on_stop: self.return_on_stop,
+            stop_twice: self.stop_twice,
+        };
+        if let Err(e) = s.save() {
             self.message = Some(format!("Einstellung nicht gespeichert: {e}"));
+        }
+    }
+
+    /// Wiedergabe ab dem Cursor; merkt die Startposition für das Stopp-Verhalten.
+    pub(crate) fn play(&mut self) {
+        self.play_from = self.cursor;
+        self.send(Command::Play);
+    }
+
+    /// Stopp (Spec „Stopp-Verhalten“): Läuft der Transport, hält er an und springt auf Wunsch
+    /// zur Startposition zurück; steht er schon, springt Stopp zum Anfang bzw. linken Locator.
+    pub(crate) fn stop(&mut self) {
+        if self.is_playing() || self.recording {
+            self.stop_transport();
+            if self.return_on_stop {
+                self.locate(self.play_from);
+            }
+        } else {
+            let to = match self.stop_twice {
+                settings::StopTarget::Start => 0,
+                settings::StopTarget::LeftLocator => self.left_locator,
+            };
+            self.locate(to);
         }
     }
 
@@ -757,7 +803,7 @@ impl ProjectWindow {
                 self.locate(0);
             }
             if icon_button(ui, Icon::Stop, false, None, "Stopp").clicked() {
-                self.stop_transport();
+                self.stop();
             }
             let playing = self.is_playing();
             if icon_button(
@@ -1170,7 +1216,7 @@ impl ProjectWindow {
                 self.locate(self.cursor.saturating_add(bar_len));
             }
             if icon_button(ui, Icon::Stop, false, None, "Stopp").clicked() {
-                self.stop_transport();
+                self.stop();
             }
             let playing = self.is_playing();
             if icon_button(
@@ -2465,6 +2511,88 @@ mod tests {
         h.get_by_label("Makro 1: Zoom und Snap F9").click();
         h.run_steps(2);
         assert_eq!(h.state().snap, snap);
+    }
+
+    #[test]
+    fn ruler_upper_half_draws_a_cycle_and_lower_half_moves_the_cursor() {
+        let (mut w, _) = one_event_window();
+        w.view.scroll_ticks = 0.0;
+        w.snap = false;
+        let bar = w.bar_ticks();
+        let mut h = window_harness(w);
+        let at = |h: &Harness<'_, ProjectWindow>, ticks: u64, dy: f32| {
+            egui::pos2(screen(h, ticks, 0.0).x, h.state().lanes_rect.top() - dy)
+        };
+        let none = egui::Modifiers::NONE;
+        let (a, b) = (at(&h, 2 * bar, 22.0), at(&h, 4 * bar, 22.0));
+        drag_with(&mut h, a, b, none, none);
+        let w = h.state();
+        assert_eq!((w.left_locator, w.right_locator), (2 * bar, 4 * bar));
+        let (a, b) = (at(&h, bar, 7.0), at(&h, 3 * bar, 7.0));
+        drag_with(&mut h, a, b, none, none);
+        let w = h.state();
+        assert_eq!(w.cursor, 3 * bar, "lower half scrubs the cursor");
+        assert_eq!(
+            (w.left_locator, w.right_locator),
+            (2 * bar, 4 * bar),
+            "locators unchanged"
+        );
+        // Ctrl/Alt + click still set the locators.
+        let p = at(&h, 5 * bar, 7.0);
+        h.event(egui::Event::PointerMoved(p));
+        h.event(egui::Event::ModifiersChanged(egui::Modifiers::ALT));
+        h.run_steps(1);
+        for pressed in [true, false] {
+            h.event(egui::Event::PointerButton {
+                pos: p,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::ALT,
+            });
+            h.run_steps(1);
+        }
+        h.event(egui::Event::ModifiersChanged(egui::Modifiers::NONE));
+        h.run_steps(1);
+        assert_eq!(h.state().right_locator, 5 * bar);
+    }
+
+    #[test]
+    fn stop_returns_to_the_start_position_and_twice_jumps_to_start_or_left_locator() {
+        let (mut core, ctl) = studiocraft_engine::engine(48_000, TempoMap::default());
+        let mut w = ProjectWindow::new(Project::default(), Some(ctl), String::new());
+        w.import_clip("A", None, tone_clip(4.0, 220.0), None)
+            .unwrap();
+        w.rebuild_song();
+        let mut buf = vec![0.0f32; 1024];
+        let mut run = |w: &mut ProjectWindow, core: &mut studiocraft_engine::EngineCore| {
+            for _ in 0..20 {
+                core.process(&mut buf);
+            }
+            w.sync_from_engine();
+        };
+        w.return_on_stop = true;
+        w.locate(960);
+        w.play();
+        run(&mut w, &mut core);
+        assert!(w.is_playing());
+        w.stop();
+        run(&mut w, &mut core);
+        assert!(!w.is_playing());
+        assert_eq!(w.cursor, 960, "back to where playback started");
+        // Stopped: stop again goes to the start, or the left locator if chosen.
+        w.stop();
+        assert_eq!(w.cursor, 0);
+        w.left_locator = 1920;
+        w.stop_twice = settings::StopTarget::LeftLocator;
+        w.stop();
+        assert_eq!(w.cursor, 1920);
+        // Without return-on-stop the cursor stays where playback stopped.
+        w.return_on_stop = false;
+        w.play();
+        run(&mut w, &mut core);
+        w.stop();
+        run(&mut w, &mut core);
+        assert!(w.cursor > 1920, "stays at the stop position: {}", w.cursor);
     }
 
     #[test]

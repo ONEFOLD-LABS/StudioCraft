@@ -195,6 +195,7 @@ impl ProjectWindow {
         if self.recording || self.transport.is_none() {
             return;
         }
+        self.play_from = self.cursor;
         let audio = self.armed_tracks();
         let midi = self.armed_instruments();
         if audio.is_empty() && midi.is_empty() {

@@ -133,17 +133,11 @@ impl crate::ProjectWindow {
         match p.key {
             KeypadKey::Enter => {
                 if !self.is_playing() {
-                    self.send(studiocraft_engine::Command::Play);
+                    self.play();
                 }
             }
-            KeypadKey::Digit(0) => {
-                // Stopp; im Stillstand zum Anfang (zweimal Stopp).
-                if self.is_playing() || self.recording {
-                    self.stop_transport();
-                } else {
-                    self.locate(0);
-                }
-            }
+            // Stopp mit dem Stopp-Verhalten aus den Einstellungen (zweimal: Anfang/Locator).
+            KeypadKey::Digit(0) => self.stop(),
             KeypadKey::Multiply if p.shift => {
                 self.message = Some("Nachträgliche Aufnahme ist noch nicht verfügbar".into())
             }

@@ -868,7 +868,7 @@ pub(crate) struct KeyDialog {
     /// Gedrückte Taste gehört schon einem anderen Befehl: (für, Taste, bisheriger Besitzer).
     pub conflict: Option<(Cmd, KeyboardShortcut, Cmd)>,
     pub message: Option<String>,
-    /// Änderungen in `keys.txt` speichern (nur in der App, nicht in Tests).
+    /// Änderungen in `keys.txt` und `settings.json` speichern (nur in der App, nicht in Tests).
     pub persist: bool,
 }
 
