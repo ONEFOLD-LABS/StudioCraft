@@ -184,6 +184,10 @@ pub struct ProjectWindow {
     /// Angezeigte Pegel je Spur und Ausgang (linear, mit Abfall).
     meter_levels: Vec<[f32; 2]>,
     master_meter: [f32; 2],
+    /// Mixer: Kanalliste und Rack eingeblendet; Name für eine neue Ansicht.
+    mixer_list: bool,
+    mixer_rack: bool,
+    mixer_view_name: String,
     /// Peak-Hold je Spur und Kanal (Wert, Alter in Sekunden) und Übersteuerung
     /// (bis zum Klick); letzter Eintrag: Ausgangsbus.
     meter_hold: Vec<[(f32, f32); 2]>,
@@ -347,6 +351,9 @@ impl ProjectWindow {
             show_lower: true,
             meter_levels: Vec::new(),
             master_meter: [0.0; 2],
+            mixer_list: false,
+            mixer_rack: false,
+            mixer_view_name: String::new(),
             meter_hold: Vec::new(),
             clipped: Vec::new(),
             undo: Vec::new(),
@@ -4970,6 +4977,76 @@ mod tests {
         assert_eq!(back.tracks[0].pan_mode, PanMode::Combined);
         h.state_mut().undo();
         assert_eq!(h.state().project.tracks[0].pan_mode, PanMode::Balance);
+    }
+
+    #[test]
+    fn mixer_channel_list_narrow_strips_and_rack() {
+        let (mut w, _) = one_event_window();
+        w.project.add_track(TrackKind::Audio, String::from("Zwei"));
+        w.project.tracks[0]
+            .inserts
+            .push(studiocraft_project::InsertSlot {
+                plugin_id: "x".into(),
+                name: "Hall".into(),
+                bypass: false,
+                params: Vec::new(),
+                state: None,
+            });
+        let first = w.project.tracks[0].name.clone();
+        w.show_lower = true;
+        w.lower = LowerZone::Mixer;
+        w.show_inspector = false;
+        let mut h = window_harness(w);
+        h.run_steps(2);
+        // Channel list: hide "Zwei".
+        h.get_by_label("Kanalliste").click();
+        h.run_steps(2);
+        h.get_by_label("Zwei").click();
+        h.run_steps(2);
+        assert!(h.state().project.tracks[1].mixer_hidden);
+        assert!(
+            h.query_by_label("Lautstärke Zwei").is_none(),
+            "hidden strip is gone"
+        );
+        // All narrow: strips lose the pan control.
+        h.get_by_label("Alle schmal").click();
+        h.run_steps(2);
+        assert!(h.state().project.tracks[0].mixer_narrow);
+        assert!(h.query_by_label("Panorama Kanal 0").is_none());
+        h.get_by_label("Alle breit").click();
+        h.run_steps(2);
+        // Rack: insert bypass and EQ on/off.
+        h.get_by_label("Rack").click();
+        h.run_steps(2);
+        h.get_by_label("Hall").click();
+        h.run_steps(2);
+        assert!(h.state().project.tracks[0].inserts[0].bypass);
+        let eq_before = h.state().project.tracks[0].eq.on;
+        h.get_by_label("EQ").click();
+        h.run_steps(2);
+        assert_ne!(h.state().project.tracks[0].eq.on, eq_before);
+        assert!(h.query_by_label(&format!("Lautstärke {first}")).is_some());
+    }
+
+    #[test]
+    fn renders_mixer_views() {
+        shot("mixer-ansichten", |w| {
+            w.show_lower = true;
+            w.lower = LowerZone::Mixer;
+            w.mixer_list = true;
+            w.mixer_rack = true;
+            w.project.tracks[1].mixer_narrow = true;
+            w.project.tracks[2].mixer_hidden = true;
+            w.project.tracks[0]
+                .inserts
+                .push(studiocraft_project::InsertSlot {
+                    plugin_id: "x".into(),
+                    name: "Kompressor".into(),
+                    bypass: true,
+                    params: Vec::new(),
+                    state: None,
+                });
+        });
     }
 
     #[test]
