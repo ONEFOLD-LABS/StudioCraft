@@ -13,6 +13,10 @@ pub enum AutoParam {
     Volume,
     Pan,
     Mute,
+    /// Pegel des Sends `index` (in dB, wie der Send-Regler).
+    Send {
+        index: u32,
+    },
     /// Parameter `id` des Inserts `slot`; `slot == u32::MAX` ist das Instrument.
     Plugin {
         slot: u32,
@@ -27,6 +31,7 @@ impl AutoParam {
             AutoParam::Volume => Some((f64::from(MIN_DB), f64::from(MAX_DB))),
             AutoParam::Pan => Some((-1.0, 1.0)),
             AutoParam::Mute => Some((0.0, 1.0)),
+            AutoParam::Send { .. } => Some((f64::from(MIN_DB), f64::from(MAX_DB))),
             AutoParam::Plugin { .. } => None,
         }
     }
@@ -37,6 +42,7 @@ impl AutoParam {
             AutoParam::Volume => "Lautstärke".into(),
             AutoParam::Pan => "Pan".into(),
             AutoParam::Mute => "Mute".into(),
+            AutoParam::Send { index } => format!("Send {}", u64::from(index) + 1),
             AutoParam::Plugin { slot: u32::MAX, id } => format!("Instrument · Parameter {id}"),
             AutoParam::Plugin { slot, id } => format!("Insert {} · Parameter {id}", slot + 1),
         }
@@ -48,6 +54,10 @@ impl AutoParam {
             AutoParam::Volume => Some(f64::from(track.volume_db)),
             AutoParam::Pan => Some(f64::from(track.pan)),
             AutoParam::Mute => Some(if track.mute { 1.0 } else { 0.0 }),
+            AutoParam::Send { index } => track
+                .sends
+                .get(index as usize)
+                .map(|s| f64::from(s.level_db)),
             AutoParam::Plugin { slot, id } => {
                 let ins = if slot == u32::MAX {
                     track.instrument.as_ref()
@@ -222,6 +232,23 @@ impl AutomationLane {
 }
 
 impl Track {
+    /// Entfernt Send `k` samt seiner Automation; die Automation späterer Sends rückt nach.
+    pub fn remove_send(&mut self, k: usize) {
+        if k >= self.sends.len() {
+            return;
+        }
+        self.sends.remove(k);
+        self.automation
+            .retain(|l| l.param != AutoParam::Send { index: k as u32 });
+        for l in &mut self.automation {
+            if let AutoParam::Send { index } = &mut l.param
+                && *index as usize > k
+            {
+                *index -= 1;
+            }
+        }
+    }
+
     /// Die Automationsspur für `param`, falls vorhanden.
     pub fn automation_lane(&self, param: AutoParam) -> Option<&AutomationLane> {
         self.automation.iter().find(|l| l.param == param)
@@ -311,6 +338,41 @@ mod tests {
         let before = l.points.clone();
         l.reduce(0, 500, 0.0);
         assert_eq!(l.points, before);
+    }
+
+    #[test]
+    fn removing_a_send_takes_its_automation_along() {
+        use crate::SendSlot;
+        let mut p = Project::default();
+        let t = p.add_track(TrackKind::Audio, "A");
+        for level in [-6.0, -12.0, -18.0] {
+            p.tracks[t].sends.push(SendSlot {
+                target: 99,
+                level_db: level,
+                pre_fader: false,
+                on: true,
+            });
+        }
+        for index in 0..3 {
+            p.tracks[t]
+                .automation_lane_mut(AutoParam::Send { index })
+                .set_point(0, -1.0);
+        }
+        assert_eq!(
+            AutoParam::Send { index: 1 }.static_value(&p.tracks[t]),
+            Some(-12.0)
+        );
+        p.tracks[t].remove_send(1);
+        let params: Vec<AutoParam> = p.tracks[t].automation.iter().map(|l| l.param).collect();
+        assert_eq!(
+            params,
+            [AutoParam::Send { index: 0 }, AutoParam::Send { index: 1 }]
+        );
+        assert_eq!(
+            AutoParam::Send { index: 1 }.static_value(&p.tracks[t]),
+            Some(-18.0)
+        );
+        assert_eq!(AutoParam::Send { index: 1 }.label(), "Send 2");
     }
 
     #[test]

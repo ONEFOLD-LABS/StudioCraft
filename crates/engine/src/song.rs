@@ -94,6 +94,8 @@ pub struct PlaySend {
     pub bus: usize,
     pub gain: f32,
     pub pre_fader: bool,
+    /// Platz des Sends in der Projektspur (für seine Automation).
+    pub model: usize,
 }
 
 /// Höchstzahl Gruppen und FX-Kanäle (Bus-Puffer werden vorab angelegt).
@@ -277,12 +279,14 @@ impl Song {
             t.sends = pt
                 .sends
                 .iter()
-                .filter(|s| s.on)
-                .filter_map(|s| match target(s.target) {
+                .enumerate()
+                .filter(|(_, s)| s.on)
+                .filter_map(|(model, s)| match target(s.target) {
                     Output::Bus(b) if Some(b) != t.bus => Some(PlaySend {
                         bus: b,
                         gain: db_to_gain(s.level_db),
                         pre_fader: s.pre_fader,
+                        model,
                     }),
                     _ => None,
                 })

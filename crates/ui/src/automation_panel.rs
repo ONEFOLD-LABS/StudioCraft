@@ -64,6 +64,17 @@ impl ProjectWindow {
                     ui.close();
                 }
             }
+            let sends = self.project.tracks[idx].sends.len();
+            for k in 0..sends {
+                let Ok(index) = u32::try_from(k) else {
+                    continue;
+                };
+                let p = AutoParam::Send { index };
+                if ui.button(self.param_name(idx, p)).clicked() {
+                    add = Some(p);
+                    ui.close();
+                }
+            }
             for (slot, name, plugin_id) in self.automatable_plugins(idx) {
                 let Some(params) = self.plugins.params.get(&plugin_id).cloned() else {
                     continue;
@@ -111,6 +122,18 @@ impl ProjectWindow {
 
     /// Name eines Parameters, bei Plugins aus der Parameterbeschreibung.
     pub(crate) fn param_name(&self, idx: usize, param: AutoParam) -> String {
+        if let AutoParam::Send { index } = param {
+            let target = self
+                .project
+                .tracks
+                .get(idx)
+                .and_then(|t| t.sends.get(index as usize))
+                .map(|s| self.track_name(s.target));
+            return match target {
+                Some(name) => format!("{} → {name}", param.label()),
+                None => param.label(),
+            };
+        }
         let AutoParam::Plugin { slot, id } = param else {
             return param.label();
         };

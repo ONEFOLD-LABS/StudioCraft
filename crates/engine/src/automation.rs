@@ -76,6 +76,8 @@ pub struct TrackAuto {
     pub pan_static: f32,
     /// Plugin-Parameter: Insert (`usize::MAX` = Instrument), Parameter-Id, Kurve.
     pub plugins: Vec<(usize, u32, Envelope)>,
+    /// Send-Pegel in dB: Send im Projekt, Kurve.
+    pub sends: Vec<(usize, Envelope)>,
 }
 
 impl TrackAuto {
@@ -97,6 +99,7 @@ impl TrackAuto {
                 AutoParam::Volume => auto.volume = Some(env),
                 AutoParam::Pan => auto.pan = Some(env),
                 AutoParam::Mute => auto.mute = Some(env),
+                AutoParam::Send { index } => auto.sends.push((index as usize, env)),
                 AutoParam::Plugin { slot, id } => {
                     let slot = if slot == u32::MAX {
                         usize::MAX
@@ -110,7 +113,8 @@ impl TrackAuto {
         let any = auto.volume.is_some()
             || auto.pan.is_some()
             || auto.mute.is_some()
-            || !auto.plugins.is_empty();
+            || !auto.plugins.is_empty()
+            || !auto.sends.is_empty();
         any.then(|| Box::new(auto))
     }
 
@@ -142,6 +146,18 @@ impl TrackAuto {
             *l = g * if pan > 0.0 { 1.0 - pan } else { 1.0 };
             *r = g * if pan < 0.0 { 1.0 + pan } else { 1.0 };
         }
+    }
+
+    /// Faktor des Sends `model` (Platz im Projekt) für jeden Frame ab `pos`; `false`, wenn er
+    /// nicht automatisiert ist. Echtzeitsicher.
+    pub fn fill_send_gain(&self, model: usize, pos: u64, out: &mut [f32]) -> bool {
+        let Some((_, env)) = self.sends.iter().find(|(m, _)| *m == model) else {
+            return false;
+        };
+        for (i, g) in out.iter_mut().enumerate() {
+            *g = db_to_gain(env.value_at(pos + i as u64) as f32);
+        }
+        true
     }
 
     /// Parameter-Ereignisse für `frames` Frames ab `pos`: `emit(slot, zeit, id, wert)`.
@@ -222,6 +238,18 @@ mod tests {
         assert_eq!((l[0], r[0]), (0.0, 1.0));
         a.fill_gains(24_000, &mut l, &mut r);
         assert_eq!((l[0], r[0]), (0.0, 0.0));
+    }
+
+    #[test]
+    fn send_levels_follow_their_curve() {
+        let t = track_with(AutoParam::Send { index: 1 }, &[(0, -60.0), (960, 0.0)]);
+        let a = TrackAuto::build(&t, &TempoMap::default(), 48_000).expect("auto");
+        let mut g = [0.0f32; 2];
+        assert!(!a.fill_send_gain(0, 0, &mut g), "send 0 is not automated");
+        assert!(a.fill_send_gain(1, 24_000, &mut g));
+        assert!((g[0] - 1.0).abs() < 1e-6);
+        assert!(a.fill_send_gain(1, 0, &mut g));
+        assert_eq!(g[0], 0.0);
     }
 
     #[test]

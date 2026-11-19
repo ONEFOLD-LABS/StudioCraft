@@ -88,7 +88,15 @@ fn current_values(project: &Project) -> HashMap<(usize, AutoParam), f64> {
         if !t.write || !crate::mixer::has_channel(t.kind) {
             continue;
         }
-        for p in [AutoParam::Volume, AutoParam::Pan, AutoParam::Mute] {
+        let sends = (0..t.sends.len()).filter_map(|k| {
+            Some(AutoParam::Send {
+                index: u32::try_from(k).ok()?,
+            })
+        });
+        for p in [AutoParam::Volume, AutoParam::Pan, AutoParam::Mute]
+            .into_iter()
+            .chain(sends)
+        {
             if let Some(v) = p.static_value(t) {
                 out.insert((i, p), v);
             }
@@ -377,6 +385,25 @@ mod tests {
         w.project.tracks[0].volume_db = -9.0;
         frame(&mut w, 960, true);
         assert!(w.project.tracks[0].automation.is_empty());
+    }
+
+    #[test]
+    fn moving_a_send_level_writes_its_lane() {
+        let mut w = window();
+        w.project.tracks[0]
+            .sends
+            .push(studiocraft_project::SendSlot {
+                target: 7,
+                level_db: 0.0,
+                pre_fader: false,
+                on: true,
+            });
+        frame(&mut w, 0, false);
+        w.project.tracks[0].sends[0].level_db = -9.0;
+        frame(&mut w, 960, true);
+        frame(&mut w, 1920, false);
+        let pts = points(&w, AutoParam::Send { index: 0 });
+        assert!(pts.contains(&(960, -9.0)), "{pts:?}");
     }
 
     #[test]

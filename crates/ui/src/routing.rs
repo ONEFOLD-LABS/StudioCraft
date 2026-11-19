@@ -26,7 +26,7 @@ impl ProjectWindow {
         self.checkpoint(before);
     }
 
-    fn track_name(&self, id: TrackId) -> String {
+    pub(crate) fn track_name(&self, id: TrackId) -> String {
         self.project
             .track_index(id)
             .map_or("?".into(), |i| self.project.tracks[i].name.clone())
@@ -151,7 +151,7 @@ impl ProjectWindow {
         }
         if let Some(k) = remove {
             let before = self.project.clone();
-            self.project.tracks[track].sends.remove(k);
+            self.project.tracks[track].remove_send(k);
             self.checkpoint(before);
         }
         let targets = self.route_targets(me, false);

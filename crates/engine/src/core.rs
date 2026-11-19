@@ -173,6 +173,8 @@ pub struct EngineCore {
     planar: [Box<[f32]>; 2],
     /// Faktoren links/rechts pro Frame bei automatisierter Lautstärke, Pan oder Mute.
     auto_gain: [Box<[f32]>; 2],
+    /// Faktor pro Frame eines automatisierten Sends.
+    send_gain: Box<[f32]>,
     /// Gehaltene Noten je Spur (Bit = Tonhöhe), für „alle Noten aus“.
     held: Vec<u128>,
     /// Beim nächsten Block alle gehaltenen Noten beenden (Stopp, Sprung, Cycle).
@@ -243,6 +245,7 @@ pub fn engine(sample_rate: u32, tempo: TempoMap) -> (EngineCore, EngineControl) 
             vec![0.0; SCRATCH_FRAMES].into(),
             vec![0.0; SCRATCH_FRAMES].into(),
         ],
+        send_gain: vec![0.0; SCRATCH_FRAMES].into(),
         status: status.clone(),
         meters: meters.clone(),
         scratch: vec![0.0; SCRATCH_FRAMES * 2].into_boxed_slice(),
@@ -575,8 +578,24 @@ impl EngineCore {
                 }
                 // Sends vor dem Fader.
                 for send in track.sends.iter().filter(|s| s.pre_fader) {
-                    for (o, t) in self.bus_bufs[send.bus][..n].iter_mut().zip(tmp.iter()) {
-                        *o += t * send.gain;
+                    let sg = &mut self.send_gain[..frames];
+                    let automated = running
+                        && track
+                            .auto
+                            .as_deref()
+                            .is_some_and(|a| a.fill_send_gain(send.model, pos, sg));
+                    let bus = &mut self.bus_bufs[send.bus][..n];
+                    if automated {
+                        for (i, (o, t)) in
+                            bus.chunks_exact_mut(2).zip(tmp.chunks_exact(2)).enumerate()
+                        {
+                            o[0] += t[0] * sg[i];
+                            o[1] += t[1] * sg[i];
+                        }
+                    } else {
+                        for (o, t) in bus.iter_mut().zip(tmp.iter()) {
+                            *o += t * send.gain;
+                        }
                     }
                 }
                 // Fader und Panorama an Ort und Stelle; Pegel messen.
@@ -602,8 +621,24 @@ impl EngineCore {
                 self.meters.feed_track(track.slot, pl, pr);
                 // Sends nach dem Fader.
                 for send in track.sends.iter().filter(|s| !s.pre_fader) {
-                    for (o, t) in self.bus_bufs[send.bus][..n].iter_mut().zip(tmp.iter()) {
-                        *o += t * send.gain;
+                    let sg = &mut self.send_gain[..frames];
+                    let automated = running
+                        && track
+                            .auto
+                            .as_deref()
+                            .is_some_and(|a| a.fill_send_gain(send.model, pos, sg));
+                    let bus = &mut self.bus_bufs[send.bus][..n];
+                    if automated {
+                        for (i, (o, t)) in
+                            bus.chunks_exact_mut(2).zip(tmp.chunks_exact(2)).enumerate()
+                        {
+                            o[0] += t[0] * sg[i];
+                            o[1] += t[1] * sg[i];
+                        }
+                    } else {
+                        for (o, t) in bus.iter_mut().zip(tmp.iter()) {
+                            *o += t * send.gain;
+                        }
                     }
                 }
                 // Ausgang.
@@ -662,6 +697,46 @@ mod tests {
 
     fn left(out: &[f32]) -> Vec<f32> {
         out.chunks(2).map(|c| c[0]).collect()
+    }
+
+    #[test]
+    fn automated_send_level_feeds_the_fx_channel() {
+        use std::collections::HashMap;
+        use studiocraft_project::{AutoParam, MIN_DB, PoolClip, Project, SendSlot, TrackKind};
+        let mut p = Project::default();
+        let a = p.add_track(TrackKind::Audio, "A");
+        let fx = p.add_track(TrackKind::Fx, "Hall");
+        let clip = p.add_clip(PoolClip {
+            name: "c".into(),
+            path: None,
+            sample_rate: 48_000,
+            frames: 1000,
+        });
+        p.add_audio_event(a, 0, clip).expect("event");
+        // Fader closed: only the pre-fader send reaches the output, through the FX channel.
+        p.tracks[a].volume_db = MIN_DB;
+        let target = p.tracks[fx].id;
+        p.tracks[a].sends.push(SendSlot {
+            target,
+            level_db: 0.0,
+            pre_fader: true,
+            on: true,
+        });
+        p.tracks[a].read = true;
+        p.tracks[a]
+            .automation_lane_mut(AutoParam::Send { index: 0 })
+            .set_point(0, -6.0);
+        let mut clips = HashMap::new();
+        clips.insert(clip, Arc::<[f32]>::from(vec![1.0f32; 2000]));
+        let song = Song::build(&p, &clips, 48_000);
+        let (mut core, mut ctl) = engine(48_000, TempoMap::default());
+        ctl.send(Command::SetSong(Arc::new(song)));
+        ctl.send(Command::Play);
+        let mut out = [0.0f32; 64];
+        core.process(&mut out);
+        let g = studiocraft_project::db_to_gain(-6.0);
+        assert!((out[10] - g).abs() < 1e-5, "{}", out[10]);
+        assert!((out[11] - g).abs() < 1e-5, "{}", out[11]);
     }
 
     #[test]
