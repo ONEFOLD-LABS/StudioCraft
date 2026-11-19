@@ -7,6 +7,11 @@
 #   $DIST/studiocraft-<version>-linux-<arch>.rpm       Fedora, openSUSE …       (braucht nfpm)
 #
 # Aufruf: packaging/linux/package.sh [--skip-build] [--formats "tar appimage deb rpm"]
+#                                    [--target riscv64gc-unknown-linux-gnu]
+#
+# Mit --target wird quer kompiliert (Linker, pkg-config und bindgen für das Ziel müssen
+# eingerichtet sein, siehe .github/workflows/release.yml); AppImage gibt es dann nicht, und der
+# Rauchtest läuft über qemu-user.
 #
 # appimagetool und die AppImage-Runtime werden bei Bedarf in fester Version geladen und per
 # SHA-256 geprüft (gleiche Stände wie SoundCraft). Optional: desktop-file-validate, appstreamcli.
@@ -17,29 +22,41 @@ HERE="$ROOT/packaging/linux"
 
 SKIP_BUILD=0
 FORMATS="tar appimage deb rpm"
+TARGET=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --skip-build) SKIP_BUILD=1; shift ;;
     --formats) FORMATS="$2"; shift 2 ;;
+    --target) TARGET="$2"; shift 2 ;;
     -h | --help) sed -n '2,13p' "$0"; exit 0 ;;
     *) echo "unbekanntes Argument: $1" >&2; exit 2 ;;
   esac
 done
 
-ARCH="$(uname -m)"
+ARCH="${TARGET%%-*}"
+ARCH="${ARCH:-$(uname -m)}"
 case "$ARCH" in
   x86_64) DEB_ARCH=amd64 ;;
   aarch64 | arm64) ARCH=aarch64; DEB_ARCH=arm64 ;;
+  riscv64 | riscv64gc) ARCH=riscv64; DEB_ARCH=riscv64 ;;
   *) echo "Architektur $ARCH wird nicht unterstützt" >&2; exit 2 ;;
 esac
+# Programme des Ziels ausführen (quer kompiliert: über qemu-user).
+RUN=()
+STRIP=strip
+if [[ -n "$TARGET" ]] && [[ "$ARCH" != "$(uname -m)" ]]; then
+  RUN=("qemu-$ARCH" -L "/usr/$ARCH-linux-gnu")
+  STRIP="$ARCH-linux-gnu-strip"
+  FORMATS="${FORMATS//appimage/}"
+fi
 BASENAME="studiocraft-$VERSION-linux-$ARCH"
 has() { case " $FORMATS " in *" $1 "*) return 0 ;; *) return 1 ;; esac; }
 
 echo "==> StudioCraft $VERSION für Linux $ARCH ($FORMATS)"
 if [[ "$SKIP_BUILD" = 0 ]]; then
-  (cd "$ROOT" && cargo build --release --locked -p studiocraft -p studiocraft-cli)
+  (cd "$ROOT" && cargo build --release --locked -p studiocraft -p studiocraft-cli ${TARGET:+--target "$TARGET"})
 fi
-BIN="$CARGO_TARGET_DIR/release"
+BIN="$CARGO_TARGET_DIR/${TARGET:+$TARGET/}release"
 WORK="$CARGO_TARGET_DIR/linux-package"
 STAGE="$WORK/root"
 rm -rf "$WORK"
@@ -47,7 +64,7 @@ rm -rf "$WORK"
 # ---- FHS-Baum (Grundlage aller Formate) ----
 install -Dm755 "$BIN/studiocraft" "$STAGE/usr/bin/studiocraft"
 install -Dm755 "$BIN/studiocraft-cli" "$STAGE/usr/bin/studiocraft-cli"
-strip "$STAGE/usr/bin/studiocraft" "$STAGE/usr/bin/studiocraft-cli" 2>/dev/null || true
+"$STRIP" "$STAGE/usr/bin/studiocraft" "$STAGE/usr/bin/studiocraft-cli" 2>/dev/null || true
 install -Dm644 "$HERE/$APP_ID.desktop" "$STAGE/usr/share/applications/$APP_ID.desktop"
 # Dateityp für .studiocraft-Projekte (Doppelklick öffnet das Projekt).
 install -Dm644 "$HERE/$APP_ID.mime.xml" "$STAGE/usr/share/mime/packages/$APP_ID.xml"
@@ -131,6 +148,7 @@ if has appimage; then
   echo "geschrieben: $OUT"
 fi
 
-"$STAGE/usr/bin/studiocraft-cli" --version
+"${RUN[@]}" "$STAGE/usr/bin/studiocraft-cli" --version
+"${RUN[@]}" "$STAGE/usr/bin/studiocraft" --version
 echo "==> fertig"
 ls -lh "$DIST"
