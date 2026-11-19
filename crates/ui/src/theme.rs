@@ -74,6 +74,9 @@ pub struct Tokens {
     pub meter_yellow: Color32,
     pub meter_red: Color32,
     pub fader_track: Color32,
+    /// Namensfeld der Kanalzüge von Eingangs- und Ausgangsbussen im Mixer.
+    pub bus_input: Color32,
+    pub bus_output: Color32,
     pub strip_bg: Color32,
     // key editor
     pub key_white: Color32,
@@ -127,6 +130,8 @@ impl Tokens {
         meter_yellow: rgb(0xe6d23c),
         meter_red: rgb(0xf0452e),
         fader_track: rgb(0x0c0c0c),
+        bus_input: rgb(0x7fa37a),
+        bus_output: rgb(0x8f97a8),
         strip_bg: rgb(0x303030),
         key_white: rgb(0xe4e4e4),
         key_black: rgb(0x1c1c1c),
@@ -178,6 +183,8 @@ impl Tokens {
         meter_yellow: rgb(0xc9ad1c),
         meter_red: rgb(0xd1321c),
         fader_track: rgb(0x8c8c8c),
+        bus_input: rgb(0x9cc296),
+        bus_output: rgb(0xaab2c4),
         strip_bg: rgb(0xc8c8c8),
         key_white: rgb(0xf6f6f6),
         key_black: rgb(0x292929),

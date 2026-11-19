@@ -100,6 +100,62 @@ pub(crate) fn update_meters(w: &mut ProjectWindow, dt: f32) {
     for c in 0..2 {
         w.master_meter[c] = master[c].max(w.master_meter[c] * fall);
     }
+    update_bus_meters(w, fall);
+}
+
+/// Ein- und Ausgangsbusse: Pegel der Eingangskanalzüge an den Eingang geben, Spitzenwerte
+/// abholen.
+fn update_bus_meters(w: &mut ProjectWindow, fall: f32) {
+    use studiocraft_engine::MAX_INPUT_CHANNELS;
+    let io = &w.project.io;
+    let fresh_out: Vec<[f32; 2]> = (0..io.outputs.len())
+        .map(|k| {
+            w.transport
+                .as_ref()
+                .map_or([0.0; 2], |t| t.meters.take_output(k))
+        })
+        .collect();
+    let mut fresh_in = vec![[0.0f32; 2]; io.inputs.len()];
+    if let Some(input) = &w.input {
+        let levels = &input.levels;
+        // Gerätekanäle ohne Eingangsbus bleiben bei 1.
+        let mut gains = [1.0f32; MAX_INPUT_CHANNELS];
+        let mut peaks = [0.0f32; MAX_INPUT_CHANNELS];
+        for (c, p) in peaks.iter_mut().enumerate() {
+            *p = levels.take(c);
+        }
+        for (b, fresh) in io.inputs.iter().zip(fresh_in.iter_mut()) {
+            let first = usize::from(b.first);
+            let right = if b.stereo { first + 1 } else { first };
+            let gain = studiocraft_project::db_to_gain(b.gain_db);
+            for ch in [first, right] {
+                if let Some(g) = gains.get_mut(ch) {
+                    *g = gain;
+                }
+            }
+            *fresh = [
+                peaks.get(first).copied().unwrap_or(0.0),
+                peaks.get(right).copied().unwrap_or(0.0),
+            ];
+        }
+        for (c, &g) in gains.iter().enumerate() {
+            if levels.gain(c) != g {
+                levels.set_gain(c, g);
+            }
+        }
+    }
+    for (shown, fresh) in [
+        (&mut w.input_meters, fresh_in),
+        (&mut w.output_meters, fresh_out),
+    ] {
+        shown.resize(fresh.len(), [0.0; 2]);
+        for (s, f) in shown.iter_mut().zip(fresh) {
+            for c in 0..2 {
+                let f = if f[c].is_finite() { f[c] } else { 0.0 };
+                s[c] = f.max(s[c] * fall);
+            }
+        }
+    }
 }
 
 /// Peak-Hold-Werte des Kanals `k` (beide Seiten).
@@ -148,7 +204,17 @@ pub(crate) fn show(w: &mut ProjectWindow, ui: &mut Ui) {
             changed |= channel_list(w, ui, height);
             ui.separator();
         }
-        let master_w = STRIP_W + 16.0;
+        let gap = ui.spacing().item_spacing.x;
+        if w.mixer_io && !w.project.io.inputs.is_empty() {
+            changed |= io_strips(w, ui, height, false);
+            ui.separator();
+        }
+        let extra_outputs = if w.mixer_io {
+            w.project.io.outputs.len().saturating_sub(1)
+        } else {
+            0
+        };
+        let master_w = (STRIP_W + gap) * (1 + extra_outputs) as f32 + 16.0;
         let tracks_w = (ui.available_width() - master_w).max(NARROW_W);
         ui.allocate_ui_with_layout(
             vec2(tracks_w, height),
@@ -249,10 +315,19 @@ pub(crate) fn show(w: &mut ProjectWindow, ui: &mut Ui) {
             },
         );
         ui.separator();
+        if extra_outputs > 0 {
+            changed |= io_strips(w, ui, height, true);
+        }
         let n = w.project.tracks.len();
+        let main_name = w
+            .project
+            .io
+            .outputs
+            .first()
+            .map_or_else(|| "Ausgang".to_owned(), |b| b.name.clone());
         let master = Strip {
             id: usize::MAX,
-            name: "Ausgang",
+            name: &main_name,
             color: Color32::from_gray(150),
             selected: false,
             volume_db: &mut w.project.master_db,
@@ -281,6 +356,56 @@ pub(crate) fn show(w: &mut ProjectWindow, ui: &mut Ui) {
     }
 }
 
+/// Kanalzüge der Eingangsbusse (`outputs == false`) oder der weiteren Ausgangsbusse (ohne
+/// den Hauptmix, der hat den Ausgangsfader des Projekts): Pegel, bei Ausgängen Mute.
+fn io_strips(w: &mut ProjectWindow, ui: &mut Ui, height: f32, outputs: bool) -> bool {
+    let mut changed = false;
+    let rack_space = w.mixer_rack;
+    let (buses, meters, skip) = if outputs {
+        (&mut w.project.io.outputs, &w.output_meters, 1)
+    } else {
+        (&mut w.project.io.inputs, &w.input_meters, 0)
+    };
+    let tokens = crate::theme::tokens(ui.ctx());
+    for (k, bus) in buses.iter_mut().enumerate().skip(skip) {
+        let meter = meters.get(k).copied().unwrap_or_default();
+        // Eigene Id-Bereiche unterhalb des Hauptmixes (usize::MAX).
+        let id = if outputs {
+            usize::MAX - 1 - k
+        } else {
+            usize::MAX - 1 - studiocraft_project::MAX_IO_BUSES - k
+        };
+        let name = bus.name.clone();
+        let strip = Strip {
+            id,
+            name: &name,
+            color: if outputs {
+                tokens.bus_output
+            } else {
+                tokens.bus_input
+            },
+            selected: false,
+            volume_db: &mut bus.gain_db,
+            pan: None,
+            pan_mode: None,
+            mute: outputs.then_some(&mut bus.mute),
+            solo: None,
+            solo_defeat: None,
+            record: None,
+            monitor: None,
+            button_row: true,
+            width: STRIP_W,
+            rack: None,
+            rack_space,
+            meter,
+            hold: meter,
+            clipped: None,
+        };
+        changed |= strip.show(ui, height).changed;
+    }
+    changed
+}
+
 /// Kopfzeile des Mixers: Kanalliste, Rack, Breite aller Kanäle, gespeicherte Ansichten.
 fn header(w: &mut ProjectWindow, ui: &mut Ui) -> bool {
     let mut changed = false;
@@ -289,6 +414,8 @@ fn header(w: &mut ProjectWindow, ui: &mut Ui) -> bool {
             .on_hover_text("Liste aller Kanäle mit Sichtbarkeit");
         ui.toggle_value(&mut w.mixer_rack, "Rack")
             .on_hover_text("Inserts, EQ und Sends über den Fadern");
+        ui.toggle_value(&mut w.mixer_io, "Ein-/Ausgänge")
+            .on_hover_text("Eingangskanäle links, Ausgangsbusse rechts");
         ui.separator();
         for (label, narrow) in [("Alle breit", false), ("Alle schmal", true)] {
             if ui.button(label).clicked() {
@@ -608,6 +735,10 @@ impl Strip<'_> {
                 }
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 2.0;
+                    if self.button_row {
+                        // Gleiche Höhe in jedem Kanalzug, mit und ohne M/S.
+                        ui.allocate_exact_size(vec2(1.0, crate::icons::BUTTON), Sense::hover());
+                    }
                     if let Some(m) = self.mute {
                         changed |= crate::icons::state_toggle(
                             ui,

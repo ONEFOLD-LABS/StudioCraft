@@ -39,7 +39,7 @@ pub use clip::{AudioClip, ClipError};
 pub use core::{Command, EngineControl, EngineCore, EngineStatus, engine};
 pub use input::{AudioInput, InputInfo, PreparedInput, Recorder, Recording};
 pub use inserts::{Insert, InsertChain};
-pub use meters::{MAX_METERED_TRACKS, Meters};
+pub use meters::{InputLevels, MAX_INPUT_CHANNELS, MAX_METERED_TRACKS, Meters};
 pub use monitor::MonitorInput;
 pub use output::{AudioOutput, DeviceChoice, OutputInfo, PreparedOutput, device_names};
 pub use song::{PlayEvent, PlayNote, PlayTrack, Song};
