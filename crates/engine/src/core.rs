@@ -1111,8 +1111,9 @@ impl EngineCore {
                     Output::Nowhere => None,
                 };
                 if let Some(target) = target {
+                    let g = track.out_gain.unwrap_or(1.0);
                     for (o, t) in target.iter_mut().zip(tmp.iter()) {
-                        *o += t;
+                        *o += t * g;
                     }
                 }
             }
@@ -1157,6 +1158,20 @@ impl EngineCore {
             pr = pr.max(o[1].abs());
         }
         self.meters.feed_master(pl, pr);
+
+        // Weitere Ausgangsbusse: Kanalzug-Pegel (stumm = 0) und Pegelanzeige.
+        let valid = self.last_frames * 2;
+        for (k, bus) in self.hw_out.iter_mut().enumerate() {
+            let gain = self.song.output_gains.get(k + 1).copied().unwrap_or(1.0);
+            let (mut bl, mut br) = (0.0f32, 0.0f32);
+            for o in bus[..valid].chunks_exact_mut(2) {
+                o[0] *= gain;
+                o[1] *= gain;
+                bl = bl.max(o[0].abs());
+                br = br.max(o[1].abs());
+            }
+            self.meters.feed_output(k + 1, bl, br);
+        }
 
         // Vorhören hinter dem Ausgangsfader, unabhängig vom Transport.
         if let Some((samples, at)) = &mut self.preview {
@@ -1292,6 +1307,7 @@ mod tests {
                 midi_ports: Vec::new(),
                 click: Default::default(),
                 outputs: Vec::new(),
+                output_gains: Vec::new(),
             })));
             ctl.send(Command::Play);
             let mut out = [0.0f32; 8];
@@ -1451,6 +1467,7 @@ mod tests {
             midi_ports: Vec::new(),
             click: Default::default(),
             outputs: Vec::new(),
+            output_gains: Vec::new(),
         };
         ctl.send(Command::SetSong(Arc::new(song)));
         crate::monitor::push_frames(&mut tx, 2, [0.1, 0.8, 0.2, 0.6].into_iter());
@@ -1466,6 +1483,7 @@ mod tests {
             midi_ports: Vec::new(),
             click: Default::default(),
             outputs: Vec::new(),
+            output_gains: Vec::new(),
         };
         ctl.send(Command::SetSong(Arc::new(song)));
         crate::monitor::push_frames(&mut tx, 2, [0.1, 0.8].into_iter());
@@ -1983,6 +2001,64 @@ mod tests {
         assert!(core.hw_block(1).iter().all(|&v| (v - 0.5).abs() < 1e-6));
         assert!(core.hw_block(2).iter().all(|&v| v == 0.0));
         assert!(core.hw_block(99).is_empty());
+    }
+
+    #[test]
+    fn output_bus_strips_scale_their_bus_and_report_peaks() {
+        use crate::song::{Output, PlayEvent, PlayTrack};
+        use std::sync::Arc;
+        let samples: Arc<[f32]> = vec![0.5f32; 2 * 64].into();
+        let run = |gains: Vec<f32>| {
+            let song = Song {
+                tracks: vec![PlayTrack {
+                    gain_l: 1.0,
+                    gain_r: 1.0,
+                    output: Output::Hw(1),
+                    events: vec![PlayEvent::new(0, 64, 0, samples.clone())],
+                    ..PlayTrack::default()
+                }],
+                master: 1.0,
+                outputs: vec![(0, true), (2, true)],
+                output_gains: gains,
+                ..Song::default()
+            };
+            let (mut core, mut ctl) = engine(48_000, TempoMap::default());
+            ctl.send(Command::SetSong(Arc::new(song)));
+            ctl.send(Command::Play);
+            core.process(&mut [0.0f32; 2 * 32]);
+            (core.hw_block(1).to_vec(), ctl.meters.take_output(1))
+        };
+        let (block, peaks) = run(vec![1.0, 0.5]);
+        assert!(block.iter().all(|&v| (v - 0.25).abs() < 1e-6), "{block:?}");
+        assert_eq!(peaks, [0.25, 0.25]);
+        let (block, peaks) = run(vec![1.0, 0.0]);
+        assert!(block.iter().all(|&v| v == 0.0), "muted bus is silent");
+        assert_eq!(peaks, [0.0, 0.0]);
+        let (block, _) = run(Vec::new());
+        assert!(
+            block.iter().all(|&v| (v - 0.5).abs() < 1e-6),
+            "missing gain = 1"
+        );
+    }
+
+    #[test]
+    fn song_takes_bus_strip_gain_and_mute_from_the_project() {
+        let mut p = studiocraft_project::Project::default();
+        let a = p.io.add(true, true).unwrap_or_default();
+        let b = p.io.add(true, true).unwrap_or_default();
+        for bus in &mut p.io.outputs {
+            if bus.id == a {
+                bus.gain_db = -6.0;
+            }
+            if bus.id == b {
+                bus.mute = true;
+            }
+        }
+        let song = Song::build(&p, &Default::default(), 48_000);
+        assert_eq!(song.output_gains.len(), 3);
+        assert_eq!(song.output_gains[0], 1.0);
+        assert!((song.output_gains[1] - studiocraft_project::db_to_gain(-6.0)).abs() < 1e-6);
+        assert_eq!(song.output_gains[2], 0.0);
     }
 
     /// Projekt mit einer Audio-Spur, deren Clip konstant 1,0 liefert, plus Bussen.

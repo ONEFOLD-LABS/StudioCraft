@@ -134,11 +134,14 @@ impl ProjectWindow {
             .collect();
         let rate = self.sample_rate;
         let mut song = Song::build(&project, &samples, rate);
+        let bus_gains = song.output_gains.clone();
         for t in &mut song.tracks {
             t.monitor = None;
-            // Weitere Ausgangsbusse landen im Gerenderten auf der Summe.
-            if matches!(t.output, studiocraft_engine::song::Output::Hw(_)) {
+            // Weitere Ausgangsbusse landen im Gerenderten auf der Summe, mit dem Pegel (und
+            // Mute) ihres Kanalzugs.
+            if let studiocraft_engine::song::Output::Hw(k) = t.output {
                 t.output = studiocraft_engine::song::Output::Master;
+                t.out_gain = Some(bus_gains.get(k).copied().unwrap_or(1.0));
             }
         }
         // Frische Plugin-Ketten für alle klingenden Spuren.

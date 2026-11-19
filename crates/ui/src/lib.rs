@@ -191,6 +191,12 @@ pub struct ProjectWindow {
     /// Mixer: Kanalliste und Rack eingeblendet; Name für eine neue Ansicht.
     mixer_list: bool,
     mixer_rack: bool,
+    /// Kanalzüge der Ein- und Ausgangsbusse im Mixer (links Eingänge, rechts Ausgänge).
+    mixer_io: bool,
+    /// Pegelanzeige je Eingangsbus und je Ausgangsbus (Platz 0: Hauptmix, siehe
+    /// `master_meter`).
+    input_meters: Vec<[f32; 2]>,
+    output_meters: Vec<[f32; 2]>,
     mixer_view_name: String,
     /// Peak-Hold je Spur und Kanal (Wert, Alter in Sekunden) und Übersteuerung
     /// (bis zum Klick); letzter Eintrag: Ausgangsbus.
@@ -359,6 +365,9 @@ impl ProjectWindow {
             master_meter: [0.0; 2],
             mixer_list: false,
             mixer_rack: false,
+            mixer_io: true,
+            input_meters: Vec::new(),
+            output_meters: Vec::new(),
             mixer_view_name: String::new(),
             meter_hold: Vec::new(),
             clipped: Vec::new(),
@@ -3332,6 +3341,41 @@ mod tests {
     }
 
     #[test]
+    fn render_offline_applies_the_output_bus_strip() {
+        let (mut w, _) = one_event_window();
+        let out = w.project.io.add(true, true).unwrap_or_default();
+        w.project.tracks[0].out_bus = Some(out);
+        let range = w.render_range(0).unwrap_or_default();
+        let spec = || render::RenderSpec {
+            target: render::RenderTarget::Main,
+            range,
+            with_channel: true,
+            inserts: true,
+        };
+        let peak = |w: &mut ProjectWindow| {
+            w.render_offline(spec())
+                .unwrap_or_default()
+                .iter()
+                .fold(0.0f32, |m, s| m.max(s.abs()))
+        };
+        let full = peak(&mut w);
+        assert!(full > 0.01, "the bus lands on the main mix: {full}");
+        let set = |w: &mut ProjectWindow, db: f32, mute: bool| {
+            for b in &mut w.project.io.outputs {
+                if b.id == out {
+                    (b.gain_db, b.mute) = (db, mute);
+                }
+            }
+        };
+        set(&mut w, -6.0, false);
+        let half = peak(&mut w);
+        let want = full * studiocraft_project::db_to_gain(-6.0);
+        assert!((half - want).abs() < 1e-3, "{half} vs {want}");
+        set(&mut w, 0.0, true);
+        assert_eq!(peak(&mut w), 0.0, "muted bus is silent");
+    }
+
+    #[test]
     fn render_offline_runs_an_instrument_plugin_in_its_own_thread() {
         let mut w = ProjectWindow::new(Project::default(), None, String::new());
         // A synthesizer sounds without content; samplers (e.g. LSP) stay silent unloaded.
@@ -5390,6 +5434,50 @@ mod tests {
         h.run_steps(2);
         assert_ne!(h.state().project.tracks[0].eq.on, eq_before);
         assert!(h.query_by_label(&format!("Lautstärke {first}")).is_some());
+    }
+
+    #[test]
+    fn mixer_shows_input_and_output_bus_strips() {
+        let (mut w, _) = one_event_window();
+        let out = w.project.io.add(true, true).unwrap_or_default();
+        w.project.io.add(false, false);
+        w.show_lower = true;
+        w.lower = LowerZone::Mixer;
+        w.show_inspector = false;
+        let mut h = window_harness(w);
+        h.run_steps(2);
+        h.get_by_label("Lautstärke Eingang 1/2");
+        h.get_by_label("Lautstärke Eingang 3");
+        h.get_by_label("Lautstärke Ausgang 3/4");
+        h.get_by_label("Lautstärke Stereo Out");
+        // The last mute button belongs to the extra output bus (the main mix has none).
+        h.get_all_by_label("M").last().unwrap().click();
+        h.run_steps(2);
+        let bus = h.state().project.io.output(out).cloned();
+        assert!(bus.is_some_and(|b| b.mute));
+        h.state_mut().undo();
+        assert!(
+            h.state().project.io.output(out).is_some_and(|b| !b.mute),
+            "undoable"
+        );
+        // The header toggle hides the bus strips; the main mix stays.
+        h.get_by_label("Ein-/Ausgänge").click();
+        h.run_steps(2);
+        assert!(h.query_by_label("Lautstärke Eingang 1/2").is_none());
+        assert!(h.query_by_label("Lautstärke Ausgang 3/4").is_none());
+        h.get_by_label("Lautstärke Stereo Out");
+    }
+
+    #[test]
+    fn renders_mixer_io_strips() {
+        shot("mixer-ein-ausgaenge", |w| {
+            w.show_lower = true;
+            w.lower = LowerZone::Mixer;
+            w.project.io.add(false, true);
+            w.project.io.add(true, true);
+            w.input_meters = vec![[0.5, 0.4], [0.1, 0.2]];
+            w.output_meters = vec![[0.0, 0.0], [0.6, 0.5]];
+        });
     }
 
     #[test]

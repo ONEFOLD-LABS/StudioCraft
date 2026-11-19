@@ -71,6 +71,10 @@ pub struct PlayTrack {
     /// Pan-Modus „Stereo kombiniert“: beide Kanäle mischen über die Matrix
     /// `[ll, lr, rl, rr]` (samt Lautstärke) statt über `gain_l`/`gain_r`.
     pub pan_mix: Option<[f32; 4]>,
+    /// Zusätzlicher Faktor beim Summieren in das Ausgangsziel (nach Fader, Pan, Anzeige und
+    /// Sends). `None` = 1. Das Offline-Rendern legt so den Pegel eines Ausgangsbusses auf
+    /// Spuren, die es auf die Summe umleitet.
+    pub out_gain: Option<f32>,
     /// Index der Projektspur, für die Pegelanzeige.
     pub slot: usize,
     /// Nach `start` sortiert.
@@ -160,6 +164,9 @@ pub struct Song {
     pub click: studiocraft_project::ClickSettings,
     /// Ausgangsbusse: (erster Hardware-Kanal, Stereo); Platz 0 ist der Hauptmix.
     pub outputs: Vec<(u16, bool)>,
+    /// Pegel (linear) der Ausgangsbusse wie [`Self::outputs`]; Platz 0 (Hauptmix) nutzt
+    /// stattdessen [`Self::master`]. Fehlende Plätze gelten als 1.
+    pub output_gains: Vec<f32>,
 }
 
 impl Default for Song {
@@ -172,6 +179,7 @@ impl Default for Song {
             midi_ports: Vec::new(),
             click: Default::default(),
             outputs: Vec::new(),
+            output_gains: Vec::new(),
         }
     }
 }
@@ -195,6 +203,7 @@ impl Song {
             midi_ports: Vec::new(),
             click: Default::default(),
             outputs: Vec::new(),
+            output_gains: Vec::new(),
         }
     }
 
@@ -399,6 +408,12 @@ impl Song {
                 .outputs
                 .iter()
                 .map(|b| (b.first, b.stereo))
+                .collect(),
+            output_gains: project
+                .io
+                .outputs
+                .iter()
+                .map(|b| if b.mute { 0.0 } else { db_to_gain(b.gain_db) })
                 .collect(),
         };
         song.route(project);
@@ -667,6 +682,7 @@ mod tests {
             midi_ports: Vec::new(),
             click: Default::default(),
             outputs: Vec::new(),
+            output_gains: Vec::new(),
         };
         let mut out = vec![0.0; 16];
         song.mix(&mut out, 0, 8);
@@ -688,6 +704,7 @@ mod tests {
             midi_ports: Vec::new(),
             click: Default::default(),
             outputs: Vec::new(),
+            output_gains: Vec::new(),
         };
         let mut out = vec![0.0; 8];
         song.mix(&mut out, 12, 4);
@@ -711,6 +728,7 @@ mod tests {
             midi_ports: Vec::new(),
             click: Default::default(),
             outputs: Vec::new(),
+            output_gains: Vec::new(),
         };
         let mut out = vec![0.0; 16];
         song.mix(&mut out, 0, 8);
@@ -736,6 +754,7 @@ mod tests {
             midi_ports: Vec::new(),
             click: Default::default(),
             outputs: Vec::new(),
+            output_gains: Vec::new(),
         };
         let mut out = vec![0.0; 16];
         song.mix(&mut out, 0, 8);
@@ -768,6 +787,7 @@ mod tests {
             midi_ports: Vec::new(),
             click: Default::default(),
             outputs: Vec::new(),
+            output_gains: Vec::new(),
         };
         let mut out = vec![0.0; 8];
         song.mix(&mut out, 0, 4);
@@ -795,6 +815,7 @@ mod tests {
             midi_ports: Vec::new(),
             click: Default::default(),
             outputs: Vec::new(),
+            output_gains: Vec::new(),
         };
         let mut out = vec![0.0; 24];
         song.mix(&mut out, 0, 12);
