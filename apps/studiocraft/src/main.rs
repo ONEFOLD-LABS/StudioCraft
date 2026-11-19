@@ -1,6 +1,18 @@
 //! StudioCraft – Desktop-App (Prototyp des Projektfensters).
 //!
 //! Aufruf: `studiocraft [datei.wav …] [--tracks <n>] [--audio-host <name>]`
+// Kein unwrap/expect/panic außerhalb von Tests (AGENTS.md „Robustness“, Issue #49).
+#![cfg_attr(
+    not(test),
+    deny(
+        clippy::unwrap_used,
+        clippy::expect_used,
+        clippy::panic,
+        clippy::todo,
+        clippy::unimplemented,
+        clippy::unreachable
+    )
+)]
 
 use std::{path::Path, process::ExitCode};
 

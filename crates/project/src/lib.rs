@@ -3,6 +3,18 @@
 //! Siehe `docs/spec.md`, Abschnitt „Begriffe und Datenmodell“. Zeitangaben
 //! werden tempo-unabhängig in Ticks gespeichert und erst über die
 //! [`TempoMap`] in Sekunden umgerechnet.
+// Kein unwrap/expect/panic außerhalb von Tests (AGENTS.md „Robustness“, Issue #49).
+#![cfg_attr(
+    not(test),
+    deny(
+        clippy::unwrap_used,
+        clippy::expect_used,
+        clippy::panic,
+        clippy::todo,
+        clippy::unimplemented,
+        clippy::unreachable
+    )
+)]
 
 pub mod automation;
 pub mod copies;
@@ -12,6 +24,7 @@ pub mod folders;
 pub mod markers;
 pub mod model;
 pub mod quantize;
+pub mod sanitize;
 pub mod time;
 
 pub use automation::{AutoParam, AutoPoint, AutomationLane};

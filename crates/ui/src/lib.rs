@@ -3,6 +3,18 @@
 //!
 //! Prototyp-Stand: Projektfenster mit Werkzeugzeile, Inspector, Spurliste,
 //! Lineal, Event-Anzeige und Transportleiste.
+// Kein unwrap/expect/panic außerhalb von Tests (AGENTS.md „Robustness“, Issue #49).
+#![cfg_attr(
+    not(test),
+    deny(
+        clippy::unwrap_used,
+        clippy::expect_used,
+        clippy::panic,
+        clippy::todo,
+        clippy::unimplemented,
+        clippy::unreachable
+    )
+)]
 
 mod automation_panel;
 mod automation_write;

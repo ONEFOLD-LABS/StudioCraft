@@ -5,6 +5,18 @@
 //! - Hauptthread: Bibliothek laden, Plugin erzeugen, aktivieren, deaktivieren,
 //!   zerstören, Parameterliste lesen.
 //! - Audio-Thread: `start_processing`, `process`, `stop_processing`.
+// Kein unwrap/expect/panic außerhalb von Tests (AGENTS.md „Robustness“, Issue #49).
+#![cfg_attr(
+    not(test),
+    deny(
+        clippy::unwrap_used,
+        clippy::expect_used,
+        clippy::panic,
+        clippy::todo,
+        clippy::unimplemented,
+        clippy::unreachable
+    )
+)]
 
 #[cfg(not(target_arch = "wasm32"))]
 mod clap;

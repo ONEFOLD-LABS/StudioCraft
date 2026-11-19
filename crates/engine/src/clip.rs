@@ -16,6 +16,21 @@ pub enum ClipError {
     UnsupportedChannels(u16),
     Io(std::io::Error),
     Decode(String),
+    /// Abtastrate außerhalb von [`SAMPLE_RATES`].
+    UnsupportedRate(u32),
+    /// Bittiefe, die es nicht gibt (WAV: 1–32 Bit Integer).
+    UnsupportedBits(u16),
+}
+
+/// Abtastraten, die ein Clip haben darf; darunter oder darüber ist die Datei kaputt.
+pub const SAMPLE_RATES: std::ops::RangeInclusive<u32> = 1_000..=768_000;
+
+fn check_rate(rate: u32) -> Result<u32, ClipError> {
+    if SAMPLE_RATES.contains(&rate) {
+        Ok(rate)
+    } else {
+        Err(ClipError::UnsupportedRate(rate))
+    }
 }
 
 impl fmt::Display for ClipError {
@@ -25,6 +40,8 @@ impl fmt::Display for ClipError {
             Self::UnsupportedChannels(n) => write!(f, "{n} Kanäle werden nicht unterstützt"),
             Self::Io(e) => write!(f, "Datei nicht lesbar: {e}"),
             Self::Decode(e) => write!(f, "Audioformat nicht lesbar: {e}"),
+            Self::UnsupportedRate(r) => write!(f, "Abtastrate {r} Hz wird nicht unterstützt"),
+            Self::UnsupportedBits(b) => write!(f, "{b} Bit werden nicht unterstützt"),
         }
     }
 }
@@ -50,6 +67,7 @@ impl AudioClip {
             .map(str::to_ascii_lowercase);
         let (_, buf) = craft_audio::decode(&bytes, ext.as_deref())
             .map_err(|e| ClipError::Decode(e.to_string()))?;
+        let sample_rate = check_rate(buf.sample_rate)?;
         let l = buf
             .channels
             .first()
@@ -57,7 +75,7 @@ impl AudioClip {
         let r = buf.channels.get(1).unwrap_or(l);
         let samples: Vec<f32> = l.iter().zip(r).flat_map(|(&a, &b)| [a, b]).collect();
         Ok(Self {
-            sample_rate: buf.sample_rate,
+            sample_rate,
             samples: samples.into(),
         })
     }
@@ -73,6 +91,12 @@ impl AudioClip {
         let spec = reader.spec();
         if !(1..=2).contains(&spec.channels) {
             return Err(ClipError::UnsupportedChannels(spec.channels));
+        }
+        check_rate(spec.sample_rate)?;
+        if spec.sample_format == hound::SampleFormat::Int
+            && !(1..=32).contains(&spec.bits_per_sample)
+        {
+            return Err(ClipError::UnsupportedBits(spec.bits_per_sample));
         }
         let raw: Vec<f32> = match spec.sample_format {
             hound::SampleFormat::Float => reader.into_samples::<f32>().collect::<Result<_, _>>()?,
@@ -103,7 +127,8 @@ impl AudioClip {
     /// Für den Durchstich gut genug; später übernimmt das ein hochwertiger
     /// Resampler (craft-audio).
     pub fn resampled(&self, rate: u32) -> Self {
-        if rate == self.sample_rate || self.samples.is_empty() {
+        if rate == self.sample_rate || self.samples.is_empty() || rate == 0 || self.sample_rate == 0
+        {
             return self.clone();
         }
         let src = &self.samples;
@@ -132,6 +157,72 @@ impl AudioClip {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn corrupt_wav_headers_and_truncated_files_give_errors_not_panics() {
+        let dir = std::env::temp_dir().join(format!("studiocraft-clip-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let good = dir.join("good.wav");
+        let spec = hound::WavSpec {
+            channels: 1,
+            sample_rate: 48_000,
+            bits_per_sample: 16,
+            sample_format: hound::SampleFormat::Int,
+        };
+        let mut w = hound::WavWriter::create(&good, spec).unwrap();
+        for i in 0..100i16 {
+            w.write_sample(i * 100).unwrap();
+        }
+        w.finalize().unwrap();
+        let bytes = std::fs::read(&good).unwrap();
+        let data = bytes.windows(4).position(|w| w == b"data").unwrap();
+        let patch = |at: usize, value: &[u8]| {
+            let mut b = bytes.clone();
+            b[at..at + value.len()].copy_from_slice(value);
+            b
+        };
+        let mut variants: Vec<(String, Vec<u8>)> = vec![
+            ("channels 0".into(), patch(22, &0u16.to_le_bytes())),
+            ("channels 9".into(), patch(22, &9u16.to_le_bytes())),
+            ("rate 0".into(), patch(24, &0u32.to_le_bytes())),
+            ("rate max".into(), patch(24, &u32::MAX.to_le_bytes())),
+            ("byte rate 0".into(), patch(28, &0u32.to_le_bytes())),
+            ("block align 0".into(), patch(32, &0u16.to_le_bytes())),
+            ("bits 0".into(), patch(34, &0u16.to_le_bytes())),
+            ("bits 64".into(), patch(34, &64u16.to_le_bytes())),
+            ("bits 200".into(), patch(34, &200u16.to_le_bytes())),
+            (
+                "data size max".into(),
+                patch(data + 4, &u32::MAX.to_le_bytes()),
+            ),
+            ("riff size 0".into(), patch(4, &0u32.to_le_bytes())),
+        ];
+        for cut in (0..bytes.len()).step_by(5) {
+            variants.push((format!("cut at {cut}"), bytes[..cut].to_vec()));
+        }
+        for (name, b) in &variants {
+            let path = dir.join("bad.wav");
+            std::fs::write(&path, b).unwrap();
+            for c in [AudioClip::load(&path), AudioClip::load_wav(&path)]
+                .into_iter()
+                .flatten()
+            {
+                assert!(SAMPLE_RATES.contains(&c.sample_rate), "{name}");
+                let _ = c.resampled(44_100).frames();
+            }
+        }
+        let rate0 = dir.join("rate0.wav");
+        std::fs::write(&rate0, &variants[2].1).unwrap();
+        assert!(AudioClip::load_wav(&rate0).is_err(), "rate 0 is rejected");
+        assert!(AudioClip::load(&rate0).is_err(), "rate 0 is rejected");
+        // A clip with a broken rate (built in code) still resamples without panicking.
+        let broken = AudioClip {
+            sample_rate: 0,
+            samples: vec![0.0; 8].into(),
+        };
+        assert_eq!(broken.resampled(48_000).frames(), 4);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn resample_keeps_duration_and_shape() {

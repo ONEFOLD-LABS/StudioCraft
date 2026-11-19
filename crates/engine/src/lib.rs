@@ -3,6 +3,18 @@
 //! Regel für alles, was im Audio-Thread läuft: keine Allokationen, keine
 //! Locks, keine Systemaufrufe. GUI und Engine sprechen nur über
 //! Message-Queues ([`Command`]) und atomare Statuswerte ([`EngineStatus`]).
+// Kein unwrap/expect/panic außerhalb von Tests (AGENTS.md „Robustness“, Issue #49).
+#![cfg_attr(
+    not(test),
+    deny(
+        clippy::unwrap_used,
+        clippy::expect_used,
+        clippy::panic,
+        clippy::todo,
+        clippy::unimplemented,
+        clippy::unreachable
+    )
+)]
 
 pub mod automation;
 pub mod clip;

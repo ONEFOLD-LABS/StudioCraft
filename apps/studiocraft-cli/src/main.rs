@@ -1,5 +1,17 @@
 //! Audio-Durchstich: spielt eine WAV-Datei mit Transport und Cycle ab.
 //! Läuft über cpal auf Linux, FreeBSD, Windows und macOS.
+// Kein unwrap/expect/panic außerhalb von Tests (AGENTS.md „Robustness“, Issue #49).
+#![cfg_attr(
+    not(test),
+    deny(
+        clippy::unwrap_used,
+        clippy::expect_used,
+        clippy::panic,
+        clippy::todo,
+        clippy::unimplemented,
+        clippy::unreachable
+    )
+)]
 
 use std::{
     io::{self, BufRead, Write},

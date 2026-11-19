@@ -439,16 +439,55 @@ impl Project {
 
     /// Fehlende oder doppelte Spur-Kennungen vergeben (ältere Dateien).
     pub fn ensure_track_ids(&mut self) {
+        self.fix_ids();
+    }
+
+    /// Eindeutige Ids unterhalb der Grenzen und Zähler dahinter, auch für fremde Dateien
+    /// (doppelte Ids, Ids nahe dem Maximum). Gibt zurück, wie viele Ids neu vergeben wurden.
+    pub(crate) fn fix_ids(&mut self) -> usize {
+        /// Grenzen, unter denen die Zähler nie überlaufen.
+        const MAX_TRACK_ID: TrackId = 1 << 24;
+        const MAX_EVENT_ID: EventId = 1 << 48;
+        let mut fixed = 0;
         let mut seen = std::collections::HashSet::new();
+        let ok = |id: TrackId| id != 0 && id < MAX_TRACK_ID;
+        let top = self.tracks.iter().map(|t| t.id).filter(|&id| ok(id)).max();
         self.next_track_id = self
             .next_track_id
-            .max(self.tracks.iter().map(|t| t.id).max().unwrap_or(0) + 1);
+            .min(MAX_TRACK_ID)
+            .max(top.map_or(1, |m| m + 1));
         for i in 0..self.tracks.len() {
-            if self.tracks[i].id == 0 || !seen.insert(self.tracks[i].id) {
+            let id = self.tracks[i].id;
+            if !ok(id) || !seen.insert(id) {
                 self.tracks[i].id = self.new_track_id();
                 seen.insert(self.tracks[i].id);
+                fixed += 1;
             }
         }
+        let mut seen = std::collections::HashSet::new();
+        let top = self
+            .tracks
+            .iter()
+            .flat_map(|t| &t.events)
+            .map(|e| e.id)
+            .filter(|&id| id != 0 && id < MAX_EVENT_ID)
+            .max();
+        self.next_id = self
+            .next_id
+            .clamp(1, MAX_EVENT_ID)
+            .max(top.map_or(1, |m| m + 1));
+        for t in 0..self.tracks.len() {
+            for e in 0..self.tracks[t].events.len() {
+                let id = self.tracks[t].events[e].id;
+                if id == 0 || id >= MAX_EVENT_ID || !seen.insert(id) {
+                    let new = self.next_event_id();
+                    self.tracks[t].events[e].id = new;
+                    seen.insert(new);
+                    fixed += 1;
+                }
+            }
+        }
+        fixed
     }
 
     pub fn track_index(&self, id: TrackId) -> Option<usize> {
