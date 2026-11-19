@@ -216,6 +216,11 @@ pub struct EngineCore {
     delays: Box<crate::delay::DelayBank>,
     /// Puffer für verzögerte Sends.
     send_tmp: Box<[f32]>,
+    /// Weitere Ausgangsbusse (Audio-Anschlüsse), je ein Stereo-Puffer; Platz `k - 1` gehört
+    /// zu `Output::Hw(k)`.
+    hw_out: Box<[Box<[f32]>]>,
+    /// Frames des zuletzt gerenderten Blocks (gültiger Teil von `hw_out`).
+    last_frames: usize,
     midi_in: rtrb::Consumer<MidiMsg>,
     midi_rec: rtrb::Producer<RecordedMidi>,
     /// Nachrichten an externe MIDI-Geräte, mit Fälligkeit (midi_out.rs).
@@ -301,6 +306,10 @@ pub fn engine(sample_rate: u32, tempo: TempoMap) -> (EngineCore, EngineControl) 
         delay_garbage: delay_tx,
         delays: Box::default(),
         send_tmp: vec![0.0; SCRATCH_FRAMES * 2].into_boxed_slice(),
+        hw_out: (1..studiocraft_project::MAX_IO_BUSES)
+            .map(|_| vec![0.0; SCRATCH_FRAMES * 2].into_boxed_slice())
+            .collect(),
+        last_frames: 0,
         midi_in: midi_rx,
         midi_rec: rec_tx,
         midi_out: out_tx,
@@ -596,6 +605,20 @@ impl EngineCore {
         }
     }
 
+    /// Ausgangsbusse des aktuellen Songs: (erster Hardware-Kanal, Stereo); Platz 0 ist der
+    /// Hauptmix (der Block aus [`Self::process`]).
+    pub fn output_layout(&self) -> &[(u16, bool)] {
+        &self.song.outputs
+    }
+
+    /// Stereo-Block des Ausgangsbusses `k` (ab 1) aus dem letzten [`Self::process`]; leer, wenn
+    /// es ihn nicht gibt oder der Block größer als der Puffer war.
+    pub fn hw_block(&self, k: usize) -> &[f32] {
+        self.hw_out
+            .get(k.wrapping_sub(1))
+            .map_or(&[][..], |b| &b[..self.last_frames * 2])
+    }
+
     /// Rendert einen Block verschachteltes Stereo. Echtzeitsicher:
     /// keine Allokation, kein Lock.
     pub fn process(&mut self, out: &mut [f32]) {
@@ -711,7 +734,12 @@ impl EngineCore {
         }
 
         out.fill(0.0);
-        let mut frames_left = (out.len() / 2) as u64;
+        let frames_total = out.len() / 2;
+        self.last_frames = frames_total.min(SCRATCH_FRAMES);
+        for b in self.hw_out.iter_mut() {
+            b[..self.last_frames * 2].fill(0.0);
+        }
+        let mut frames_left = frames_total as u64;
         let mut offset = 0usize;
         // Instrumente und Inserts laufen auch im Stopp weiter (Ausklingen, Live-Spiel).
         while frames_left > 0 {
@@ -1021,6 +1049,10 @@ impl EngineCore {
                 }
                 // Ausgang.
                 let target: Option<&mut [f32]> = match track.output {
+                    Output::Hw(k) => self
+                        .hw_out
+                        .get_mut(k.wrapping_sub(1))
+                        .and_then(|b| b.get_mut(offset..offset + n)),
                     Output::Master => Some(&mut dst[..]),
                     Output::Bus(b) => Some(&mut self.bus_bufs[b][..n]),
                     Output::Nowhere => None,
@@ -1206,6 +1238,7 @@ mod tests {
                 tempo: TempoMap::default(),
                 midi_ports: Vec::new(),
                 click: Default::default(),
+                outputs: Vec::new(),
             })));
             ctl.send(Command::Play);
             let mut out = [0.0f32; 8];
@@ -1317,6 +1350,7 @@ mod tests {
             tempo: TempoMap::default(),
             midi_ports: Vec::new(),
             click: Default::default(),
+            outputs: Vec::new(),
         };
         ctl.send(Command::SetSong(Arc::new(song)));
         crate::monitor::push_frames(&mut tx, 2, [0.1, 0.8, 0.2, 0.6].into_iter());
@@ -1331,6 +1365,7 @@ mod tests {
             tempo: TempoMap::default(),
             midi_ports: Vec::new(),
             click: Default::default(),
+            outputs: Vec::new(),
         };
         ctl.send(Command::SetSong(Arc::new(song)));
         crate::monitor::push_frames(&mut tx, 2, [0.1, 0.8].into_iter());
@@ -1813,6 +1848,41 @@ mod tests {
         assert_eq!(left[100], 1.0, "track 0 delayed by 100 frames");
         assert_eq!(left.iter().filter(|v| v.abs() > 0.0).count(), 2);
         assert_eq!(ctl.status.latency(), 100);
+    }
+
+    #[test]
+    fn a_track_on_another_output_bus_skips_the_main_mix() {
+        use crate::song::{Output, PlayEvent, PlayTrack};
+        use std::sync::Arc;
+        let samples: Arc<[f32]> = vec![0.5f32; 2 * 64].into();
+        let t = |slot, output| PlayTrack {
+            gain_l: 1.0,
+            gain_r: 1.0,
+            slot,
+            output,
+            events: vec![PlayEvent::new(0, 64, 0, samples.clone())],
+            ..PlayTrack::default()
+        };
+        let song = Song {
+            tracks: vec![t(0, Output::Master), t(1, Output::Hw(1))],
+            master: 1.0,
+            outputs: vec![(0, true), (2, true)],
+            ..Song::default()
+        };
+        let (mut core, mut ctl) = engine(48_000, TempoMap::default());
+        ctl.send(Command::SetSong(Arc::new(song)));
+        ctl.send(Command::Play);
+        let mut out = vec![0.0f32; 2 * 32];
+        core.process(&mut out);
+        assert!(
+            out.iter().all(|&v| (v - 0.5).abs() < 1e-6),
+            "main mix: only track 0"
+        );
+        assert_eq!(core.output_layout(), &[(0, true), (2, true)]);
+        assert_eq!(core.hw_block(1).len(), 64);
+        assert!(core.hw_block(1).iter().all(|&v| (v - 0.5).abs() < 1e-6));
+        assert!(core.hw_block(2).iter().all(|&v| v == 0.0));
+        assert!(core.hw_block(99).is_empty());
     }
 
     /// Projekt mit einer Audio-Spur, deren Clip konstant 1,0 liefert, plus Bussen.

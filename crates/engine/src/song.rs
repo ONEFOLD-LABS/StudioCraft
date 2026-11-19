@@ -102,6 +102,8 @@ pub enum Output {
     Master,
     /// Bus-Puffer einer Gruppe.
     Bus(usize),
+    /// Weiterer Ausgangsbus der Audio-Anschlüsse (Platz in [`Song::outputs`], ab 1).
+    Hw(usize),
     /// Ziel ist stummgeschaltet: Signal geht nirgendwohin.
     Nowhere,
 }
@@ -150,6 +152,8 @@ pub struct Song {
     pub midi_ports: Vec<String>,
     /// Metronom- und Vorzähler-Einstellungen des Projekts.
     pub click: studiocraft_project::ClickSettings,
+    /// Ausgangsbusse: (erster Hardware-Kanal, Stereo); Platz 0 ist der Hauptmix.
+    pub outputs: Vec<(u16, bool)>,
 }
 
 impl Default for Song {
@@ -161,6 +165,7 @@ impl Default for Song {
             tempo: TempoMap::default(),
             midi_ports: Vec::new(),
             click: Default::default(),
+            outputs: Vec::new(),
         }
     }
 }
@@ -183,6 +188,7 @@ impl Song {
             tempo: TempoMap::default(),
             midi_ports: Vec::new(),
             click: Default::default(),
+            outputs: Vec::new(),
         }
     }
 
@@ -288,8 +294,10 @@ impl Song {
                 let (gain_l, gain_r) = t.gains();
                 let pan_mix =
                     (t.pan_mode == studiocraft_project::PanMode::Combined).then(|| t.mix_matrix());
-                let monitor = (t.monitor && t.kind == TrackKind::Audio)
-                    .then_some((t.input.first, t.input.stereo));
+                let monitor = (t.monitor && t.kind == TrackKind::Audio).then(|| {
+                    let input = project.input_of(slot);
+                    (input.first, input.stereo)
+                });
                 let auto = crate::automation::TrackAuto::build(t, tempo, rate);
                 // MIDI-Spuren mit Ausgang: Port-Platz und Kanal.
                 let midi_out = (t.kind == TrackKind::Midi)
@@ -334,6 +342,12 @@ impl Song {
             tempo: project.tempo.clone(),
             midi_ports: ports,
             click: project.click,
+            outputs: project
+                .io
+                .outputs
+                .iter()
+                .map(|b| (b.first, b.stereo))
+                .collect(),
         };
         song.route(project);
         song
@@ -371,6 +385,15 @@ impl Song {
             t.output = pt.output.map_or(Output::Master, target);
             if t.output == Output::Bus(t.bus.unwrap_or(usize::MAX)) {
                 t.output = Output::Master; // Spur auf sich selbst: zur Summe
+            }
+            // Summe: auf einen weiteren Ausgangsbus statt auf den Hauptmix.
+            if t.output == Output::Master
+                && let Some(k) = pt
+                    .out_bus
+                    .and_then(|id| project.io.outputs.iter().position(|b| b.id == id))
+                    .filter(|&k| k > 0)
+            {
+                t.output = Output::Hw(k);
             }
             t.sends = pt
                 .sends
@@ -591,6 +614,7 @@ mod tests {
             tempo: TempoMap::default(),
             midi_ports: Vec::new(),
             click: Default::default(),
+            outputs: Vec::new(),
         };
         let mut out = vec![0.0; 16];
         song.mix(&mut out, 0, 8);
@@ -611,6 +635,7 @@ mod tests {
             tempo: TempoMap::default(),
             midi_ports: Vec::new(),
             click: Default::default(),
+            outputs: Vec::new(),
         };
         let mut out = vec![0.0; 8];
         song.mix(&mut out, 12, 4);
@@ -633,6 +658,7 @@ mod tests {
             tempo: TempoMap::default(),
             midi_ports: Vec::new(),
             click: Default::default(),
+            outputs: Vec::new(),
         };
         let mut out = vec![0.0; 16];
         song.mix(&mut out, 0, 8);
@@ -657,6 +683,7 @@ mod tests {
             tempo: TempoMap::default(),
             midi_ports: Vec::new(),
             click: Default::default(),
+            outputs: Vec::new(),
         };
         let mut out = vec![0.0; 16];
         song.mix(&mut out, 0, 8);
@@ -688,6 +715,7 @@ mod tests {
             tempo: TempoMap::default(),
             midi_ports: Vec::new(),
             click: Default::default(),
+            outputs: Vec::new(),
         };
         let mut out = vec![0.0; 8];
         song.mix(&mut out, 0, 4);
@@ -714,6 +742,7 @@ mod tests {
             tempo: TempoMap::default(),
             midi_ports: Vec::new(),
             click: Default::default(),
+            outputs: Vec::new(),
         };
         let mut out = vec![0.0; 24];
         song.mix(&mut out, 0, 12);

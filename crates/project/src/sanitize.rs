@@ -124,6 +124,19 @@ impl Project {
         sigs.sort_by_key(|e| e.bar);
         sigs.dedup_by_key(|e| e.bar);
         fix(*sigs != before);
+        let io = std::mem::take(&mut self.io).sanitized();
+        self.io = io;
+        // Verweise auf Busse, die es nicht (mehr) gibt.
+        for t in &mut self.tracks {
+            if t.input_bus.is_some_and(|id| self.io.input(id).is_none()) {
+                t.input_bus = None;
+            }
+            if t.out_bus
+                .is_some_and(|id| id == crate::MAIN_OUT || self.io.output(id).is_none())
+            {
+                t.out_bus = None;
+            }
+        }
         let click = self.click.sanitized();
 
         fix(click != self.click);
