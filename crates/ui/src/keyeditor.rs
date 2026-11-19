@@ -776,7 +776,6 @@ fn paint_grid(w: &ProjectWindow, p: &Painter, g: &KGeo, part_start: u64, part_en
         Color32::from_black_alpha(90),
     );
     // Feines Snap-Raster, darüber Zählzeit- und Taktlinien.
-    let bar = w.bar_ticks().max(1);
     let beat = w.beat_ticks().max(1);
     let t0 = g.tick(g.grid.left()).max(0.0);
     let t1 = g.tick(g.grid.right()).max(0.0);
@@ -786,39 +785,37 @@ fn paint_grid(w: &ProjectWindow, p: &Painter, g: &KGeo, part_start: u64, part_en
     for t in w.fine_grid_lines(t0, t1, ppq, beats) {
         p.vline(g.x(t), g.grid.y_range(), Stroke::new(1.0, v.faint_bg_color));
     }
-    let step = if beats { beat } else { bar };
-    let mut t = (t0 as u64 / step) * step;
-    while t as f64 <= t1 {
-        let col = if t % bar == 0 {
+    for (t, bar_no) in w.meter_lines(t0 as u64, t1 as u64, beats) {
+        let col = if bar_no.is_some() {
             v.widgets.noninteractive.bg_stroke.color
         } else {
             v.widgets.noninteractive.bg_stroke.color.gamma_multiply(0.5)
         };
         p.vline(g.x(t as f64), g.grid.y_range(), Stroke::new(1.0, col));
-        t += step;
     }
 }
 
 fn paint_ruler(w: &ProjectWindow, p: &Painter, g: &KGeo) {
     let v = p.ctx().global_style().visuals.clone();
     p.rect_filled(g.ruler, 0.0, v.faint_bg_color);
-    let bar = w.bar_ticks();
-    let mut b = g.tick(g.ruler.left()).max(0.0) as u64 / bar;
-    while (b * bar) as f64 <= g.tick(g.ruler.right()) {
-        let x = g.x((b * bar) as f64);
+    let t0 = g.tick(g.ruler.left()).max(0.0) as u64;
+    let t1 = g.tick(g.ruler.right()).max(0.0) as u64;
+    for (t, bar_no) in w.meter_lines(t0, t1, false) {
+        let x = g.x(t as f64);
         p.vline(
             x,
             g.ruler.y_range(),
             Stroke::new(1.0, v.widgets.noninteractive.bg_stroke.color),
         );
-        p.text(
-            pos2(x + 3.0, g.ruler.center().y),
-            Align2::LEFT_CENTER,
-            (b + 1).to_string(),
-            FontId::proportional(11.0),
-            v.text_color(),
-        );
-        b += 1;
+        if let Some(n) = bar_no {
+            p.text(
+                pos2(x + 3.0, g.ruler.center().y),
+                Align2::LEFT_CENTER,
+                n.to_string(),
+                FontId::proportional(11.0),
+                v.text_color(),
+            );
+        }
     }
 }
 

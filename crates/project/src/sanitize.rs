@@ -86,6 +86,18 @@ impl Project {
         ev.sort_by_key(|e| e.tick);
         ev.dedup_by_key(|e| e.tick);
         fix(*ev != before);
+        let before = self.tempo.signatures.clone();
+        let sigs = &mut self.tempo.signatures;
+        sigs.truncate(MAX_TEMPO_EVENTS);
+        sigs.retain(|e| e.bar >= 2 && e.bar <= MAX_TICKS / crate::TICKS_PER_QUARTER);
+        for e in sigs.iter_mut() {
+            let sane = e.signature().sane();
+            e.numerator = sane.numerator;
+            e.denominator = sane.denominator;
+        }
+        sigs.sort_by_key(|e| e.bar);
+        sigs.dedup_by_key(|e| e.bar);
+        fix(*sigs != before);
 
         for c in &mut self.pool {
             clamp!(
