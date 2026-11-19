@@ -500,8 +500,13 @@ impl ProjectWindow {
             ui.label(egui::RichText::new(format!("Latenz: {}", self.latency_text(lat))).weak());
         }
         let count = self.project.tracks[track].inserts.len();
+        let pre = usize::from(self.project.pre_fader_inserts);
         let mut remove = None;
         for k in 0..count {
+            // Grenze Pre/Post-Fader (Projekt-Voreinstellung, Menü Projekt).
+            if k == pre {
+                ui.weak("nach dem Fader");
+            }
             let slot = self.project.tracks[track].inserts[k].clone();
             ui.horizontal(|ui| {
                 let mut on = !slot.bypass;

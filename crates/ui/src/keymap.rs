@@ -41,6 +41,8 @@ pub(crate) enum Cmd {
     OpenEditorWindow,
     ToggleInspector,
     ToggleRightZone,
+    /// Dialog „Audio-Anschlüsse“.
+    AudioConnections,
     InsertMarker,
     CycleMarkerFromLocators,
     /// Zu Positionsmarker mit dieser Nummer (3–9).
@@ -406,6 +408,13 @@ pub(crate) const COMMANDS: &[CommandInfo] = &[
         "Rechte Zone",
         "Fenster",
         [k(A, Key::R)]
+    ),
+    cmd!(
+        Cmd::AudioConnections,
+        "view.audio_connections",
+        "Audio-Anschlüsse",
+        "Fenster",
+        [k(N, Key::F4)]
     ),
     cmd!(
         Cmd::PlayStop,
@@ -1052,6 +1061,7 @@ impl crate::ProjectWindow {
                 }
             }
             Cmd::ToggleRightZone => self.show_right = !self.show_right,
+            Cmd::AudioConnections => self.io_dialog = !self.io_dialog,
             Cmd::InsertMarker => self.insert_marker(),
             Cmd::CycleMarkerFromLocators => self.cycle_marker_from_locators(),
             Cmd::GotoMarker(id) => self.locate_marker(id),

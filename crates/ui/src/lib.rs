@@ -28,6 +28,7 @@ mod folders_ui;
 mod icons;
 mod infoline;
 mod inserts;
+mod io_ui;
 mod keyeditor;
 mod keymap;
 pub mod keypad;
@@ -40,6 +41,7 @@ mod midiout_ui;
 mod mixer;
 mod noteinfo;
 mod panel_undo;
+mod pre_ui;
 mod quantize;
 mod recording;
 mod render;
@@ -207,6 +209,11 @@ pub struct ProjectWindow {
     lanes_rect: egui::Rect,
     /// Projektdatei, unter der zuletzt gespeichert oder geöffnet wurde.
     project_path: Option<PathBuf>,
+    /// Dialog „Audio-Anschlüsse“ offen, Stand vor einer laufenden Eingabe darin, Kanäle des
+    /// Ausgabegeräts.
+    io_dialog: bool,
+    io_before: Option<Project>,
+    output_channels: u16,
     /// Latenzausgleich (Issue #51).
     latency: latency::LatencyState,
     /// Automatische Sicherung und Wiederherstellung (Issue #52).
@@ -359,6 +366,9 @@ impl ProjectWindow {
             drag_before: None,
             lanes_rect: egui::Rect::NOTHING,
             project_path: None,
+            io_dialog: false,
+            io_before: None,
+            output_channels: 2,
             latency: latency::LatencyState::default(),
             autosave: autosave::Autosave::new(prefs.autosave_minutes, prefs.autosave_keep),
             saved: None,
@@ -1030,6 +1040,7 @@ impl ProjectWindow {
         self.tool_palette(ui.ctx());
         self.key_commands_dialog(ui.ctx());
         self.repeat_dialog(ui.ctx());
+        self.io_dialog(ui.ctx());
         self.recovery_dialog(ui.ctx());
         self.fade_editor_dialog(ui.ctx());
         self.crossfade_editor_dialog(ui.ctx());
@@ -1253,7 +1264,6 @@ impl ProjectWindow {
             ui.weak("Keine Spur ausgewählt");
             return;
         };
-        let channels = self.input_channels();
         let track = &mut self.project.tracks[idx];
         // Kopf in Spurfarbe mit Name und Typ (docs/ui-parity.md, „Linke Zone“).
         let color = Color32::from_rgb(track.color[0], track.color[1], track.color[2]);
@@ -1410,20 +1420,8 @@ impl ProjectWindow {
         }
         if kind == TrackKind::Audio || channel {
             inspector_section(ui, "Routing", true, |ui| {
-                let track = &mut self.project.tracks[idx];
                 if kind == TrackKind::Audio {
-                    ui.horizontal(|ui| {
-                        let l = ui.label("Eingang");
-                        egui::ComboBox::from_id_salt(("eingang", idx))
-                            .selected_text(track.input.label())
-                            .show_ui(ui, |ui| {
-                                for opt in studiocraft_project::TrackInput::options(channels) {
-                                    ui.selectable_value(&mut track.input, opt, opt.label());
-                                }
-                            })
-                            .response
-                            .labelled_by(l.id);
-                    });
+                    self.input_ui(ui, idx);
                 }
                 if channel {
                     self.output_ui(ui, idx);
@@ -1435,6 +1433,9 @@ impl ProjectWindow {
         }
         if kind == TrackKind::Tempo {
             inspector_section(ui, "Tempo", true, |ui| self.tempo_track_ui(ui));
+        }
+        if channel {
+            inspector_section(ui, "Pre", false, |ui| self.pre_ui(ui, idx));
         }
         if kind == TrackKind::Instrument {
             inspector_section(ui, "Instrument", true, |ui| self.instrument_ui(ui, idx));
@@ -3442,6 +3443,65 @@ mod tests {
     }
 
     #[test]
+    fn audio_connections_dialog_adds_busses_tracks_use_them() {
+        let (mut w, _) = one_event_window();
+        w.selected_track = Some(0);
+        w.set_output_channels(4);
+        let mut h = window_harness(w);
+        h.key_press(Key::F4);
+        h.run_steps(2);
+        assert!(h.state().io_dialog, "F4 opens the dialog");
+        h.get_by_label("+ Mono-Eingang").click();
+        h.run_steps(2);
+        h.get_by_label("+ Stereo-Ausgang").click();
+        h.run_steps(2);
+        let io = h.state().project.io.clone();
+        assert_eq!(io.inputs.len(), 2);
+        assert_eq!(io.inputs[1].name, "Eingang 3");
+        assert_eq!(io.outputs.len(), 2);
+        assert_eq!(io.outputs[1].ports_label(), "3/4");
+        // The main mix cannot be removed.
+        assert!(
+            !h.state_mut()
+                .project
+                .remove_io_bus(true, studiocraft_project::MAIN_OUT)
+        );
+        // Inspector: the track takes the mono input and the new output bus.
+        let (inp, out) = (io.inputs[1].id, io.outputs[1].id);
+        h.state_mut().io_dialog = false;
+        h.run_steps(1);
+        h.get_by_label("Eingang").click();
+        h.run_steps(2);
+        h.get_by_label("Eingang 3 (3)").click();
+        h.run_steps(2);
+        assert_eq!(h.state().project.tracks[0].input_bus, Some(inp));
+        assert_eq!(
+            h.state().project.input_of(0),
+            studiocraft_project::TrackInput {
+                first: 2,
+                stereo: false
+            }
+        );
+        h.get_by_label("Ausgang").click();
+        h.run_steps(2);
+        h.get_all_by_label("Ausgang 3/4").last().unwrap().click();
+        h.run_steps(2);
+        assert_eq!(h.state().project.tracks[0].out_bus, Some(out));
+        // The song routes the track to output bus 1 (behind the main mix).
+        let w = h.state();
+        let song = studiocraft_engine::song::Song::build(&w.project, &Default::default(), 48_000);
+        assert_eq!(song.outputs, [(0, true), (2, true)]);
+        assert!(
+            song.tracks
+                .iter()
+                .all(|t| t.output == studiocraft_engine::song::Output::Hw(1))
+        );
+        // Undo: back to the main mix.
+        h.state_mut().undo();
+        assert_eq!(h.state().project.tracks[0].out_bus, None);
+    }
+
+    #[test]
     fn key_commands_can_be_reassigned_with_a_conflict_warning() {
         use keymap::Cmd;
         let (w, _) = one_event_window();
@@ -5152,6 +5212,27 @@ mod tests {
                     state: None,
                 });
         });
+    }
+
+    #[test]
+    fn pre_section_sets_filters_and_phase() {
+        let (mut w, _) = one_event_window();
+        w.selected_track = Some(0);
+        w.show_lower = false;
+        let mut h = window_harness(w);
+        h.run_steps(2);
+        h.get_by_label("Pre").click();
+        h.run_steps(2);
+        h.get_by_label("Hochpass").click();
+        h.run_steps(2);
+        h.get_by_label("Phase umkehren").click();
+        h.run_steps(2);
+        let t = &h.state().project.tracks[0];
+        assert_eq!(t.pre_hpf, Some(80.0));
+        assert!(t.phase_invert);
+        assert_eq!(t.pre_lpf, None);
+        h.state_mut().undo();
+        assert!(!h.state().project.tracks[0].phase_invert, "undoable");
     }
 
     #[test]

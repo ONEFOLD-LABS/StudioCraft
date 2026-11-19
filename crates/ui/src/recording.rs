@@ -601,7 +601,8 @@ impl ProjectWindow {
 
         for track in self.armed_tracks() {
             let t = &self.project.tracks[track];
-            let samples = input::extract_channels(rec, t.input.first, t.input.stereo)?;
+            let inp = self.project.input_of(track);
+            let samples = input::extract_channels(rec, inp.first, inp.stereo)?;
             let file = unique_name(&dir, &format!("{stem} - {}.wav", sanitize(&t.name)));
             export::write_wav_f32(&samples, rec.sample_rate, &file)?;
             let clip = AudioClip {

@@ -127,6 +127,25 @@ impl ProjectWindow {
                 {
                     self.add_folder_track();
                 }
+                ui.menu_button("Inserts vor dem Fader", |ui| {
+                    for n in 0..=8u8 {
+                        let text = format!("Slots 1–{n} vor, {}–8 nach dem Fader", n + 1);
+                        let text = match n {
+                            0 => "alle nach dem Fader".to_owned(),
+                            8 => "alle vor dem Fader".to_owned(),
+                            _ => text,
+                        };
+                        if ui
+                            .radio(self.project.pre_fader_inserts == n, text)
+                            .clicked()
+                        {
+                            let before = self.project.clone();
+                            self.project.pre_fader_inserts = n;
+                            self.checkpoint(before);
+                            ui.close();
+                        }
+                    }
+                });
                 if ui.button("Marker-Spur hinzufügen").clicked() {
                     let before = self.project.clone();
                     self.add_marker_track();
@@ -467,6 +486,12 @@ impl ProjectWindow {
             );
         }
         ui.separator();
+        let io = egui::Button::new("Audio-Anschlüsse …")
+            .shortcut_text(self.key_label(ui.ctx(), Cmd::AudioConnections));
+        if ui.add(io).clicked() {
+            self.io_dialog = true;
+            ui.close();
+        }
         if ui.button("Audio- und MIDI-Geräte …").clicked() {
             self.open_device_dialog();
             ui.close();
