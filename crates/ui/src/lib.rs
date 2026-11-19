@@ -821,8 +821,11 @@ impl ProjectWindow {
                 self.toggle_cycle();
             }
             icons::group_gap(ui);
-            for tool in Tool::ALL {
-                let mut hint = format!("{} ({})", tool.label(), tool.key_label());
+            for tool in Tool::TOOLBAR {
+                let mut hint = match tool.key_label() {
+                    "" => tool.label().to_owned(),
+                    key => format!("{} ({key})", tool.label()),
+                };
                 if !tool.implemented() {
                     hint.push_str(" – im Prototyp noch ohne Funktion");
                 }
@@ -1757,6 +1760,50 @@ mod tests {
         h.run_steps(1);
         // The menus stay reachable in the same bar.
         h.get_by_label("Datei");
+    }
+
+    #[test]
+    fn comp_tool_picks_sections_of_takes_in_lanes() {
+        let mut p = Project::default();
+        let t = p.add_track(TrackKind::Audio, "Gesang");
+        let mut w = ProjectWindow::new(p, None, String::new());
+        let bar = w.bar_ticks();
+        let take1 = w.project.create_event(t, 0, 4 * bar).unwrap();
+        let take2 = w.project.create_event(t, 0, 4 * bar).unwrap();
+        w.project.tracks[t].show_lanes = true;
+        w.view.scroll_ticks = 0.0;
+        w.tool = Tool::Comp;
+        let mut h = window_harness(w);
+        assert_eq!(h.state().project.event_at(t, bar + 1), Some(take2));
+        // Drag across bars 2..3 of take 1 (top lane).
+        drag(&mut h, (bar, 0.5), (2 * bar, 0.5), 0.0);
+        let p = &h.state().project;
+        let mid = p.event_at(t, bar + bar / 2).unwrap();
+        assert_ne!(mid, take2);
+        assert_eq!(
+            p.event(mid).map(|e| (e.start.0, e.end())),
+            Some((bar, 2 * bar))
+        );
+        assert_eq!(p.event_at(t, 3 * bar), Some(take2));
+        assert_eq!(h.state().selection, vec![mid]);
+        // Undo puts the takes back together.
+        h.state_mut().undo();
+        assert_eq!(h.state().project.tracks[t].events.len(), 2);
+        assert!(h.state().project.event(take1).is_some());
+    }
+
+    #[test]
+    fn renders_comped_lanes() {
+        shot("comping", |w| {
+            let bar = w.bar_ticks();
+            w.project.tracks[0].events.clear();
+            let a = w.project.create_event(0, 0, 8 * bar).unwrap();
+            w.project.create_event(0, 0, 8 * bar).unwrap();
+            w.project.create_event(0, bar, 6 * bar).unwrap();
+            w.project.comp(a, 2 * bar, 4 * bar);
+            w.project.tracks[0].show_lanes = true;
+            w.tool = Tool::Comp;
+        });
     }
 
     #[test]

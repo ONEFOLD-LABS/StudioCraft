@@ -160,23 +160,17 @@ impl Song {
                 ) && project.audible(*i)
             })
             .map(|(slot, t)| {
-                // Wie in klassischen DAWs klingt auf einer Audiospur bei Überlappung nur das
-                // oberste Event (das spätere in der Liste). Verdeckte Teile fallen weg.
+                // Wie in klassischen DAWs klingt auf einer Audiospur bei Überlappung nur das oberste Event
+                // (höchster Comp-Rang, sonst das spätere in der Liste). Verdeckte Teile fallen weg.
+                let audible = t.audible_parts();
                 let mut events = Vec::new();
-                for (i, e) in t.events.iter().enumerate() {
-                    if e.muted {
-                        continue;
-                    }
+                for (e, parts) in t.events.iter().zip(&audible) {
                     let Some(samples) = e.clip.and_then(|c| clips.get(&c)) else {
                         continue;
                     };
-                    let covers = t.events[i + 1..]
-                        .iter()
-                        .filter(|l| !l.muted)
-                        .map(|l| (l.start.0, l.end()));
                     let ev_start = tempo.frames(e.start.0, rate);
                     let env_length = tempo.frames(e.end(), rate) - ev_start;
-                    for (a, b) in visible_parts((e.start.0, e.end()), covers) {
+                    for &(a, b) in parts {
                         let (fa, fb) = (tempo.frames(a, rate), tempo.frames(b, rate));
                         if fb <= fa {
                             continue;
@@ -349,27 +343,6 @@ impl Song {
             }
         }
     }
-}
-
-/// Teile von `range`, die von keinem der `covers` verdeckt werden.
-fn visible_parts(range: (u64, u64), covers: impl Iterator<Item = (u64, u64)>) -> Vec<(u64, u64)> {
-    let mut parts = vec![range];
-    for (ca, cb) in covers {
-        parts = parts
-            .into_iter()
-            .flat_map(|(a, b)| {
-                if cb <= a || ca >= b {
-                    vec![(a, b)]
-                } else {
-                    [(a, ca.max(a)), (cb.min(b), b)]
-                        .into_iter()
-                        .filter(|(x, y)| y > x)
-                        .collect()
-                }
-            })
-            .collect();
-    }
-    parts
 }
 
 impl PlayTrack {
@@ -558,16 +531,6 @@ mod tests {
             "Fade-In bei halber Länge: {}",
             out[0]
         );
-    }
-
-    #[test]
-    fn visible_parts_cut_out_covers() {
-        assert_eq!(
-            visible_parts((0, 10), [(2, 4), (8, 12)].into_iter()),
-            [(0, 2), (4, 8)]
-        );
-        assert_eq!(visible_parts((0, 10), [(0, 10)].into_iter()), []);
-        assert_eq!(visible_parts((5, 10), [(0, 3)].into_iter()), [(5, 10)]);
     }
 
     #[test]

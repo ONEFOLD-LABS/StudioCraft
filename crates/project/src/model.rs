@@ -63,6 +63,17 @@ pub struct Event {
     /// MIDI-Parts: Noten, Position relativ zum Part-Anfang.
     #[serde(default)]
     pub notes: Vec<Note>,
+    /// Feste Lane (Takes); `None`: wird aus der Reihenfolge verteilt ([`Track::lanes`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lane: Option<u32>,
+    /// Comping-Rang: Bei Überlappung klingt das Event mit dem höchsten Rang, bei Gleichstand
+    /// das spätere in der Liste.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub comp: u32,
+}
+
+fn is_zero(v: &u32) -> bool {
+    *v == 0
 }
 
 /// Eine MIDI-Note in einem Part (Spec „MIDI-Part“: Noten relativ zum Part-Start).
@@ -165,8 +176,22 @@ impl Track {
     /// Takes landen so darunter.
     pub fn lanes(&self) -> (Vec<usize>, usize) {
         let mut ends: Vec<Vec<(u64, u64)>> = Vec::new();
-        let mut out = Vec::with_capacity(self.events.len());
-        for e in &self.events {
+        let mut out = vec![0; self.events.len()];
+        // Feste Lanes zuerst (Comping), dann der Rest in der Reihenfolge der Liste.
+        for (i, e) in self.events.iter().enumerate() {
+            if let Some(l) = e.lane {
+                let l = l as usize;
+                if ends.len() <= l {
+                    ends.resize_with(l + 1, Vec::new);
+                }
+                ends[l].push((e.start.0, e.end()));
+                out[i] = l;
+            }
+        }
+        for (i, e) in self.events.iter().enumerate() {
+            if e.lane.is_some() {
+                continue;
+            }
             let span = (e.start.0, e.end());
             let lane = ends
                 .iter()
@@ -176,9 +201,52 @@ impl Track {
                 ends.push(Vec::new());
             }
             ends[lane].push(span);
-            out.push(lane);
+            out[i] = lane;
         }
         (out, ends.len().max(1))
+    }
+
+    /// Schreibt die aktuelle Lane-Verteilung fest, damit Teilen und Comping nichts verschieben.
+    pub fn freeze_lanes(&mut self) {
+        let (lanes, _) = self.lanes();
+        for (e, l) in self.events.iter_mut().zip(lanes) {
+            e.lane = u32::try_from(l).ok();
+        }
+    }
+
+    /// Hörbare Abschnitte (Ticks) je Event, in der Reihenfolge von `events`: Ein Event wird
+    /// von nicht stummen Events mit höherem (Comp-Rang, Listenplatz) verdeckt.
+    pub fn audible_parts(&self) -> Vec<Vec<(u64, u64)>> {
+        self.events
+            .iter()
+            .enumerate()
+            .map(|(i, e)| {
+                if e.muted {
+                    return Vec::new();
+                }
+                let mut parts = vec![(e.start.0, e.end())];
+                for (j, c) in self.events.iter().enumerate() {
+                    if j == i || c.muted || (c.comp, j) < (e.comp, i) {
+                        continue;
+                    }
+                    let (ca, cb) = (c.start.0, c.end());
+                    parts = parts
+                        .into_iter()
+                        .flat_map(|(a, b)| {
+                            if cb <= a || ca >= b {
+                                vec![(a, b)]
+                            } else {
+                                [(a, ca.max(a)), (cb.min(b), b)]
+                                    .into_iter()
+                                    .filter(|(x, y)| y > x)
+                                    .collect()
+                            }
+                        })
+                        .collect();
+                }
+                parts
+            })
+            .collect()
     }
 }
 
@@ -440,6 +508,8 @@ impl Project {
                         fade_in: 0,
                         fade_out: 0,
                         notes: Vec::new(),
+                        lane: None,
+                        comp: 0,
                     });
                     at += len + ((i as u64 + 2 * k) % 3) * bar;
                     k += 1;
@@ -456,9 +526,10 @@ impl Project {
             .get(track)?
             .events
             .iter()
-            .rev()
-            .find(|e| e.contains(ticks))
-            .map(|e| e.id)
+            .enumerate()
+            .filter(|(_, e)| e.contains(ticks))
+            .max_by_key(|(i, e)| (e.comp, *i))
+            .map(|(_, e)| e.id)
     }
 
     pub fn find(&self, id: EventId) -> Option<(usize, usize)> {
@@ -596,6 +667,8 @@ impl Project {
                 fade_in: 0,
                 fade_out: 0,
                 notes: Vec::new(),
+                lane: None,
+                comp: 0,
             },
         );
         Some(id)
@@ -608,6 +681,33 @@ impl Project {
         let before = self.tempo.ticks(ev.offset, c.sample_rate);
         let total = self.tempo.ticks(c.frames, c.sample_rate);
         Some((before, total))
+    }
+
+    /// Comping: Der Abschnitt `from..to` des Takes `id` klingt ab jetzt über allen anderen.
+    /// Das Take wird an den Grenzen geteilt (die Lanes bleiben fest); der Abschnitt bekommt den
+    /// höchsten Comp-Rang der Spur. Gibt die Id des Abschnitts zurück.
+    pub fn comp(&mut self, id: EventId, from: u64, to: u64) -> Option<EventId> {
+        let (t, _) = self.find(id)?;
+        self.tracks[t].freeze_lanes();
+        let ev = self.event(id)?;
+        let (a, b) = (from.min(to).max(ev.start.0), from.max(to).min(ev.end()));
+        if b <= a {
+            return None;
+        }
+        let mut mid = id;
+        if let Some(right) = self.split(mid, a) {
+            mid = right;
+        }
+        self.split(mid, b);
+        let top = self.tracks[t]
+            .events
+            .iter()
+            .map(|e| e.comp)
+            .max()
+            .unwrap_or(0);
+        let ev = self.event_mut(mid)?;
+        ev.comp = top.saturating_add(1);
+        Some(mid)
     }
 
     /// Snap-Modus „Schieben“: Das Event wandert innerhalb seiner Spur an die Stelle, an der
@@ -764,6 +864,8 @@ impl Project {
                 fade_in: 0,
                 fade_out: 0,
                 notes: Vec::new(),
+                lane: None,
+                comp: 0,
             },
         );
         Some(id)
@@ -817,6 +919,8 @@ impl Project {
             fade_in: 0,
             fade_out: 0,
             notes: Vec::new(),
+            lane: None,
+            comp: 0,
         });
         Some(id)
     }
@@ -954,6 +1058,42 @@ impl Project {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn comping_a_section_makes_it_audible_and_keeps_lanes() {
+        let mut p = Project::default();
+        let t = p.add_track(TrackKind::Audio, "Gesang");
+        let take1 = p.create_event(t, 0, 4000).expect("take 1");
+        let take2 = p.create_event(t, 0, 4000).expect("take 2");
+        // create_event keeps start order: take2 comes after take1 and sounds on top.
+        let parts = p.tracks[t].audible_parts();
+        assert_eq!(parts, [vec![], vec![(0, 4000)]]);
+        assert_eq!(p.event_at(t, 100), Some(take2));
+        // Comp the middle of take 1.
+        let mid = p.comp(take1, 1000, 2000).expect("comped");
+        let track = &p.tracks[t];
+        assert_eq!(track.events.len(), 4);
+        let (lanes, n) = track.lanes();
+        assert_eq!(n, 2);
+        let lane_of = |id: EventId| {
+            track
+                .events
+                .iter()
+                .position(|e| e.id == id)
+                .map(|i| lanes[i])
+        };
+        assert_eq!(lane_of(mid), lane_of(take1), "pieces stay in their lane");
+        assert_eq!(p.event_at(t, 1500), Some(mid));
+        assert_eq!(p.event_at(t, 2500), Some(take2));
+        let audible: Vec<(u64, u64)> = track.audible_parts().into_iter().flatten().collect();
+        let mut sorted = audible.clone();
+        sorted.sort_unstable();
+        assert_eq!(sorted, [(0, 1000), (1000, 2000), (2000, 4000)]);
+        // Saved projects keep lanes and ranks; older files load with defaults.
+        let json = serde_json::to_string(&p).expect("save");
+        let back: Project = serde_json::from_str(&json).expect("load");
+        assert_eq!(back.tracks[t].events, p.tracks[t].events);
+    }
 
     #[test]
     fn time_base_decides_what_follows_a_tempo_change() {

@@ -23,6 +23,8 @@ pub enum Icon {
     Draw,
     Play,
     TimeWarp,
+    /// Comping: Lanes mit hervorgehobenem Abschnitt.
+    Comp,
     // snap
     Snap,
     /// Quantisierungs-Panel: Schieberegler.
@@ -52,7 +54,7 @@ pub enum Icon {
 }
 
 impl Icon {
-    pub const ALL: [Icon; 28] = [
+    pub const ALL: [Icon; 29] = [
         Icon::Select,
         Icon::Range,
         Icon::Split,
@@ -63,6 +65,7 @@ impl Icon {
         Icon::Draw,
         Icon::Play,
         Icon::TimeWarp,
+        Icon::Comp,
         Icon::Snap,
         Icon::QuantizePanel,
         Icon::TimeMusical,
@@ -316,6 +319,21 @@ pub fn shapes(rect: Rect, icon: Icon, color: Color32) -> Vec<Shape> {
             for (y, x) in [(4.0, 10.0), (8.0, 5.0), (12.0, 8.5)] {
                 out.push(line(vec![g.p(2.0, y), g.p(14.0, y)]));
                 out.push(Shape::circle_filled(g.p(x, y), g.len(2.0), color));
+            }
+        }
+        Icon::Comp => {
+            // three lanes, one section of each picked
+            for (y, a, b) in [(3.0, 2.0, 7.0), (7.0, 7.0, 11.0), (11.0, 11.0, 14.0)] {
+                out.push(Shape::line_segment(
+                    [g.p(2.0, y + 1.0), g.p(14.0, y + 1.0)],
+                    Stroke::new(g.len(0.8).max(1.0), color.gamma_multiply(0.5)),
+                ));
+                out.push(fill(vec![
+                    g.p(a, y),
+                    g.p(b, y),
+                    g.p(b, y + 2.5),
+                    g.p(a, y + 2.5),
+                ]));
             }
         }
         Icon::TimeMusical => {

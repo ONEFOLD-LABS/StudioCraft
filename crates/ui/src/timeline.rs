@@ -57,6 +57,12 @@ pub(crate) enum Drag {
         lane: usize,
         idx: usize,
     },
+    /// Comping: Abschnitt eines Takes ab `start` aufziehen.
+    Comp {
+        row: usize,
+        id: EventId,
+        start: u64,
+    },
     /// Automation frei zeichnen; `last` = zuletzt gezeichneter Tick.
     AutoDraw {
         row: usize,
@@ -538,7 +544,7 @@ fn live_drag(w: &mut ProjectWindow, g: &Geo, d: Drag, p: Pos2, mods: egui::Modif
             w.drag = Some(automation::live_drag(w, g, d, p, mods.alt));
             return;
         }
-        Drag::Move { .. } | Drag::Draw { .. } => return,
+        Drag::Move { .. } | Drag::Draw { .. } | Drag::Comp { .. } => return,
     }
     w.dirty = true;
 }
@@ -586,7 +592,31 @@ fn start_drag(w: &mut ProjectWindow, g: &Geo, p: Pos2, alt: bool) -> Option<Drag
             row,
             start: w.snap_ticks(ticks),
         }),
+        Tool::Comp => {
+            let id = hit_event(w, g, row, p.y, ticks.max(0.0) as u64)?;
+            w.selected_track = Some(row);
+            Some(Drag::Comp {
+                row,
+                id,
+                start: w.snap_ticks(ticks),
+            })
+        }
         _ => None,
+    }
+}
+
+/// Comping: Abschnitt `a..b` (Klick: das ganze Take) hörbar machen und auswählen.
+fn comp(w: &mut ProjectWindow, id: EventId, a: u64, b: u64) {
+    let (a, b) = if a == b {
+        match w.project.event(id) {
+            Some(e) => (e.start.0, e.end()),
+            None => return,
+        }
+    } else {
+        (a.min(b), a.max(b))
+    };
+    if let Some(mid) = w.project.comp(id, a, b) {
+        w.selection = vec![mid];
     }
 }
 
@@ -631,6 +661,10 @@ fn finish_drag(w: &mut ProjectWindow, g: &Geo, d: Drag, p: Pos2, mods: egui::Mod
         | Drag::FadeOut { .. }
         | Drag::AutoPoint { .. }
         | Drag::AutoDraw { .. } => {}
+        Drag::Comp { id, start, .. } => {
+            let end = w.snap_ticks(g.ticks(p.x));
+            comp(w, id, start, end);
+        }
         Drag::Draw { row, start } => {
             let end = w.snap_ticks(g.ticks(p.x));
             let min = w.grid_ticks();
@@ -765,6 +799,7 @@ fn click(w: &mut ProjectWindow, g: &Geo, p: Pos2, mods: egui::Modifiers) {
             w.range = None;
         }
         (Tool::Range, _) => w.range = None,
+        (Tool::Comp, Some(id)) => comp(w, id, 0, 0),
         (Tool::Glue, Some(id)) => {
             // Alt: alle folgenden Events dieser Spur ankleben.
             let mut result = w.project.glue(id);
@@ -928,7 +963,15 @@ fn paint_lanes(w: &ProjectWindow, painter: &Painter, g: &Geo) {
         let track = &w.project.tracks[row];
         let h = g.view.row_h - 4.0;
         let lanes = track.show_lanes.then(|| track.lanes().0);
-        for (i, ev) in track.events.iter().enumerate() {
+        // Aufgeklappt: nicht hörbare Abschnitte abdunkeln (Comping).
+        let audible = track.show_lanes.then(|| track.audible_parts());
+        // Zugeklappt: das klingende Event (höchster Comp-Rang) oben zeichnen.
+        let mut order: Vec<usize> = (0..track.events.len()).collect();
+        if track.events.iter().any(|e| e.comp > 0) {
+            order.sort_by_key(|&i| (track.events[i].comp, i));
+        }
+        for i in order {
+            let ev = &track.events[i];
             if ev.end() < t0 || ev.start.0 > t1 {
                 continue;
             }
@@ -939,6 +982,18 @@ fn paint_lanes(w: &ProjectWindow, painter: &Painter, g: &Geo) {
                 pos2(g.x(ev.end() as f64), top + h),
             );
             paint_event(w, painter, g, track, ev, rect);
+            if let Some(parts) = audible.as_ref().and_then(|a| a.get(i)) {
+                let mut from = ev.start.0;
+                let shade = Color32::from_black_alpha(120);
+                for &(a, b) in parts.iter().chain(std::iter::once(&(ev.end(), ev.end()))) {
+                    if a > from {
+                        let r =
+                            Rect::from_x_y_ranges(g.x(from as f64)..=g.x(a as f64), rect.y_range());
+                        painter.rect_filled(r.intersect(rect), 3.0, shade);
+                    }
+                    from = from.max(b);
+                }
+            }
         }
     }
     automation::paint(w, painter, g);
@@ -1228,6 +1283,17 @@ fn paint_drag_preview(w: &ProjectWindow, painter: &Painter, g: &Geo) {
                 );
                 painter.rect_stroke(rect, 3.0, ghost, StrokeKind::Inside);
             }
+        }
+        Some(Drag::Comp { row, id, start }) => {
+            let end = w.snap_ticks(g.ticks(p.x));
+            let lane = w.project.tracks.get(row).map_or(0, |t| lane_of(t, id));
+            let top = g.row_top(row) + lane as f32 * g.view.row_h + 2.0;
+            let rect = Rect::from_x_y_ranges(
+                g.x(start.min(end) as f64)..=g.x(start.max(end) as f64),
+                top..=top + g.view.row_h - 4.0,
+            );
+            let accent = crate::theme::tokens(painter.ctx()).accent;
+            painter.rect_stroke(rect, 3.0, Stroke::new(2.0, accent), StrokeKind::Inside);
         }
         Some(Drag::Draw { row, start }) => {
             let end = w.snap_ticks(g.ticks(p.x));

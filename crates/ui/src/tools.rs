@@ -15,9 +15,27 @@ pub enum Tool {
     Draw,
     Play,
     TimeWarp,
+    /// Comping in den Lanes: Klick oder Ziehen über ein Take macht den Abschnitt hörbar.
+    Comp,
 }
 
 impl Tool {
+    /// Reihenfolge in der Werkzeugzeile: wie [`Tool::ALL`], Comping hinter dem Bereich.
+    pub const TOOLBAR: [Tool; 11] = [
+        Tool::Select,
+        Tool::Range,
+        Tool::Comp,
+        Tool::Split,
+        Tool::Glue,
+        Tool::Erase,
+        Tool::Zoom,
+        Tool::Mute,
+        Tool::Draw,
+        Tool::Play,
+        Tool::TimeWarp,
+    ];
+
+    /// Die Werkzeuge auf den Tasten 1 bis 0.
     pub const ALL: [Tool; 10] = [
         Tool::Select,
         Tool::Range,
@@ -43,6 +61,7 @@ impl Tool {
             Tool::Draw => "Zeichnen",
             Tool::Play => "Wiedergabe",
             Tool::TimeWarp => "Zeitkorrektur",
+            Tool::Comp => "Comping",
         }
     }
 
@@ -58,6 +77,7 @@ impl Tool {
             Tool::Draw => "8",
             Tool::Play => "9",
             Tool::TimeWarp => "0",
+            Tool::Comp => "",
         }
     }
 
@@ -91,6 +111,7 @@ impl Tool {
             Tool::Draw => Icon::Draw,
             Tool::Play => Icon::Play,
             Tool::TimeWarp => Icon::TimeWarp,
+            Tool::Comp => Icon::Comp,
         }
     }
 
