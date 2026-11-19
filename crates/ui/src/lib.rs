@@ -1372,6 +1372,23 @@ impl ProjectWindow {
                 let r = ui.add(egui::Slider::new(&mut track.pan, -1.0..=1.0).text("Pan"));
                 self.dirty |= r.changed();
             });
+            ui.horizontal(|ui| {
+                let l = ui.label("Pan-Modus");
+                let before = track.pan_mode;
+                egui::ComboBox::from_id_salt(("pan-modus", idx))
+                    .selected_text(track.pan_mode.label())
+                    .show_ui(ui, |ui| {
+                        for m in [
+                            studiocraft_project::PanMode::Balance,
+                            studiocraft_project::PanMode::Combined,
+                        ] {
+                            ui.selectable_value(&mut track.pan_mode, m, m.label());
+                        }
+                    })
+                    .response
+                    .labelled_by(l.id);
+                self.dirty |= track.pan_mode != before;
+            });
             ui.label(format!("{} Events", track.events.len()));
         }
         ui.add_space(4.0);
@@ -4877,6 +4894,26 @@ mod tests {
             egui::PointerButton::Primary,
         );
         assert!(h.state().project.tracks[0].record);
+    }
+
+    #[test]
+    fn pan_mode_is_chosen_in_the_inspector_saved_and_undoable() {
+        use studiocraft_project::PanMode;
+        let (mut w, _) = one_event_window();
+        w.selected_track = Some(0);
+        w.show_lower = false;
+        let mut h = window_harness(w);
+        h.run_steps(2);
+        h.get_by_label("Pan-Modus").click();
+        h.run_steps(2);
+        h.get_by_label("Stereo kombiniert").click();
+        h.run_steps(3);
+        assert_eq!(h.state().project.tracks[0].pan_mode, PanMode::Combined);
+        let json = studiocraft_project::file::to_json(&h.state().project);
+        let back = studiocraft_project::file::from_json(&json).unwrap();
+        assert_eq!(back.tracks[0].pan_mode, PanMode::Combined);
+        h.state_mut().undo();
+        assert_eq!(h.state().project.tracks[0].pan_mode, PanMode::Balance);
     }
 
     #[test]

@@ -938,7 +938,31 @@ impl EngineCore {
                 }
                 // Fader und Panorama an Ort und Stelle; Pegel messen.
                 let (mut pl, mut pr) = (0.0f32, 0.0f32);
-                if let Some(auto) = track.auto.as_deref().filter(|a| running && a.has_gain()) {
+                let automated = track.auto.as_deref().filter(|a| running && a.has_gain());
+                if let (Some(auto), Some(_)) = (automated, track.pan_mix) {
+                    // Stereo kombiniert mit Automation: Matrix je Frame aus Pegel und Pan.
+                    for (i, t) in tmp.chunks_exact_mut(2).enumerate() {
+                        let (g, pan) = auto.level_at(pos + i as u64);
+                        let m = studiocraft_project::pan_matrix(
+                            studiocraft_project::PanMode::Combined,
+                            pan,
+                        );
+                        let (l, r) = (t[0], t[1]);
+                        t[0] = g * (l * m[0] + r * m[2]);
+                        t[1] = g * (l * m[1] + r * m[3]);
+                        pl = pl.max(t[0].abs());
+                        pr = pr.max(t[1].abs());
+                    }
+                } else if let Some(m) = track.pan_mix.filter(|_| automated.is_none()) {
+                    // Stereo kombiniert: feste Matrix (samt Lautstärke).
+                    for t in tmp.chunks_exact_mut(2) {
+                        let (l, r) = (t[0], t[1]);
+                        t[0] = l * m[0] + r * m[2];
+                        t[1] = l * m[1] + r * m[3];
+                        pl = pl.max(t[0].abs());
+                        pr = pr.max(t[1].abs());
+                    }
+                } else if let Some(auto) = automated {
                     // Automation: Faktor pro Frame (sample-genau).
                     let [gl, gr] = &mut self.auto_gain;
                     auto.fill_gains(pos, &mut gl[..frames], &mut gr[..frames]);
@@ -1159,6 +1183,44 @@ mod tests {
             tail.push(m.data);
         }
         assert_eq!(tail.last(), Some(&[0x82, 60, 0]));
+    }
+
+    #[test]
+    fn combined_pan_moves_both_channels_balance_only_dims() {
+        use studiocraft_project::{PanMode, pan_matrix};
+        // Left channel only, four frames.
+        let samples: Arc<[f32]> = vec![1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0].into();
+        let run = |mix: Option<[f32; 4]>, gl: f32, gr: f32| {
+            let (mut core, mut ctl) = engine(48_000, TempoMap::default());
+            let track = crate::PlayTrack {
+                gain_l: gl,
+                gain_r: gr,
+                pan_mix: mix,
+                events: vec![crate::song::PlayEvent::new(0, 4, 0, samples.clone())],
+                ..Default::default()
+            };
+            ctl.send(Command::SetSong(Arc::new(Song {
+                tracks: vec![track],
+                master: 1.0,
+                buses: 0,
+                tempo: TempoMap::default(),
+                midi_ports: Vec::new(),
+                click: Default::default(),
+            })));
+            ctl.send(Command::Play);
+            let mut out = [0.0f32; 8];
+            core.process(&mut out);
+            (out[0], out[1])
+        };
+        // Balance hard right: the left-only signal disappears.
+        let b = pan_matrix(PanMode::Balance, 1.0);
+        assert_eq!(run(None, b[0], b[3]), (0.0, 0.0));
+        // Combined hard right: it comes out fully on the right.
+        let (l, r) = run(Some(pan_matrix(PanMode::Combined, 1.0)), 1.0, 1.0);
+        assert!(l.abs() < 1e-6 && (r - 1.0).abs() < 1e-6, "{l} {r}");
+        // Combined centre leaves the signal as it is.
+        let (l, r) = run(Some(pan_matrix(PanMode::Combined, 0.0)), 1.0, 1.0);
+        assert!((l - 1.0).abs() < 1e-6 && r.abs() < 1e-6, "{l} {r}");
     }
 
     fn left(out: &[f32]) -> Vec<f32> {

@@ -228,6 +228,9 @@ pub struct Track {
     /// Ordnerspur, zu der diese Spur gehört (siehe `folders.rs`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub parent: Option<TrackId>,
+    /// Pan-Modus: Stereo-Balance (Standard) oder Stereo kombiniert.
+    #[serde(default, skip_serializing_if = "PanMode::is_balance")]
+    pub pan_mode: PanMode,
     /// Solo-Defeat (Strg+Klick auf Solo): bleibt hörbar, wenn andere Spuren solo sind.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub solo_defeat: bool,
@@ -475,12 +478,69 @@ pub fn db_to_gain(db: f32) -> f32 {
 
 impl Track {
     /// Faktoren für links und rechts aus Fader und Stereo-Balance.
+    /// Faktoren des Kanals als Matrix `[ll, lr, rl, rr]` (links in → links/rechts aus,
+    /// rechts in → links/rechts aus): Lautstärke mal Pan im eingestellten Modus.
+    pub fn mix_matrix(&self) -> [f32; 4] {
+        let g = db_to_gain(self.volume_db);
+        pan_matrix(self.pan_mode, self.pan).map(|v| v * g)
+    }
+
     pub fn gains(&self) -> (f32, f32) {
         let g = db_to_gain(self.volume_db);
         let p = self.pan.clamp(-1.0, 1.0);
         let l = if p > 0.0 { 1.0 - p } else { 1.0 };
         let r = if p < 0.0 { 1.0 + p } else { 1.0 };
         (g * l, g * r)
+    }
+}
+
+/// Pan-Modus eines Kanals (Spec „Kanalzug-Elemente“).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+pub enum PanMode {
+    /// Stereo-Balance: dämpft die Gegenseite, die Kanäle bleiben, wo sie sind.
+    #[default]
+    Balance,
+    /// Stereo kombiniert: beide Kanäle wandern gemeinsam (gleiche Leistung); ganz rechts
+    /// liegen beide rechts.
+    Combined,
+}
+
+impl PanMode {
+    pub fn is_balance(&self) -> bool {
+        *self == PanMode::Balance
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            PanMode::Balance => "Stereo-Balance",
+            PanMode::Combined => "Stereo kombiniert",
+        }
+    }
+}
+
+/// Pan als Matrix `[ll, lr, rl, rr]` für `pan` in −1..1 (NaN gilt als Mitte). In der Mitte ist
+/// sie in beiden Modi die Einheitsmatrix.
+pub fn pan_matrix(mode: PanMode, pan: f32) -> [f32; 4] {
+    let p = if pan.is_finite() {
+        pan.clamp(-1.0, 1.0)
+    } else {
+        0.0
+    };
+    match mode {
+        PanMode::Balance => {
+            let l = if p > 0.0 { 1.0 - p } else { 1.0 };
+            let r = if p < 0.0 { 1.0 + p } else { 1.0 };
+            [l, 0.0, 0.0, r]
+        }
+        PanMode::Combined => {
+            // Lage der beiden Kanäle: links wandert ab der Mitte nach rechts mit, rechts nach
+            // links; je Kanal gleiche Leistung.
+            let pos_l = (-1.0 + 2.0 * p.max(0.0)).clamp(-1.0, 1.0);
+            let pos_r = (1.0 + 2.0 * p.min(0.0)).clamp(-1.0, 1.0);
+            let angle = |pos: f32| (pos + 1.0) * std::f32::consts::FRAC_PI_4;
+            let (al, ar) = (angle(pos_l), angle(pos_r));
+            [al.cos(), al.sin(), ar.cos(), ar.sin()]
+        }
     }
 }
 
@@ -674,6 +734,7 @@ impl Project {
                 midi_channel: 1,
                 program: None,
                 solo_defeat: false,
+                pan_mode: PanMode::Balance,
                 volume_db: 0.0,
                 pan: 0.0,
                 input: TrackInput::default(),
@@ -1269,6 +1330,7 @@ impl Project {
             midi_channel: 1,
             program: None,
             solo_defeat: false,
+            pan_mode: PanMode::Balance,
             volume_db: 0.0,
             pan: 0.0,
             input: TrackInput::default(),
@@ -1877,6 +1939,31 @@ mod tests {
         // Unknown in older files: a part without controllers still loads.
         let json = crate::file::to_json(&p);
         assert!(crate::file::from_json(&json).is_ok());
+    }
+
+    #[test]
+    fn pan_matrix_modes() {
+        let near = |a: [f32; 4], b: [f32; 4]| a.iter().zip(b).all(|(x, y)| (x - y).abs() < 1e-5);
+        for mode in [PanMode::Balance, PanMode::Combined] {
+            assert!(
+                near(pan_matrix(mode, 0.0), [1.0, 0.0, 0.0, 1.0]),
+                "{mode:?} centre"
+            );
+            assert!(near(pan_matrix(mode, f32::NAN), [1.0, 0.0, 0.0, 1.0]));
+        }
+        // Balance hard right: the left channel is gone, right stays.
+        assert!(near(
+            pan_matrix(PanMode::Balance, 1.0),
+            [0.0, 0.0, 0.0, 1.0]
+        ));
+        // Combined hard right: both channels go fully right.
+        assert!(near(
+            pan_matrix(PanMode::Combined, 1.0),
+            [0.0, 1.0, 0.0, 1.0]
+        ));
+        // Combined half right: left channel in the middle (equal power), right stays right.
+        let h = std::f32::consts::FRAC_1_SQRT_2;
+        assert!(near(pan_matrix(PanMode::Combined, 0.5), [h, h, 0.0, 1.0]));
     }
 
     #[test]
