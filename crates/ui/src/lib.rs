@@ -22,6 +22,7 @@ mod shortcuts;
 mod snap;
 pub mod theme;
 mod timeline;
+pub mod titlebar;
 mod tools;
 pub mod waveform;
 
@@ -111,6 +112,11 @@ pub struct ProjectWindow {
     /// Schließen ist bestätigt (keine weitere Rückfrage).
     allow_close: bool,
     last_title: String,
+    /// Wer den Fensterrahmen zeichnet (siehe [`titlebar`]).
+    window_frame: craft_window::policy::Frame,
+    /// macOS: zuletzt an AppKit gemeldetes `movable` der Titelleiste.
+    #[cfg(target_os = "macos")]
+    mac_movable: Option<bool>,
     /// Audio-Host, mit dem auch der Eingang geöffnet wird.
     pub audio_host: Option<String>,
     input: Option<studiocraft_engine::AudioInput>,
@@ -199,6 +205,9 @@ impl ProjectWindow {
             pending: None,
             allow_close: false,
             last_title: String::new(),
+            window_frame: craft_window::policy::Frame::Native,
+            #[cfg(target_os = "macos")]
+            mac_movable: None,
             audio_host: None,
             input: None,
             recorder: None,
@@ -653,7 +662,12 @@ impl ProjectWindow {
             self.frame_ms * 0.95 + dt * 0.05
         };
 
-        egui::Panel::top("menue").show(ui, |ui| self.menu_bar(ui));
+        self.resize_edges(ui.ctx());
+        let mut top = egui::Panel::top("menue");
+        if self.draws_title_bar() {
+            top = top.exact_size(32.0);
+        }
+        top.show(ui, |ui| self.top_bar(ui));
         egui::Panel::top("werkzeugzeile").show(ui, |ui| self.toolbar(ui));
         if self.show_info {
             egui::Panel::top("info-zeile").show(ui, |ui| infoline::show(self, ui));
@@ -722,6 +736,7 @@ impl ProjectWindow {
         }
 
         self.confirm_dialog(ui);
+        self.sync_title_bar(ui.ctx());
         let title = self.title();
         if title != self.last_title {
             ui.ctx()
@@ -1654,6 +1669,50 @@ mod tests {
                 .automation_lane_mut(AutoParam::Mute)
                 .visible = false;
         });
+    }
+
+    #[test]
+    fn renders_integrated_title_bar() {
+        shot("titelleiste", |w| {
+            w.window_frame = titlebar::integrated_frame()
+        });
+    }
+
+    #[test]
+    fn renders_title_bar_with_desktop_button_layouts() {
+        use craft_window::policy::{CaptionFamily, Captions, Frame};
+        use craft_window::{Button, Layout};
+        // GNOME with "close" on the left, Adwaita look.
+        shot("titelleiste-gnome", |w| {
+            w.window_frame = Frame::Integrated(Captions {
+                family: CaptionFamily::Adwaita,
+                layout: Layout {
+                    left: vec![Button::Close],
+                    right: Vec::new(),
+                },
+            });
+        });
+        shot("titelleiste-windows", |w| {
+            w.window_frame = Frame::Integrated(Captions {
+                family: CaptionFamily::Windows,
+                layout: Layout::default(),
+            });
+        });
+    }
+
+    #[test]
+    fn title_bar_buttons_send_window_commands() {
+        let (mut w, _) = one_event_window();
+        w.window_frame = titlebar::integrated_frame();
+        let mut h = window_harness(w);
+        h.get_by_label("Maximieren").click();
+        h.run_steps(1);
+        h.get_by_label("Minimieren").click();
+        h.run_steps(1);
+        h.get_by_label("Schließen").click();
+        h.run_steps(1);
+        // The menus stay reachable in the same bar.
+        h.get_by_label("Datei");
     }
 
     #[test]

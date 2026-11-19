@@ -118,5 +118,7 @@ Die Positionsanzeige hat einen dunklen Hintergrund (`counter_bg`) mit heller Sch
 
 13. ✅ Feine Rasterlinien: Event-Anzeige und Key-Editor zeigen das Snap-Raster (1/16, Frames,
     „An Zoom anpassen“) zwischen den Zählzeiten
+14. ✅ Titelleiste wie in den Craft-Apps: Symbol, Menü, Titel und Fensterknöpfe in einer Zeile
+    (craft-window entscheidet pro Desktop)
 
-**Als Nächstes:** Automation (#34), Comping in den Lanes.
+**Als Nächstes:** Automation schreiben (Touch, Auto-Latch, #34), Comping in den Lanes.

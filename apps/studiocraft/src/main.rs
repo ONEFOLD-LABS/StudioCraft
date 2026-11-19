@@ -121,9 +121,14 @@ fn main() -> ExitCode {
     }
     window.clear_history();
 
+    // Titelleiste wie in den anderen Craft-Apps: craft-window entscheidet pro Desktop, ob die
+    // App sie zeichnet; STUDIOCRAFT_TITLEBAR=system behält den Rahmen des Systems.
+    let frame = studiocraft_ui::titlebar::decide_frame();
+    let builder = egui::ViewportBuilder::default().with_title("StudioCraft");
+    let builder = studiocraft_ui::titlebar::apply_frame(builder, &frame);
+    window.set_window_frame(frame);
     let options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default()
-            .with_title("StudioCraft")
+        viewport: builder
             // Wayland finds the window icon through the app id and the installed desktop file
             // of the same name (packaging/linux/io.github.xxcrusaderxx.studiocraft.desktop).
             .with_app_id(APP_ID)
