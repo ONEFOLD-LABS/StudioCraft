@@ -35,6 +35,7 @@ mod macros;
 mod markers_ui;
 mod menu;
 mod mixer;
+mod noteinfo;
 mod quantize;
 mod recording;
 mod rightzone;
@@ -794,6 +795,12 @@ impl ProjectWindow {
     fn handle_keys(&mut self, ui: &Ui) {
         // Zuerst der Nummernblock: er nimmt seine Ereignisse, bevor die Tastenbelegung sie sieht.
         self.handle_keypad(ui);
+        self.handle_window_keys(ui);
+    }
+
+    /// Tastenbelegung für die Eingaben von `ui`: das Hauptfenster und jedes eigene Fenster
+    /// (dort kommen die Tasten in dessen eigener Eingabe an).
+    pub(crate) fn handle_window_keys(&mut self, ui: &Ui) {
         if ui.ctx().egui_wants_keyboard_input() {
             return;
         }
@@ -3484,6 +3491,55 @@ mod tests {
         w.key_editor.focused = true;
         w.key_editor.selection = vec![0];
         (w, part)
+    }
+
+    #[test]
+    fn key_editor_info_line_edits_notes_relatively() {
+        let (mut w, part) = key_editor_window();
+        w.key_editor.selection = vec![0, 1];
+        let mut h = window_harness(w);
+        h.run_steps(2);
+        let enter = |h: &mut Harness<'_, ProjectWindow>, label: &str, text: &str| {
+            h.get_by_label(label).focus();
+            h.run_steps(1);
+            h.key_press_modifiers(egui::Modifiers::COMMAND, Key::A);
+            h.run_steps(1);
+            h.get_by_label(label).type_text(text);
+            h.run_steps(1);
+            h.key_press(Key::Enter);
+            h.run_steps(2);
+        };
+        // The first note is C3 (60); D3 moves both notes up two semitones.
+        enter(&mut h, "Tonhöhe", "D3");
+        let notes = h.state().project.event(part).unwrap().notes.clone();
+        assert_eq!((notes[0].pitch, notes[1].pitch), (62, 66));
+        // Velocity 80 lowers both by 20.
+        enter(&mut h, "Velocity", "80");
+        let notes = h.state().project.event(part).unwrap().notes.clone();
+        assert_eq!((notes[0].velocity, notes[1].velocity), (80, 80));
+        // Each change is one undo step.
+        h.state_mut().undo();
+        let notes = h.state().project.event(part).unwrap().notes.clone();
+        assert_eq!(notes[0].velocity, 100);
+        assert_eq!(notes[0].pitch, 62);
+    }
+
+    #[test]
+    fn renders_key_editor_info_line() {
+        shot("key-editor-info", |w| {
+            let row = w
+                .project
+                .add_track(TrackKind::Instrument, String::from("Synth"));
+            let part = w.project.create_event(row, 0, 4 * 3840).unwrap();
+            w.project.event_mut(part).unwrap().notes = vec![studiocraft_project::Note {
+                pitch: 60,
+                velocity: 96,
+                start: 960,
+                length: 960,
+            }];
+            w.open_key_editor(part);
+            w.key_editor.selection = vec![0];
+        });
     }
 
     #[test]
