@@ -82,7 +82,10 @@ impl ProjectWindow {
     fn event_frames(&self, id: EventId) -> Option<(u64, u64)> {
         let ev = self.project.event(id)?;
         let rate = self.project.pool.get(ev.clip? as usize)?.sample_rate;
-        let len = self.project.tempo.frames(ev.length, rate);
+        let len = self
+            .project
+            .tempo
+            .duration_frames(ev.start.0, ev.length, rate);
         Some((ev.offset, ev.offset.saturating_add(len)))
     }
 
@@ -156,11 +159,13 @@ impl ProjectWindow {
         };
         let tempo = self.project.tempo.clone();
         // Tick eines Clip-Frames auf der Zeitachse.
+        // Über die Zeitachse in Frames, damit Tempowechsel stimmen.
+        let start_f = tempo.frames(ev.start.0, rate);
         let tick_of = |f: u64| -> u64 {
             if f >= ev.offset {
-                ev.start.0.saturating_add(tempo.ticks(f - ev.offset, rate))
+                tempo.ticks(start_f.saturating_add(f - ev.offset), rate)
             } else {
-                ev.start.0.saturating_sub(tempo.ticks(ev.offset - f, rate))
+                tempo.ticks(start_f.saturating_sub(ev.offset - f), rate)
             }
         };
         let before = self.project.clone();

@@ -126,6 +126,10 @@ impl ProjectWindow {
                     self.add_marker_track();
                     self.checkpoint(before);
                 }
+                if ui.button("Tempospur hinzufügen").clicked() {
+                    ui.close();
+                    self.add_tempo_track();
+                }
                 let insert = egui::Button::new("Marker einfügen")
                     .shortcut_text(self.key_label(ui.ctx(), Cmd::InsertMarker));
                 if ui.add(insert).clicked() {
