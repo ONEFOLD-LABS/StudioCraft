@@ -1,12 +1,16 @@
 //! Bearbeitungs- und Navigationskürzel aus der Standardbelegung (Spec „Tastaturkonzept“,
 //! Issue #2): Ausschneiden/Kopieren/Einfügen, Duplizieren, am Cursor teilen, alles auswählen,
 //! auf das Projekt zoomen, Spur und Event wechseln, M/S/R der gewählten Spur, F2, Alt+L und
-//! Q (Quantisieren) und X (Crossfade).
+//! Q (Quantisieren), X (Crossfade) und Nudge (Strg+Pfeil: um einen Rasterschritt verschieben,
+//! Strg+Umschalt+Pfeil: Länge ändern).
+//!
+//! Fokus-Regel: Hat der Key-Editor den Fokus, wirken Ausschneiden/Kopieren/Einfügen und Nudge
+//! auf die gewählten Noten, Pfeil hoch/runter transponiert sie um einen Halbton.
 //!
 //! Die Kürzel werden vor [`ProjectWindow::handle_keys`] verbraucht, damit dort keine
 //! Doppelbelegung greift (z. B. Alt+X gegen X).
 
-use studiocraft_project::{Event, EventId, Position};
+use studiocraft_project::{Event, EventId, Note, Position};
 
 use crate::ProjectWindow;
 
@@ -14,6 +18,8 @@ use crate::ProjectWindow;
 #[derive(Debug, Clone, Default)]
 pub(crate) struct Clipboard {
     events: Vec<(usize, Event)>,
+    /// Kopierte Noten, Anfang relativ zur frühesten.
+    notes: Vec<Note>,
 }
 
 /// Ein Befehl aus der Standardbelegung.
@@ -37,17 +43,33 @@ pub(crate) enum EditCommand {
     ToggleLeftZone,
     Quantize,
     Crossfade,
+    NudgeLeft,
+    NudgeRight,
+    Shorter,
+    Longer,
 }
 
 impl ProjectWindow {
     pub(crate) fn run_edit_command(&mut self, c: EditCommand) {
         match c {
+            EditCommand::Copy if self.key_editor_active() => self.copy_notes(),
+            EditCommand::Cut if self.key_editor_active() => {
+                self.copy_notes();
+                self.delete_selected_notes();
+            }
+            EditCommand::Paste if self.key_editor_active() => self.paste_notes(),
+            EditCommand::PrevTrack if self.key_editor_active() => self.transpose_notes(1),
+            EditCommand::NextTrack if self.key_editor_active() => self.transpose_notes(-1),
             EditCommand::Copy => self.copy_selection(),
             EditCommand::Cut => {
                 self.copy_selection();
                 self.delete_selection();
             }
             EditCommand::Paste => self.paste(),
+            EditCommand::NudgeLeft => self.nudge(-1, false),
+            EditCommand::NudgeRight => self.nudge(1, false),
+            EditCommand::Shorter => self.nudge(-1, true),
+            EditCommand::Longer => self.nudge(1, true),
             EditCommand::Duplicate => self.duplicate(),
             EditCommand::SplitAtCursor => self.split_at_cursor(),
             EditCommand::SelectAll => {
@@ -93,6 +115,110 @@ impl ProjectWindow {
         }
     }
 
+    /// Gewählte Noten des Key-Editors in die Zwischenablage.
+    fn copy_notes(&mut self) {
+        let Some(ev) = self.key_editor.part.and_then(|p| self.project.event(p)) else {
+            return;
+        };
+        let mut notes: Vec<Note> = self
+            .key_editor
+            .selection
+            .iter()
+            .filter_map(|&i| ev.notes.get(i).copied())
+            .collect();
+        let Some(first) = notes.iter().map(|n| n.start).min() else {
+            return;
+        };
+        for n in &mut notes {
+            n.start -= first;
+        }
+        self.clipboard.notes = notes;
+    }
+
+    /// Noten aus der Zwischenablage am Cursor in den offenen Part einfügen und wählen.
+    fn paste_notes(&mut self) {
+        let Some(part) = self.key_editor.part else {
+            return;
+        };
+        if self.clipboard.notes.is_empty() {
+            return;
+        }
+        let before = self.project.clone();
+        let at = i64::try_from(self.cursor).unwrap_or(i64::MAX);
+        let notes = self.clipboard.notes.clone();
+        let Some(ev) = self.project.event_mut(part) else {
+            return;
+        };
+        let rel = at.saturating_sub(i64::try_from(ev.start.0).unwrap_or(0));
+        let first = ev.notes.len();
+        ev.notes.extend(notes.into_iter().map(|n| Note {
+            start: n.start.saturating_add(rel),
+            ..n
+        }));
+        self.key_editor.selection = (first..first + self.clipboard.notes.len()).collect();
+        self.checkpoint(before);
+    }
+
+    /// Gewählte Noten um `semitones` transponieren (in 0–127 begrenzt).
+    fn transpose_notes(&mut self, semitones: i32) {
+        let Some(part) = self.key_editor.part else {
+            return;
+        };
+        let before = self.project.clone();
+        let sel = self.key_editor.selection.clone();
+        if let Some(ev) = self.project.event_mut(part) {
+            for i in sel {
+                if let Some(n) = ev.notes.get_mut(i) {
+                    n.pitch = (i32::from(n.pitch) + semitones).clamp(0, 127) as u8;
+                }
+            }
+        }
+        self.checkpoint(before);
+    }
+
+    /// Nudge: die Auswahl um einen Rasterschritt verschieben (`length`: ihre Länge ändern).
+    /// Mit Fokus im Key-Editor die gewählten Noten, sonst die gewählten Events.
+    fn nudge(&mut self, dir: i64, length: bool) {
+        let step = i64::try_from(self.grid_ticks()).unwrap_or(1).max(1) * dir;
+        let before = self.project.clone();
+        if self.key_editor_active() {
+            let sel = self.key_editor.selection.clone();
+            if let Some(ev) = self.key_editor.part.and_then(|p| self.project.event_mut(p)) {
+                for i in sel {
+                    let Some(n) = ev.notes.get_mut(i) else {
+                        continue;
+                    };
+                    if length {
+                        let len = i64::try_from(n.length).unwrap_or(i64::MAX);
+                        n.length = u64::try_from(len.saturating_add(step)).unwrap_or(0).max(1);
+                    } else {
+                        n.start = n.start.saturating_add(step);
+                    }
+                }
+            }
+        } else {
+            for id in self.selection.clone() {
+                let Some((track, _)) = self.project.find(id) else {
+                    continue;
+                };
+                let Some(ev) = self.project.event(id).cloned() else {
+                    continue;
+                };
+                let shift = |v: u64| {
+                    u64::try_from(i64::try_from(v).unwrap_or(i64::MAX).saturating_add(step))
+                        .unwrap_or(0)
+                };
+                if length {
+                    let end = shift(ev.end()).max(ev.start.0 + 1);
+                    self.project.trim_end(id, end);
+                } else {
+                    self.project.move_event(id, track, shift(ev.start.0), false);
+                }
+            }
+        }
+        self.checkpoint(before);
+    }
+
     fn copy_selection(&mut self) {
         let mut events: Vec<(usize, Event)> = self
             .selection
@@ -104,7 +230,7 @@ impl ProjectWindow {
             .collect();
         events.sort_by_key(|(t, e)| (e.start.0, *t));
         if !events.is_empty() {
-            self.clipboard = Clipboard { events };
+            self.clipboard.events = events;
         }
     }
 

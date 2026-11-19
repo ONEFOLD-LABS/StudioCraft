@@ -2593,6 +2593,99 @@ mod tests {
     }
 
     #[test]
+    fn ctrl_arrows_nudge_events_by_the_grid() {
+        let (mut w, id) = one_event_window();
+        w.selection = vec![id];
+        let ev = w.project.event(id).cloned().unwrap();
+        let step = w.grid_ticks();
+        let mut h = window_harness(w);
+        h.key_press_modifiers(egui::Modifiers::COMMAND, Key::ArrowRight);
+        h.run_steps(1);
+        assert_eq!(
+            h.state().project.event(id).map(|e| e.start.0),
+            Some(ev.start.0 + step)
+        );
+        let cs = egui::Modifiers::COMMAND.plus(egui::Modifiers::SHIFT);
+        h.key_press_modifiers(cs, Key::ArrowLeft);
+        h.run_steps(1);
+        assert_eq!(
+            h.state().project.event(id).map(|e| e.length),
+            Some(ev.length - step)
+        );
+        // Plain arrows still select the neighbouring event, not nudge.
+        h.key_press(Key::ArrowRight);
+        h.run_steps(1);
+        assert_eq!(
+            h.state().project.event(id).map(|e| e.start.0),
+            Some(ev.start.0 + step)
+        );
+        h.state_mut().undo();
+        h.state_mut().undo();
+        assert_eq!(
+            h.state().project.event(id).map(|e| (e.start.0, e.length)),
+            Some((ev.start.0, ev.length))
+        );
+    }
+
+    #[test]
+    fn key_editor_copies_pastes_transposes_and_nudges_notes() {
+        let mut p = Project::default();
+        let t = p.add_track(TrackKind::Instrument, "Synth");
+        let part = p.create_event(t, 0, 4 * 3840).unwrap();
+        p.event_mut(part).unwrap().notes = vec![
+            studiocraft_project::Note {
+                pitch: 60,
+                velocity: 100,
+                start: 0,
+                length: 480,
+            },
+            studiocraft_project::Note {
+                pitch: 64,
+                velocity: 100,
+                start: 480,
+                length: 480,
+            },
+        ];
+        let mut w = ProjectWindow::new(p, None, String::new());
+        w.open_key_editor(part);
+        w.key_editor.focused = true;
+        w.key_editor.selection = vec![0, 1];
+        w.cursor = 3840;
+        let mut h = window_harness(w);
+        h.key_press_modifiers(egui::Modifiers::COMMAND, Key::C);
+        h.run_steps(1);
+        h.key_press_modifiers(egui::Modifiers::COMMAND, Key::V);
+        h.run_steps(1);
+        let notes = &h.state().project.event(part).unwrap().notes;
+        assert_eq!(notes.len(), 4);
+        assert_eq!((notes[2].start, notes[3].start), (3840, 4320));
+        assert_eq!(
+            h.state().key_editor.selection,
+            vec![2, 3],
+            "the pasted notes are selected"
+        );
+        h.key_press(Key::ArrowUp);
+        h.run_steps(1);
+        let notes = &h.state().project.event(part).unwrap().notes;
+        assert_eq!(
+            (notes[2].pitch, notes[3].pitch, notes[0].pitch),
+            (61, 65, 60)
+        );
+        let step = h.state().grid_ticks() as i64;
+        h.key_press_modifiers(egui::Modifiers::COMMAND, Key::ArrowRight);
+        h.run_steps(1);
+        assert_eq!(
+            h.state().project.event(part).unwrap().notes[2].start,
+            3840 + step
+        );
+        assert_eq!(
+            h.state().project.tracks.len(),
+            1,
+            "arrows did not change track selection"
+        );
+    }
+
+    #[test]
     fn sample_editor_processes_non_destructively_and_trims_to_the_selection() {
         let (mut w, id) = one_event_window();
         let old_clip = w.project.event(id).and_then(|e| e.clip).unwrap();

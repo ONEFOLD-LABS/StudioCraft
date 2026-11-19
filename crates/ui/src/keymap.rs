@@ -253,6 +253,34 @@ pub(crate) const COMMANDS: &[CommandInfo] = &[
         [k(N, Key::ArrowDown)]
     ),
     cmd!(
+        Cmd::Edit(EditCommand::NudgeLeft),
+        "nav.nudge_left",
+        "Nudge links",
+        "Navigation",
+        [k(C, Key::ArrowLeft)]
+    ),
+    cmd!(
+        Cmd::Edit(EditCommand::NudgeRight),
+        "nav.nudge_right",
+        "Nudge rechts",
+        "Navigation",
+        [k(C, Key::ArrowRight)]
+    ),
+    cmd!(
+        Cmd::Edit(EditCommand::Shorter),
+        "edit.shorter",
+        "Länge kürzen",
+        "Bearbeitung",
+        [k(CS, Key::ArrowLeft)]
+    ),
+    cmd!(
+        Cmd::Edit(EditCommand::Longer),
+        "edit.longer",
+        "Länge verlängern",
+        "Bearbeitung",
+        [k(CS, Key::ArrowRight)]
+    ),
+    cmd!(
         Cmd::Edit(EditCommand::Mute),
         "track.mute",
         "Mute",

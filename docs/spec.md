@@ -159,7 +159,7 @@ Snap ist global ein- und ausschaltbar (Taste J); wohin eingerastet wird, bestimm
 | Geteilte Kopie (Änderungen wirken auf alle Kopien) | Strg + Umschalt + Ziehen |
 | Nur horizontal oder vertikal | Ziehen, dann Strg halten (Richtung wird beim Loslassen fixiert) |
 | Wiederholen | Strg + D öffnet Dialog; Alt + Ziehen am rechten Rand wiederholt so oft wie gezogen |
-| Nudge | Pfeiltasten bewegen Auswahl um einen Rasterschritt (Strg + Pfeil: Länge) |
+| Nudge | Strg + Pfeil links/rechts verschiebt die Auswahl um einen Rasterschritt, Strg + Umschalt + Pfeil ändert ihre Länge (Pfeil allein wählt Event bzw. Spur); im Key-Editor gilt das für die gewählten Noten, Pfeil hoch/runter transponiert sie |
 
 ## Transport und Aufnahme
 
