@@ -20,3 +20,7 @@ in which order the window buttons sit, and to make the bar move the window.
 Windows packaging: packaging/windows (package.ps1, sign.ps1, studiocraft.wxs) and
 apps/studiocraft/build.rs are adapted from SoundCraft (storytold/soundcraft,
 packaging/windows and apps/soundcraft/build.rs), licensed under Apache-2.0.
+
+macOS packaging: packaging/macos (package.sh, import-cert.sh, Info.plist.in,
+entitlements.plist) is adapted from SoundCraft (storytold/soundcraft,
+packaging/macos), licensed under Apache-2.0.
