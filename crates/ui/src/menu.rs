@@ -159,9 +159,21 @@ impl ProjectWindow {
                 ui.checkbox(&mut self.show_right, "Rechte Zone (Alt+R)");
                 ui.menu_button("Layouts", |ui| self.layouts_menu(ui));
                 if ui
+                    .selectable_label(self.windows.mixer, "Mixer-Fenster (F3)")
+                    .clicked()
+                {
+                    self.toggle_mixer_window();
+                    ui.close();
+                }
+                if ui.button("Editor im eigenen Fenster (Strg+E)").clicked() {
+                    self.open_editor_window();
+                    ui.close();
+                }
+                ui.separator();
+                if ui
                     .selectable_label(
                         self.show_lower && self.lower == crate::LowerZone::Mixer,
-                        "Mixer (F3)",
+                        "Mixer (untere Zone)",
                     )
                     .clicked()
                 {

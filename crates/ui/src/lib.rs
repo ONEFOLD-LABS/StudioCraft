@@ -50,6 +50,7 @@ mod timeline;
 pub mod titlebar;
 mod tools;
 pub mod waveform;
+mod windows;
 
 use std::{
     collections::HashMap,
@@ -99,6 +100,8 @@ pub struct ProjectWindow {
     /// Offene Farbpalette (Klick auf die Farbleiste im Spurkopf) und ihr Alter in Bildern.
     color_popup: Option<(colors::Target, egui::Pos2)>,
     color_popup_age: u8,
+    /// Eigene Fenster für Mixer und Editoren.
+    windows: windows::Windows,
     /// Inspector-Spalte in der linken Zone (Alt+I); die Zone selbst ist `show_inspector`
     /// (Alt+L).
     show_inspector_column: bool,
@@ -260,6 +263,7 @@ impl ProjectWindow {
             grid_zoom: false,
             color_popup: None,
             color_popup_age: 0,
+            windows: windows::Windows::new(prefs.windows),
             show_inspector_column: true,
             layout_gen: 0,
             zone_sizes: [None; 3],
@@ -584,6 +588,7 @@ impl ProjectWindow {
             stop_twice: self.stop_twice,
             audio: self.audio_choice.clone(),
             midi_inputs: self.midi_inputs_on,
+            windows: self.windows.rects,
         };
         if let Err(e) = s.save() {
             self.message = Some(format!("Einstellung nicht gespeichert: {e}"));
@@ -872,12 +877,17 @@ impl ProjectWindow {
                             }
                         });
                         ui.separator();
-                        ui.with_layout(egui::Layout::top_down(egui::Align::LEFT), |ui| match self
-                            .lower
-                        {
-                            LowerZone::Mixer => mixer::show(self, ui),
-                            LowerZone::Editor => keyeditor::show(self, ui),
-                            LowerZone::SampleEditor => sampleeditor::show(self, ui),
+                        ui.with_layout(egui::Layout::top_down(egui::Align::LEFT), |ui| {
+                            let zone = self.lower;
+                            if self.in_own_window(zone) {
+                                self.own_window_placeholder(ui, zone);
+                                return;
+                            }
+                            match zone {
+                                LowerZone::Mixer => mixer::show(self, ui),
+                                LowerZone::Editor => keyeditor::show(self, ui),
+                                LowerZone::SampleEditor => sampleeditor::show(self, ui),
+                            }
                         });
                     });
                 });
@@ -936,6 +946,7 @@ impl ProjectWindow {
         self.repeat_dialog(ui.ctx());
         self.fade_editor_dialog(ui.ctx());
         self.device_dialog(ui.ctx());
+        self.show_windows(ui.ctx());
 
         self.sync_tempo();
         let playing = self.is_playing();
@@ -4026,6 +4037,54 @@ mod tests {
         w.undo();
         assert!(w.project.event(id).is_some());
         assert!(w.project.layout.right && w.show_right);
+    }
+
+    #[test]
+    fn f3_opens_the_mixer_in_its_own_window() {
+        let (mut w, _) = one_event_window();
+        w.show_lower = true;
+        w.lower = LowerZone::Mixer;
+        let mut h = window_harness(w);
+        h.key_press(Key::F3);
+        h.run_steps(3);
+        assert!(h.state().windows.mixer);
+        // The lower zone only points to the window; the mixer is drawn once, in the window.
+        h.get_by_label("Läuft im eigenen Fenster.");
+        assert!(h.query_by_label("In die untere Zone").is_some());
+        h.get_by_label("In die untere Zone").click();
+        h.run_steps(3);
+        assert!(!h.state().windows.mixer);
+        assert!(h.state().show_lower && h.state().lower == LowerZone::Mixer);
+        assert!(h.query_by_label("Läuft im eigenen Fenster.").is_none());
+    }
+
+    #[test]
+    fn ctrl_e_opens_the_editor_of_the_selected_event() {
+        let (mut w, id) = one_event_window();
+        w.show_lower = false;
+        let mut h = window_harness(w);
+        // Nothing selected: only a message.
+        h.key_press_modifiers(egui::Modifiers::COMMAND, Key::E);
+        h.run_steps(2);
+        assert!(h.state().windows.editor.is_none());
+        assert!(h.state().message.is_some());
+        // An audio event opens the sample editor window; the lower zone stays as it was.
+        h.state_mut().selection = vec![id];
+        h.key_press_modifiers(egui::Modifiers::COMMAND, Key::E);
+        h.run_steps(3);
+        assert_eq!(
+            h.state().windows.editor,
+            Some(windows::EditorWindow::Sample)
+        );
+        assert_eq!(h.state().sample_editor.event, Some(id));
+        assert!(!h.state().show_lower);
+    }
+
+    #[test]
+    fn renders_mixer_window() {
+        shot("mixer-fenster", |w| {
+            w.toggle_mixer_window();
+        });
     }
 
     #[test]
