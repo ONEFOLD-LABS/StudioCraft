@@ -13,6 +13,8 @@ use studiocraft_project::{EventId, Note};
 
 use crate::{ProjectWindow, TPQ, Tool};
 
+mod lanes;
+
 const KEYS_W: f32 = 52.0;
 const RULER_H: f32 = 20.0;
 const VEL_H: f32 = 70.0;
@@ -72,6 +74,11 @@ pub(crate) struct KeyEditor {
     pub focused: bool,
     /// Akustisches Feedback: angeklickte und verschobene Noten erklingen.
     pub feedback: bool,
+    /// Controller-Spuren unter der Velocity-Spur (lanes.rs).
+    pub lanes: Vec<studiocraft_project::CtrlKind>,
+    /// Gewählte Controller-Punkte (Indizes in `Event::controllers` des aktiven Parts).
+    pub ctrl_sel: Vec<usize>,
+    pub ctrl_drag: Option<lanes::CtrlDrag>,
     /// Lage des Notenrasters und der Velocity-Spur im letzten Frame (für Tests).
     pub grid_rect: Rect,
     pub vel_rect: Rect,
@@ -88,6 +95,9 @@ impl Default for KeyEditor {
             preview: None,
             focused: false,
             feedback: true,
+            lanes: Vec::new(),
+            ctrl_sel: Vec::new(),
+            ctrl_drag: None,
             grid_rect: Rect::NOTHING,
             vel_rect: Rect::NOTHING,
         }
@@ -154,6 +164,7 @@ impl ProjectWindow {
         let (start, notes) = (ev.start.0, ev.notes.clone());
         self.key_editor.part = Some(part);
         self.key_editor.open = vec![part];
+        self.key_editor.ctrl_sel.clear();
         self.key_editor.selection.clear();
         self.key_editor.view.scroll_ticks = start as f64;
         if let Some(mid) = notes.iter().map(|n| i32::from(n.pitch)).max() {
@@ -208,6 +219,7 @@ impl ProjectWindow {
         if self.key_editor.open.contains(&id) && self.project.event(id).is_some() {
             self.key_editor.part = Some(id);
             self.key_editor.selection.clear();
+            self.key_editor.ctrl_sel.clear();
             self.key_editor.drag = None;
         }
     }
@@ -252,6 +264,11 @@ impl ProjectWindow {
     }
 
     pub(crate) fn delete_selected_notes(&mut self) {
+        // Gewählte Controller-Punkte haben Vorrang (zuletzt in einer Controller-Spur gewählt).
+        if !self.key_editor.ctrl_sel.is_empty() {
+            self.delete_selected_ctrls();
+            return;
+        }
         let Some(part) = self.key_editor.part else {
             return;
         };
@@ -313,6 +330,12 @@ pub(crate) fn show(w: &mut ProjectWindow, ui: &mut Ui) {
                 }
             }
         }
+        ui.menu_button("+ Controller-Spur", |ui| {
+            if let Some(k) = lanes::kind_menu(ui) {
+                w.add_ctrl_lane(k);
+                ui.close();
+            }
+        });
         // Info-Zeile der gewählten Noten (noteinfo.rs).
         if !w.key_editor.selection.is_empty() {
             ui.separator();
@@ -321,9 +344,12 @@ pub(crate) fn show(w: &mut ProjectWindow, ui: &mut Ui) {
     });
     let (resp, painter) = ui.allocate_painter(ui.available_size(), Sense::click_and_drag());
     let r = resp.rect;
+    // Unten: Velocity-Spur, darunter die Controller-Spuren.
+    let lanes_h = w.key_editor.lanes.len() as f32 * lanes::CTRL_H;
+    let bottom_h = VEL_H + lanes_h;
     let keys = Rect::from_min_max(
         pos2(r.left(), r.top() + RULER_H),
-        pos2(r.left() + KEYS_W, r.bottom() - VEL_H),
+        pos2(r.left() + KEYS_W, r.bottom() - bottom_h),
     );
     let ruler = Rect::from_min_max(
         pos2(r.left() + KEYS_W, r.top()),
@@ -331,9 +357,29 @@ pub(crate) fn show(w: &mut ProjectWindow, ui: &mut Ui) {
     );
     let grid = Rect::from_min_max(
         pos2(r.left() + KEYS_W, r.top() + RULER_H),
-        pos2(r.right(), r.bottom() - VEL_H),
+        pos2(r.right(), r.bottom() - bottom_h),
     );
-    let vel = Rect::from_min_max(pos2(r.left() + KEYS_W, r.bottom() - VEL_H + 4.0), r.max);
+    let vel = Rect::from_min_max(
+        pos2(r.left() + KEYS_W, r.bottom() - bottom_h + 4.0),
+        pos2(r.right(), r.bottom() - lanes_h),
+    );
+    let ctrl_lanes: Vec<lanes::Lane> = w
+        .key_editor
+        .lanes
+        .iter()
+        .enumerate()
+        .map(|(index, &kind)| {
+            let top = r.bottom() - lanes_h + index as f32 * lanes::CTRL_H;
+            lanes::Lane {
+                index,
+                kind,
+                rect: Rect::from_min_max(
+                    pos2(r.left() + KEYS_W, top + 2.0),
+                    pos2(r.right(), top + lanes::CTRL_H),
+                ),
+            }
+        })
+        .collect();
     // Taste F: während der Wiedergabe mitblättern, wenn der Cursor hinausläuft.
     if w.follow_playback && w.is_playing() {
         let v = &mut w.key_editor.view;
@@ -383,7 +429,9 @@ pub(crate) fn show(w: &mut ProjectWindow, ui: &mut Ui) {
     w.key_editor.grid_rect = grid;
     w.key_editor.vel_rect = vel;
 
-    interact(w, ui, &resp, &g, part, &ev.notes);
+    if !lanes::interact(w, ui, &resp, &g, part, &ctrl_lanes) {
+        interact(w, ui, &resp, &g, part, &ev.notes);
+    }
 
     let notes = w
         .project
@@ -438,6 +486,13 @@ pub(crate) fn show(w: &mut ProjectWindow, ui: &mut Ui) {
         &w.key_editor.selection,
         color,
     );
+    let ctrls = w
+        .project
+        .event(part)
+        .map(|e| e.controllers.clone())
+        .unwrap_or_default();
+    lanes::paint(w, &painter, &g, &ctrl_lanes, &ctrls, color);
+    lanes::heads(w, ui, &ctrl_lanes, r.left());
     // Projekt-Cursor
     let cx = g.x(w.cursor as f64);
     painter.with_clip_rect(ruler.union(grid)).vline(
