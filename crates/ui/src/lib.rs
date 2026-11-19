@@ -35,6 +35,7 @@ mod layouts_ui;
 mod macros;
 mod markers_ui;
 mod menu;
+mod midiout_ui;
 mod mixer;
 mod noteinfo;
 mod quantize;
@@ -102,6 +103,10 @@ pub struct ProjectWindow {
     /// Offene Farbpalette (Klick auf die Farbleiste im Spurkopf) und ihr Alter in Bildern.
     color_popup: Option<(colors::Target, egui::Pos2)>,
     color_popup_age: u8,
+    /// Ausgabe-Thread für externe MIDI-Geräte (nur mit Engine).
+    midi_out: Option<studiocraft_engine::midi_out::MidiOutThread>,
+    /// Zuletzt gelesene MIDI-Ausgänge des Systems (Inspector einer MIDI-Spur).
+    midi_out_ports: Option<Vec<String>>,
     /// Taste F: Projektfenster und Editoren folgen der Wiedergabe.
     follow_playback: bool,
     /// Eigene Fenster für Mixer und Editoren.
@@ -277,6 +282,8 @@ impl ProjectWindow {
             grid_zoom: false,
             color_popup: None,
             color_popup_age: 0,
+            midi_out: None,
+            midi_out_ports: None,
             follow_playback: true,
             windows: windows::Windows::new(prefs.windows),
             show_inspector_column: true,
@@ -368,6 +375,13 @@ impl ProjectWindow {
             tempo_track_before: None,
         };
         w.apply_layout(w.project.layout.clone());
+        // MIDI-Ausgang: der Thread übernimmt den Puffer, den der Audio-Thread füllt.
+        if let Some(rx) = w.transport.as_mut().and_then(|t| t.midi_out.take()) {
+            match studiocraft_engine::midi_out::MidiOutThread::spawn(rx) {
+                Ok(t) => w.midi_out = Some(t),
+                Err(e) => w.message = Some(e),
+            }
+        }
         w.saved = Some(w.project.clone());
         w.send_locators();
         w
@@ -619,6 +633,7 @@ impl ProjectWindow {
 
     /// Wiedergabe ab dem Cursor; merkt die Startposition für das Stopp-Verhalten.
     pub(crate) fn play(&mut self) {
+        self.send_programs();
         self.play_from = self.cursor;
         self.send(Command::Play);
     }
@@ -801,6 +816,9 @@ impl ProjectWindow {
             .map(|(&id, c)| (id, c.samples.clone()))
             .collect();
         let song = Song::build(&self.project, &samples, self.sample_rate);
+        if let Some(out) = &self.midi_out {
+            out.set_ports(song.midi_ports.clone());
+        }
         t.send(Command::SetSong(Arc::new(song)));
     }
 
@@ -1333,6 +1351,9 @@ impl ProjectWindow {
         let kind = track.kind;
         let channel = crate::mixer::has_channel(kind);
         self.folder_ui(ui, idx);
+        if kind == TrackKind::Midi {
+            inspector_section(ui, "MIDI-Ausgang", true, |ui| self.midi_out_ui(ui, idx));
+        }
         if kind == TrackKind::Audio || channel {
             inspector_section(ui, "Routing", true, |ui| {
                 let track = &mut self.project.tracks[idx];
@@ -4633,6 +4654,34 @@ mod tests {
         drag_with(&mut h, a, b, egui::Modifiers::NONE, egui::Modifiers::NONE);
         let now = h.state().project.event(id).map(|e| e.start.0).unwrap_or(0);
         assert_eq!(now, start + bar);
+    }
+
+    #[test]
+    fn midi_track_inspector_sets_channel_and_program() {
+        let mut p = Project::default();
+        let t = p.add_track(TrackKind::Midi, "Gerät");
+        p.tracks[t].midi_port = Some("Synth A".into());
+        let mut w = ProjectWindow::new(p, None, String::new());
+        w.selected_track = Some(t);
+        // No real ports in the test: the saved one stays selectable as missing.
+        w.midi_out_ports = Some(Vec::new());
+        let mut h = window_harness(w);
+        h.run_steps(2);
+        h.get_by_label("MIDI-Ausgang");
+        h.get_by_label("Programm").click();
+        h.run_steps(2);
+        assert_eq!(h.state().project.tracks[t].program, Some(0));
+        h.state_mut().undo();
+        assert_eq!(h.state().project.tracks[t].program, None, "one undo step");
+        // Saved values are sanitized on load.
+        let mut q = h.state().project.clone();
+        q.tracks[t].midi_channel = 99;
+        q.tracks[t].program = Some(200);
+        q.sanitize();
+        assert_eq!(
+            (q.tracks[t].midi_channel, q.tracks[t].program),
+            (16, Some(127))
+        );
     }
 
     #[test]
