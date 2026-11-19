@@ -252,6 +252,8 @@ pub struct EngineCore {
     send_gain: Box<[f32]>,
     /// Filterzustände des Kanal-EQs je Projektspur, vorab angelegt.
     eq_state: Vec<crate::eq::EqState>,
+    /// Zustand der Pre-Filter je Spur (Hochpass, Tiefpass; links, rechts).
+    pre_state: Vec<[[crate::eq::BandState; 2]; 2]>,
     /// Gehaltene Noten je Spur (Bit = Tonhöhe), für „alle Noten aus“.
     held: Vec<u128>,
     /// Beim nächsten Block alle gehaltenen Noten beenden (Stopp, Sprung, Cycle).
@@ -348,6 +350,7 @@ pub fn engine(sample_rate: u32, tempo: TempoMap) -> (EngineCore, EngineControl) 
         ],
         send_gain: vec![0.0; SCRATCH_FRAMES].into(),
         eq_state: vec![Default::default(); MAX_METERED_TRACKS],
+        pre_state: vec![Default::default(); MAX_METERED_TRACKS],
         status: status.clone(),
         meters: meters.clone(),
         scratch: vec![0.0; SCRATCH_FRAMES * 2].into_boxed_slice(),
@@ -837,7 +840,7 @@ impl EngineCore {
                     }
                     continue;
                 }
-                let chain = self
+                let mut chain = self
                     .inserts
                     .get_mut(track.slot)
                     .and_then(|c| c.as_deref_mut())
@@ -855,7 +858,7 @@ impl EngineCore {
                 if let Some((first, stereo)) = track.monitor {
                     mix_into(tmp, input, in_ch, first, stereo);
                 }
-                if let Some(chain) = chain {
+                if let Some(chain) = chain.as_deref_mut() {
                     let held = &mut self.held[track.slot.min(MAX_METERED_TRACKS - 1)];
                     if panic {
                         for key in 0..128u8 {
@@ -912,7 +915,41 @@ impl EngineCore {
                         pl[i] = f[0];
                         pr[i] = f[1];
                     }
-                    chain.process(&mut pl[..frames], &mut pr[..frames]);
+                    // Erst nur das Instrument; die Insert-Slots folgen hinter der Pre-Sektion.
+                    chain.process_instrument(&mut pl[..frames], &mut pr[..frames]);
+                    for (i, f) in tmp.chunks_exact_mut(2).enumerate() {
+                        f[0] = pl[i];
+                        f[1] = pr[i];
+                    }
+                }
+                // Eingangsgain und Phase, dann Hoch- und Tiefpass (Spec „Signalfluss“).
+                if let Some(g) = track.input_gain {
+                    for v in tmp.iter_mut() {
+                        *v *= g;
+                    }
+                }
+                if !track.pre_filters.is_empty()
+                    && let Some(state) = self.pre_state.get_mut(track.slot)
+                {
+                    for &(k, f) in &track.pre_filters {
+                        let Some([l, r]) = state.get_mut(k) else {
+                            continue;
+                        };
+                        for fr in tmp.chunks_exact_mut(2) {
+                            fr[0] = f.tick(l, fr[0]);
+                            fr[1] = f.tick(r, fr[1]);
+                        }
+                    }
+                }
+                // Inserts vor dem Fader (Slots 1–6 als Standard).
+                let post_from = track.post_from.unwrap_or(usize::MAX);
+                if let Some(chain) = chain.as_deref_mut().filter(|c| c.has_pre(post_from)) {
+                    let [pl, pr] = &mut self.planar;
+                    for (i, f) in tmp.chunks_exact(2).enumerate() {
+                        pl[i] = f[0];
+                        pr[i] = f[1];
+                    }
+                    chain.process_slots(false, post_from, &mut pl[..frames], &mut pr[..frames]);
                     for (i, f) in tmp.chunks_exact_mut(2).enumerate() {
                         f[0] = pl[i];
                         f[1] = pr[i];
@@ -1006,6 +1043,22 @@ impl EngineCore {
                         t[1] *= track.gain_r;
                         pl = pl.max(t[0].abs());
                         pr = pr.max(t[1].abs());
+                    }
+                }
+                // Inserts hinter dem Fader (Slots 7–8 als Standard); Pegel danach messen.
+                if let Some(chain) = chain.filter(|c| c.has_post(post_from)) {
+                    let [ql, qr] = &mut self.planar;
+                    for (i, f) in tmp.chunks_exact(2).enumerate() {
+                        ql[i] = f[0];
+                        qr[i] = f[1];
+                    }
+                    chain.process_slots(true, post_from, &mut ql[..frames], &mut qr[..frames]);
+                    (pl, pr) = (0.0, 0.0);
+                    for (i, f) in tmp.chunks_exact_mut(2).enumerate() {
+                        f[0] = ql[i];
+                        f[1] = qr[i];
+                        pl = pl.max(f[0].abs());
+                        pr = pr.max(f[1].abs());
                     }
                 }
                 self.meters.feed_track(track.slot, pl, pr);
@@ -1254,6 +1307,53 @@ mod tests {
         // Combined centre leaves the signal as it is.
         let (l, r) = run(Some(pan_matrix(PanMode::Combined, 0.0)), 1.0, 1.0);
         assert!((l - 1.0).abs() < 1e-6 && r.abs() < 1e-6, "{l} {r}");
+    }
+
+    #[test]
+    fn input_gain_phase_and_pre_filters_act_before_the_fader() {
+        let ones: Arc<[f32]> = vec![1.0; 2 * 4096].into();
+        let run = |input_gain: Option<f32>, filters: Vec<(usize, crate::eq::Biquad)>| {
+            let (mut core, mut ctl) = engine(48_000, TempoMap::default());
+            let track = crate::PlayTrack {
+                gain_l: 0.5,
+                gain_r: 0.5,
+                input_gain,
+                pre_filters: filters,
+                events: vec![crate::song::PlayEvent::new(0, 4096, 0, ones.clone())],
+                ..Default::default()
+            };
+            ctl.send(Command::SetSong(Arc::new(Song {
+                tracks: vec![track],
+                master: 1.0,
+                ..Default::default()
+            })));
+            ctl.send(Command::Play);
+            let mut out = vec![0.0f32; 2 * 4096];
+            core.process(&mut out);
+            out
+        };
+        // Gain −6 dB with inverted phase, then the fader halves it again.
+        let g = -studiocraft_project::db_to_gain(-6.0);
+        let out = run(Some(g), Vec::new());
+        assert!(
+            (out[0] - g * 0.5).abs() < 1e-6 && out[0] < 0.0,
+            "{}",
+            out[0]
+        );
+        // A high-pass removes the DC signal after a while.
+        let hp = crate::eq::Biquad::design(
+            &studiocraft_project::EqBand {
+                on: true,
+                kind: studiocraft_project::BandKind::LowCut,
+                freq: 1000.0,
+                gain: 0.0,
+                q: std::f32::consts::FRAC_1_SQRT_2,
+            },
+            48_000,
+        );
+        let out = run(None, vec![(0, hp)]);
+        let tail = out[2 * 4000].abs();
+        assert!(tail < 1e-3, "high-pass leaves DC: {tail}");
     }
 
     fn left(out: &[f32]) -> Vec<f32> {

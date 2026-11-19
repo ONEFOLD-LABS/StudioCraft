@@ -41,6 +41,7 @@ mod midiout_ui;
 mod mixer;
 mod noteinfo;
 mod panel_undo;
+mod pre_ui;
 mod quantize;
 mod recording;
 mod rightzone;
@@ -1431,6 +1432,9 @@ impl ProjectWindow {
         }
         if kind == TrackKind::Tempo {
             inspector_section(ui, "Tempo", true, |ui| self.tempo_track_ui(ui));
+        }
+        if channel {
+            inspector_section(ui, "Pre", false, |ui| self.pre_ui(ui, idx));
         }
         if kind == TrackKind::Instrument {
             inspector_section(ui, "Instrument", true, |ui| self.instrument_ui(ui, idx));
@@ -5072,6 +5076,27 @@ mod tests {
                     state: None,
                 });
         });
+    }
+
+    #[test]
+    fn pre_section_sets_filters_and_phase() {
+        let (mut w, _) = one_event_window();
+        w.selected_track = Some(0);
+        w.show_lower = false;
+        let mut h = window_harness(w);
+        h.run_steps(2);
+        h.get_by_label("Pre").click();
+        h.run_steps(2);
+        h.get_by_label("Hochpass").click();
+        h.run_steps(2);
+        h.get_by_label("Phase umkehren").click();
+        h.run_steps(2);
+        let t = &h.state().project.tracks[0];
+        assert_eq!(t.pre_hpf, Some(80.0));
+        assert!(t.phase_invert);
+        assert_eq!(t.pre_lpf, None);
+        h.state_mut().undo();
+        assert!(!h.state().project.tracks[0].phase_invert, "undoable");
     }
 
     #[test]
