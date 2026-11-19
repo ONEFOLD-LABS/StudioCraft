@@ -96,6 +96,7 @@ impl ProjectWindow {
                     }
                 }
                 self.render_menu(ui);
+                self.freeze_menu(ui);
                 self.event_color_menu(ui);
                 if ui.button("Quantisierungs-Panel …").clicked() {
                     self.show_quantize = true;

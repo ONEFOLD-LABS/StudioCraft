@@ -270,9 +270,19 @@ impl Song {
                     }
                 }
                 events.sort_by_key(|e| e.start);
+                // Eingefroren: nur der gerenderte Clip klingt (fehlt er, bleibt die Spur still).
+                if let Some(f) = &t.frozen {
+                    events.clear();
+                    if let Some(samples) = clips.get(&f.clip) {
+                        let frames = (samples.len() / 2) as u64;
+                        let at = tempo.frames(f.start, rate);
+                        events.push(PlayEvent::new(at, frames, 0, samples.clone()));
+                    }
+                }
+                let frozen = t.frozen.is_some();
                 // Noten aller nicht stummen Parts; nur der sichtbare Teil klingt.
                 let mut notes = Vec::new();
-                if matches!(t.kind, TrackKind::Instrument | TrackKind::Midi) {
+                if !frozen && matches!(t.kind, TrackKind::Instrument | TrackKind::Midi) {
                     for e in t.events.iter().filter(|e| !e.muted) {
                         let len = e.length as i64;
                         for n in e.notes.iter().filter(|n| n.start >= 0 && n.start < len) {
@@ -290,7 +300,7 @@ impl Song {
                 }
                 // Controller der nicht stummen Parts, nur im sichtbaren Teil.
                 let mut ctrls = Vec::new();
-                if matches!(t.kind, TrackKind::Instrument | TrackKind::Midi) {
+                if !frozen && matches!(t.kind, TrackKind::Instrument | TrackKind::Midi) {
                     for e in t.events.iter().filter(|e| !e.muted) {
                         let len = e.length as i64;
                         for c in e
@@ -313,11 +323,16 @@ impl Song {
                     let input = project.input_of(slot);
                     (input.first, input.stereo)
                 });
-                let auto = crate::automation::TrackAuto::build(t, tempo, rate);
+                let mut auto = crate::automation::TrackAuto::build(t, tempo, rate);
+                // Eingefroren: Plugin-Automation steckt im Clip.
+                if frozen && let Some(a) = auto.as_mut() {
+                    a.plugins.clear();
+                }
                 // Eingang und Pre-Sektion (Spec „Signalfluss“, Punkte 1 und 2).
                 let gain = studiocraft_project::db_to_gain(t.input_gain_db)
                     * if t.phase_invert { -1.0 } else { 1.0 };
-                let input_gain = (gain != 1.0).then_some(gain);
+                // Eingefroren: Eingang und Pre-Sektion stecken schon im Clip.
+                let input_gain = (gain != 1.0 && !frozen).then_some(gain);
                 let filter = |kind, freq: Option<f32>| {
                     freq.map(|f| {
                         crate::eq::Biquad::design(
@@ -339,6 +354,7 @@ impl Song {
                 .into_iter()
                 .enumerate()
                 .filter_map(|(i, f)| f.map(|f| (i, f)))
+                .filter(|_| !frozen)
                 .collect();
                 let post_from = Some(usize::from(project.pre_fader_inserts));
                 // MIDI-Spuren mit Ausgang: Port-Platz und Kanal.
@@ -954,5 +970,55 @@ mod tests {
         assert_eq!(Song::build(&p, &clips, 48_000).tracks.len(), 1);
         p.tracks[1].mute = true;
         assert_eq!(Song::build(&p, &clips, 48_000).tracks.len(), 0);
+    }
+    #[test]
+    fn a_frozen_track_plays_its_clip_instead_of_notes_and_pre_section() {
+        use studiocraft_project::{Frozen, Note};
+        let mut p = Project::default();
+        let t = p.add_track(TrackKind::Instrument, "Synth");
+        let q = TICKS_PER_QUARTER;
+        let id = p.create_event(t, 0, 2 * q).unwrap();
+        p.event_mut(id).unwrap().notes = vec![Note {
+            pitch: 60,
+            velocity: 100,
+            start: 0,
+            length: q,
+        }];
+        p.tracks[t].instrument = Some(studiocraft_project::InsertSlot {
+            plugin_id: "x".into(),
+            name: "X".into(),
+            bypass: false,
+            params: Vec::new(),
+            state: None,
+        });
+        p.tracks[t].input_gain_db = 6.0;
+        p.tracks[t].pre_hpf = Some(100.0);
+        let c = p.add_clip(PoolClip {
+            name: "Synth (eingefroren)".into(),
+            path: None,
+            sample_rate: 48_000,
+            frames: 300,
+        });
+        let clips = HashMap::from([(c, ones(300, 0.5))]);
+        let live = Song::build(&p, &clips, 48_000);
+        assert_eq!(live.tracks[0].notes.len(), 1);
+        assert!(live.tracks[0].input_gain.is_some());
+
+        p.tracks[t].frozen = Some(Frozen { clip: c, start: q });
+        let song = Song::build(&p, &clips, 48_000);
+        let pt = &song.tracks[0];
+        assert!(pt.notes.is_empty(), "Noten stecken im Clip");
+        assert_eq!(pt.input_gain, None);
+        assert!(pt.pre_filters.is_empty());
+        assert_eq!(pt.events.len(), 1);
+        assert_eq!((pt.events[0].start, pt.events[0].length), (24_000, 300));
+
+        // Fehlt der Clip, bleibt die Spur still statt ohne Plugins zu spielen.
+        let song = Song::build(&p, &HashMap::new(), 48_000);
+        assert!(
+            song.tracks
+                .iter()
+                .all(|t| t.events.is_empty() && t.notes.is_empty())
+        );
     }
 }

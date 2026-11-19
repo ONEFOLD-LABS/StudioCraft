@@ -428,6 +428,10 @@ fn lane_of(track: &Track, id: EventId) -> usize {
 /// unter `y`, sonst das oberste (klingende).
 fn hit_event(w: &ProjectWindow, g: &Geo, row: usize, y: f32, ticks: u64) -> Option<EventId> {
     let track = w.project.tracks.get(row)?;
+    // Eingefroren: Events gesperrt.
+    if track.frozen.is_some() {
+        return None;
+    }
     let lane = ((y - g.row_top(row)) / g.view.row_h).floor().max(0.0) as usize;
     // Darunter liegen die Automationsspuren.
     if lane >= automation::take_lanes(track) {
@@ -1965,6 +1969,9 @@ fn paint_lanes(w: &ProjectWindow, painter: &Painter, g: &Geo) {
         }
     }
     for row in g.visible_rows() {
+        if w.project.tracks[row].frozen.is_some() {
+            paint_frozen(painter, g, row);
+        }
         if w.project.tracks[row].kind == TrackKind::Folder {
             paint_folder_summary(w, painter, g, row);
         }
@@ -2043,6 +2050,22 @@ fn paint_recording(w: &ProjectWindow, painter: &Painter, g: &Geo) {
 }
 
 /// Ein Event: farbige Namensleiste oben, darunter der Inhalt (bei Audio die Wellenform).
+/// Eingefrorene Spur: Events abgedunkelt und gesperrt, mit Hinweis am linken Rand.
+fn paint_frozen(painter: &Painter, g: &Geo, row: usize) {
+    let tk = crate::theme::tokens(painter.ctx());
+    let top = g.row_top(row);
+    let r = Rect::from_x_y_ranges(g.lanes.x_range(), top..=top + g.view.row_h);
+    // Halbdurchsichtig in Hintergrundfarbe: Events bleiben zu sehen, wirken aber gesperrt.
+    painter.rect_filled(r.intersect(g.lanes), 0.0, tk.window_bg.gamma_multiply(0.6));
+    painter.text(
+        pos2(g.lanes.left() + 6.0, top + g.view.row_h - 4.0),
+        egui::Align2::LEFT_BOTTOM,
+        "Eingefroren",
+        egui::FontId::proportional(12.0),
+        tk.text,
+    );
+}
+
 fn paint_event(
     w: &ProjectWindow,
     painter: &Painter,

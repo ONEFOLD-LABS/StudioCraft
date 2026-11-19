@@ -312,7 +312,20 @@ pub struct Track {
     /// Sends an FX-Kanäle oder Gruppen (Spec: Sends 1–8).
     #[serde(default)]
     pub sends: Vec<SendSlot>,
+    /// Eingefroren: Instrument und Inserts klingen als gerenderter Clip, die Plugins sind
+    /// entladen und die Events gesperrt (Spec „Einfrieren“).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub frozen: Option<Frozen>,
     pub events: Vec<Event>,
+}
+
+/// Gerendertes Signal einer eingefrorenen Spur.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct Frozen {
+    /// Clip im Pool (Stereo, Projekt-Abtastrate).
+    pub clip: ClipId,
+    /// Anfang des Clips in Ticks.
+    pub start: u64,
 }
 
 /// Zeitbasis einer Spur (Spec „Zeitbasis“): Musikalische Events hängen an Takten und wandern
@@ -859,6 +872,7 @@ impl Project {
                 instrument: None,
                 output: None,
                 sends: Vec::new(),
+                frozen: None,
                 events: Vec::new(),
             };
             if kind.holds_events() {
@@ -1463,6 +1477,7 @@ impl Project {
             instrument: None,
             output: None,
             sends: Vec::new(),
+            frozen: None,
             events: Vec::new(),
         });
         i

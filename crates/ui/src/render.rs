@@ -149,7 +149,8 @@ impl ProjectWindow {
         let mut missing = Vec::new();
         for &i in &keep {
             let pt = project.tracks[i].clone();
-            if pt.mute {
+            // Eingefrorene Spuren spielen ihren Clip, ohne Plugins.
+            if pt.mute || pt.frozen.is_some() {
                 continue;
             }
             let mut chain = InsertChain::default();

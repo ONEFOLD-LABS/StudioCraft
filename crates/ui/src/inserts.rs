@@ -135,8 +135,18 @@ impl ProjectWindow {
         sent.resize_with(n, SentChain::default);
         let mut missing = Vec::new();
         for (i, have) in sent.iter_mut().enumerate() {
-            let want = self.project.tracks[i].inserts.clone();
-            let want_instr = self.project.tracks[i].instrument.clone();
+            // Eingefroren: Plugins entladen (der Zustand steht schon im Projekt).
+            let frozen = self.project.tracks[i].frozen.is_some();
+            let want = if frozen {
+                Vec::new()
+            } else {
+                self.project.tracks[i].inserts.clone()
+            };
+            let want_instr = if frozen {
+                None
+            } else {
+                self.project.tracks[i].instrument.clone()
+            };
             let same_instr = match (&want_instr, &have.instrument) {
                 (None, None) => true,
                 (Some(a), Some(b)) => a.same_plugin(b),
@@ -494,6 +504,14 @@ impl ProjectWindow {
 
     /// Insert-Bereich des Inspectors.
     pub(crate) fn inserts_ui(&mut self, ui: &mut Ui, track: usize) {
+        // Eingefroren: Plugins entladen, Inserts gesperrt.
+        if self.project.tracks[track].frozen.is_some() {
+            ui.weak("Eingefroren – Plugins entladen");
+            if ui.button("Einfrieren aufheben").clicked() {
+                self.unfreeze_track(track);
+            }
+            return;
+        }
         // Latenz der Spur durch Plugins (Latenzausgleich, Issue #51).
         let lat = self.track_latency(track);
         if lat > 0 {
