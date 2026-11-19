@@ -410,18 +410,22 @@ impl EngineCore {
         const LEVEL: f32 = 0.5;
         let rate = self.sample_rate.max(1);
         let tempo = &self.song.tempo;
-        let beat = tempo.signature.beat_ticks().max(1);
-        let per_bar = u64::from(tempo.signature.numerator.max(1));
-        // Erste Zählzeit ab `pos` (in Ticks), dann jede weitere bis zum Blockende.
-        let tick = tempo.ticks_at_seconds(pos as f64 / f64::from(rate));
-        let mut next = (tick / beat as f64).ceil().max(0.0) as u64;
-        if tempo.frames(next.saturating_mul(beat), rate) < pos {
-            next += 1;
+        // Erste Zählzeit ab `pos` (in Ticks), dann jede weitere bis zum Blockende; Taktart
+        // und Takt-Eins folgen den Taktwechseln.
+        let tick = tempo.ticks_at_seconds(pos as f64 / f64::from(rate)).ceil();
+        let tick = if tick.is_finite() && tick > 0.0 {
+            tick as u64
+        } else {
+            0
+        };
+        let (mut next, mut downbeat) = tempo.next_beat(tick);
+        if tempo.frames(next, rate) < pos {
+            (next, downbeat) = tempo.next_beat(next + 1);
         }
         let mut i = 0usize;
         let end = pos + frames as u64;
         loop {
-            let beat_at = tempo.frames(next.saturating_mul(beat), rate);
+            let beat_at = tempo.frames(next, rate);
             let until = if beat_at >= end {
                 frames
             } else {
@@ -440,9 +444,9 @@ impl EngineCore {
             if until >= frames {
                 break;
             }
-            let which = usize::from(next % per_bar != 0);
+            let which = usize::from(!downbeat);
             self.click = Some((which, 0));
-            next += 1;
+            (next, downbeat) = tempo.next_beat(next + 1);
             i = until;
         }
     }

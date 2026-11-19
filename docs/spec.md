@@ -54,6 +54,8 @@ Ein Projekt besteht aus Spuren, auf denen Events liegen; Audio-Events verweisen 
 
 **Undo:** Jede Bearbeitung ist ein Befehl im Undo-Verlauf. Der Verlauf ist unbegrenzt konfigurierbar und wird mit dem Projekt nicht gespeichert.
 
+**Automatische Sicherung:** In einstellbarem Abstand (Datei → „Automatisch sichern“, Standard 5 Minuten, „Aus“ möglich) sichert StudioCraft geänderte Projekte als nummerierte Dateien neben der Projektdatei (`Name.backup-07.studiocraft`), ungespeicherte Projekte im Einstellungsordner. Die ältesten Sicherungen über der eingestellten Anzahl (Standard 10) werden gelöscht. Sicherungen schreiben atomar im Hintergrund und markieren das Projekt nicht als gespeichert. Wurde StudioCraft nicht sauber beendet, bietet es beim nächsten Start die neueste Sicherung an; sie öffnet sich als ungespeicherte Fassung des ursprünglichen Projekts.
+
 ## Fenster-Architektur
 
 Alles passiert in einem Projektfenster: In der Mitte liegt die Event-Anzeige, um sie herum liegen Zonen, die einzeln ein- und ausgeblendet werden. Editoren und Mixer laufen wahlweise in der unteren Zone oder als eigene Fenster.
@@ -147,7 +149,7 @@ Snap ist global ein- und ausschaltbar (Taste J); wohin eingerastet wird, bestimm
 **Fades und Crossfades**
 
 - Fade-In und Fade-Out am Griff oben links bzw. rechts ziehen; Doppelklick öffnet den Kurveneditor
-- Überlappen sich zwei Events auf einer Spur, erzeugt X einen Crossfade
+- Überlappen sich zwei Events auf einer Spur, erzeugt X einen Crossfade; beide Events klingen durch die Überlappung. Doppelklick auf einen seiner Fade-Griffe öffnet den Crossfade-Editor: eine Kurve für beide Seiten („Gleiche Lautstärke“, „Gleiche Leistung“, S-Kurve, Exponentiell) oder je Seite einzeln, mit Vorschau
 - Fades sind nicht-destruktiv und Teil des Events
 
 **Verschieben und Kopieren**
@@ -178,7 +180,7 @@ Die Transportleiste unten im Projektfenster bedient Wiedergabe, Aufnahme und Loc
 
 **Audio- und MIDI-Geräte:** Menü Transport → „Audio- und MIDI-Geräte …“: Host, Aus- und Eingang, Abtastrate, Blockgröße (mit Latenz) und MIDI-Eingänge an/aus. Die Wahl liegt in den Einstellungen. Ein Wechsel von Gerät oder Blockgröße gilt sofort, eine andere Abtastrate nach einem Neustart. Verschwindet das Gerät, meldet die Statuszeile es.
 
-**Tempospur:** Projekt → „Tempospur hinzufügen“ legt die Spur an und schaltet sie ein; „Spur“ in der Transportleiste schaltet zwischen Tempospur und festem Tempo um (die Punkte bleiben). In der Spur setzt der Stift einen Tempowechsel, die Objektauswahl zieht ihn (Takt mit Snap, Tempo nach Höhe), der Radiergummi löscht ihn. Im Inspector stehen alle Punkte mit Tempo und „Rampe“ (das Tempo gleitet vom vorigen Punkt). Mit Tempospur zeigt die Transportleiste das Tempo am Cursor. Audio auf Spuren mit linearer Zeitbasis behält bei jeder Tempoänderung seine Zeit, MIDI seine Takte; Metronom und Export folgen der Kurve.
+**Tempospur:** Projekt → „Tempospur hinzufügen“ legt die Spur an und schaltet sie ein; „Spur“ in der Transportleiste schaltet zwischen Tempospur und festem Tempo um (die Punkte bleiben). In der Spur setzt der Stift einen Tempowechsel, die Objektauswahl zieht ihn (Takt mit Snap, Tempo nach Höhe), der Radiergummi löscht ihn. Im Inspector stehen alle Punkte mit Tempo und „Rampe“ (das Tempo gleitet vom vorigen Punkt). Mit Tempospur zeigt die Transportleiste das Tempo am Cursor. Taktwechsel stehen im selben Inspector („Taktwechsel am Cursor“, Zähler/Nenner je Takt) und als Beschriftung in der Tempospur; Lineal, Raster, Snap auf Takt/Zählzeit, Positionsanzeige, Nummernblock −/+ und Metronom folgen ihnen. Events behalten ihre Ticks; Dauern zählen in der Taktart von Takt 1. Audio auf Spuren mit linearer Zeitbasis behält bei jeder Tempoänderung seine Zeit, MIDI seine Takte; Metronom und Export folgen der Kurve.
 
 **Vorzähler und Metronom:** Metronom an/aus mit C; Vorzähler in Takten einstellbar. Klick-Sound, Lautstärke und Ausgang sind Projekteinstellungen.
 

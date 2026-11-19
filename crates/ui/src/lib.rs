@@ -18,6 +18,7 @@
 
 mod automation_panel;
 mod automation_write;
+mod autosave;
 mod colors;
 mod devices;
 mod eq_ui;
@@ -130,6 +131,8 @@ pub struct ProjectWindow {
     keypad: Option<keypad::KeypadTap>,
     /// Kurveneditor eines Fades (Doppelklick auf den Fade-Griff).
     fade_editor: Option<fades_ui::FadeEditor>,
+    /// Crossfade-Editor (Doppelklick auf einen Fade, der zu einem Crossfade gehört).
+    crossfade_editor: Option<fades_ui::CrossfadeEditor>,
     /// Dialog „Wiederholen“ (Strg+K).
     repeat_dialog: shortcuts::RepeatDialog,
     /// Sample-Editor in der unteren Zone.
@@ -182,6 +185,8 @@ pub struct ProjectWindow {
     lanes_rect: egui::Rect,
     /// Projektdatei, unter der zuletzt gespeichert oder geöffnet wurde.
     project_path: Option<PathBuf>,
+    /// Automatische Sicherung und Wiederherstellung (Issue #52).
+    autosave: autosave::Autosave,
     /// Zuletzt gespeicherter Stand, um ungesicherte Änderungen zu erkennen.
     saved: Option<Project>,
     /// Befehl, der auf die Rückfrage „Speichern?“ wartet.
@@ -280,6 +285,7 @@ impl ProjectWindow {
             key_dialog: keymap::KeyDialog::default(),
             keypad: None,
             fade_editor: None,
+            crossfade_editor: None,
             repeat_dialog: shortcuts::RepeatDialog::default(),
             sample_editor: sampleeditor::SampleEditor::default(),
             quantize: studiocraft_project::Quantize::default(),
@@ -313,6 +319,7 @@ impl ProjectWindow {
             drag_before: None,
             lanes_rect: egui::Rect::NOTHING,
             project_path: None,
+            autosave: autosave::Autosave::new(prefs.autosave_minutes, prefs.autosave_keep),
             saved: None,
             pending: None,
             allow_close: false,
@@ -593,6 +600,8 @@ impl ProjectWindow {
             audio: self.audio_choice.clone(),
             midi_inputs: self.midi_inputs_on,
             windows: self.windows.rects,
+            autosave_minutes: self.autosave.minutes,
+            autosave_keep: self.autosave.keep,
         };
         if let Err(e) = s.save() {
             self.message = Some(format!("Einstellung nicht gespeichert: {e}"));
@@ -827,6 +836,10 @@ impl ProjectWindow {
             t.collect_garbage();
         }
         self.sync_midi();
+        // Automatische Sicherung nur in einer Sitzung der App (`begin_session`), nicht in Tests.
+        if self.autosave.dir.is_some() {
+            self.tick_autosave(std::time::Instant::now());
+        }
         if self.idle_plugins() {
             // Plugin-Fenster brauchen ihre Timer auch ohne Mausbewegung.
             ui.ctx()
@@ -954,7 +967,9 @@ impl ProjectWindow {
         self.tool_palette(ui.ctx());
         self.key_commands_dialog(ui.ctx());
         self.repeat_dialog(ui.ctx());
+        self.recovery_dialog(ui.ctx());
         self.fade_editor_dialog(ui.ctx());
+        self.crossfade_editor_dialog(ui.ctx());
         self.device_dialog(ui.ctx());
         self.show_windows(ui.ctx());
 
@@ -2943,6 +2958,27 @@ mod tests {
     }
 
     #[test]
+    fn render_crossfade_editor() {
+        shot("crossfade", |w| {
+            let bar = w.bar_ticks();
+            let a = w
+                .import_clip("Take 1", None, tone_clip(8.0, 220.0), Some((0, bar)))
+                .unwrap();
+            let clip = w.project.event(a).unwrap().clip.unwrap();
+            let b = w.project.add_audio_event(0, 4 * bar, clip).unwrap();
+            w.project.crossfade(a, b);
+            w.project.event_mut(a).unwrap().fade_out_curve =
+                studiocraft_project::FadeCurve::EqualPower;
+            w.project.event_mut(b).unwrap().fade_in_curve =
+                studiocraft_project::FadeCurve::EqualPower;
+            w.view.scroll_ticks = 0.0;
+            w.view.px_per_quarter = 40.0;
+            w.view.row_h = 90.0;
+            w.open_fade_editor(b, fades_ui::Side::In);
+        });
+    }
+
+    #[test]
     fn render_tempo_track() {
         shot("tempo", |w| {
             let t = w.add_tempo_track();
@@ -2951,6 +2987,13 @@ mod tests {
             map.set_event(2 * bar, 140.0, false);
             map.set_event(4 * bar, 90.0, true);
             map.set_event(6 * bar, 120.0, false);
+            map.set_signature(
+                5,
+                studiocraft_project::TimeSignature {
+                    numerator: 3,
+                    denominator: 4,
+                },
+            );
             w.project.set_tempo_map(map);
             // Tempo track at the top, selected, so that the curve and the inspector show.
             let track = w.project.tracks.remove(t);
@@ -2959,6 +3002,45 @@ mod tests {
             w.view.scroll_ticks = 0.0;
             w.cursor = 5 * bar;
         });
+    }
+
+    #[test]
+    fn double_click_on_a_crossfade_opens_the_crossfade_editor() {
+        let (mut w, a) = one_event_window();
+        w.view.scroll_ticks = 0.0;
+        let (start, len) = {
+            let e = w.project.event(a).unwrap();
+            (e.start.0, e.length)
+        };
+        // A second take overlapping the last bar of the first, then X.
+        let clip = w.project.event(a).unwrap().clip.unwrap();
+        let b = w
+            .project
+            .add_audio_event(0, start + len - 3840, clip)
+            .unwrap();
+        assert!(w.project.crossfade(a, b));
+        w.clear_history();
+        let mut h = window_harness(w);
+        // The fade-in handle of the later event sits at the end of the overlap.
+        let handle = screen(&h, start + len, 0.2);
+        double_click_at(&mut h, handle);
+        assert!(
+            h.state().crossfade_editor.is_some(),
+            "crossfade editor is open"
+        );
+        assert!(h.state().fade_editor.is_none());
+        h.get_by_label("Gleiche Leistung").click();
+        h.run_steps(3);
+        let p = &h.state().project;
+        let eq = studiocraft_project::FadeCurve::EqualPower;
+        assert_eq!(p.event(a).unwrap().fade_out_curve, eq);
+        assert_eq!(p.event(b).unwrap().fade_in_curve, eq);
+        h.state_mut().undo();
+        let p = &h.state().project;
+        assert_eq!(
+            p.event(b).unwrap().fade_in_curve,
+            studiocraft_project::FadeCurve::Linear
+        );
     }
 
     #[test]
@@ -3025,6 +3107,72 @@ mod tests {
         assert!(
             !h.state().project.tempo.events[0].ramp,
             "ramp is one undo step"
+        );
+    }
+
+    #[test]
+    fn signature_changes_drive_snap_keypad_and_the_inspector() {
+        use studiocraft_project::TimeSignature;
+        let q = studiocraft_project::TICKS_PER_QUARTER;
+        let (mut w, _) = one_event_window();
+        // From bar 3 on 3/4: bar 4 starts at 11 quarters.
+        w.project.tempo.set_signature(
+            3,
+            TimeSignature {
+                numerator: 3,
+                denominator: 4,
+            },
+        );
+        w.snap = true;
+        w.grid = tools::Grid::Bar;
+        w.grid_zoom = false;
+        assert_eq!(w.snap_ticks((11 * q) as f64 + 300.0), 11 * q);
+        assert_eq!(
+            w.snap_ticks((12 * q) as f64 + 600.0),
+            14 * q,
+            "next 3/4 bar"
+        );
+        w.grid = tools::Grid::Beat;
+        assert_eq!(w.snap_ticks((11 * q) as f64 + 700.0), 12 * q);
+        // Keypad minus/plus step along the real bar lines.
+        w.cursor = 11 * q + 10;
+        w.run_keypad(keypad::KeypadPress {
+            key: keypad::KeypadKey::Subtract,
+            shift: false,
+            repeat: false,
+        });
+        assert_eq!(w.cursor, 11 * q, "to the start of this bar");
+        w.run_keypad(keypad::KeypadPress {
+            key: keypad::KeypadKey::Add,
+            shift: false,
+            repeat: false,
+        });
+        assert_eq!(w.cursor, 14 * q);
+        // Inspector of the tempo track: a new change at the cursor's bar, one undo step.
+        let t = w.add_tempo_track();
+        w.selected_track = Some(t);
+        w.clear_history();
+        let mut h = window_harness(w);
+        h.get_by_label("Taktwechsel am Cursor").click();
+        h.run_steps(3);
+        let bars: Vec<u64> = h
+            .state()
+            .project
+            .tempo
+            .signatures
+            .iter()
+            .map(|e| e.bar)
+            .collect();
+        assert_eq!(bars, [3, 5]);
+        h.state_mut().undo();
+        assert_eq!(h.state().project.tempo.signatures.len(), 1);
+        // The position display uses the changed bars.
+        assert_eq!(
+            h.state()
+                .project
+                .tempo
+                .format_position(studiocraft_project::Position(14 * q)),
+            "5.1.1.000"
         );
     }
 

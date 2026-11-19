@@ -102,7 +102,46 @@ impl ProjectWindow {
 
     fn on_grid(&self, t: f64) -> f64 {
         let g = self.grid_step();
+        // Takte und Zählzeiten folgen den Taktwechseln (nicht gleichmäßig ab 0).
+        let tempo = &self.project.tempo;
+        if !tempo.signatures.is_empty() && !self.grid_zoom {
+            let at = t.max(0.0) as u64;
+            let (_, start, sig) = tempo.bar_at(at);
+            let unit = match self.grid {
+                crate::tools::Grid::Bar => Some(sig.bar_ticks()),
+                crate::tools::Grid::Beat => Some(sig.beat_ticks()),
+                _ => None,
+            };
+            if let Some(unit) = unit {
+                let unit = unit.max(1) as f64;
+                let k = ((t - start as f64) / unit).round().max(0.0);
+                // Nicht über den Anfang des nächsten Takts hinaus (dort beginnt die neue Taktart).
+                let next = tempo.bar_start(tempo.bar_at(at).0 + 1) as f64;
+                return (start as f64 + k * unit).min(next);
+            }
+        }
         ((t / g).round() * g).max(0.0)
+    }
+
+    /// Takt- und Zählzeitlinien in `t0..=t1` entlang der Taktwechsel: (Tick, Taktnummer bei
+    /// Taktlinien, sonst `None`). Zählzeiten nur mit `beats`.
+    pub(crate) fn meter_lines(&self, t0: u64, t1: u64, beats: bool) -> Vec<(u64, Option<u64>)> {
+        let tempo = &self.project.tempo;
+        let mut out = Vec::new();
+        for (at, bar, sig) in tempo.bar_lines(t0, t1) {
+            out.push((at, Some(bar)));
+            if beats {
+                let beat = sig.beat_ticks().max(1);
+                for k in 1..u64::from(sig.numerator) {
+                    let t = at + k * beat;
+                    if t > t1 {
+                        break;
+                    }
+                    out.push((t, None));
+                }
+            }
+        }
+        out
     }
 
     /// Nächster magnetischer Punkt (Event-Ränder, Cursor) im Fangbereich um `t`, mit Abstand.

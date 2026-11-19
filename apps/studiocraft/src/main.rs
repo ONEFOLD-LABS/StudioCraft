@@ -70,6 +70,11 @@ impl eframe::App for App {
             self.window.audio_lost();
         }
     }
+
+    fn on_exit(&mut self) {
+        // Sauber beendet: keine Wiederherstellung beim nächsten Start.
+        self.window.end_session();
+    }
 }
 
 /// Statuszeile für eine laufende Ausgabe.
@@ -225,6 +230,8 @@ fn main() -> ExitCode {
         window.audio_switched(Err(format!("{n}; Standardgerät verwendet")));
     }
     window.open_midi_inputs();
+    // Automatische Sicherung; nach einem Absturz bietet ein Dialog die neueste Sicherung an.
+    window.begin_session();
     for f in &files {
         let path = Path::new(f);
         let result = if path.extension().is_some_and(|e| e == file::EXTENSION) {
