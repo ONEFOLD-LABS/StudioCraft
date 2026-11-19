@@ -11,6 +11,8 @@ studiocraft-project.workspace = true
 studiocraft-engine.workspace = true
 studiocraft-plugin-host.workspace = true
 base64 = "0.23"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 egui = { version = "0.37", features = ["default_fonts", "monochrome_emoji_fonts"] }
 # Gemeinsame Fensterrahmen-Regel der Craft-Apps (storytold/craft-libs, MIT OR Apache-2.0).
 craft-window = { git = "https://github.com/storytold/craft-libs", rev = "56c3c833bb869a140271e2aceec2112322cacc58", default-features = false, features = ["egui"] }

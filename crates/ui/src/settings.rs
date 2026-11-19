@@ -7,6 +7,7 @@
 use std::path::PathBuf;
 
 use egui::ThemePreference;
+use studiocraft_engine::DeviceChoice;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Settings {
@@ -15,6 +16,10 @@ pub struct Settings {
     pub return_on_stop: bool,
     /// Wohin zweimal Stopp springt.
     pub stop_twice: StopTarget,
+    /// Audio-Host und -Geräte (Dialog „Audio- und MIDI-Geräte“).
+    pub audio: DeviceChoice,
+    /// MIDI-Eingänge öffnen.
+    pub midi_inputs: bool,
 }
 
 /// Ziel von zweimal Stopp (Spec „Stopp-Verhalten“).
@@ -32,16 +37,50 @@ impl Default for Settings {
             theme: ThemePreference::Dark,
             return_on_stop: false,
             stop_twice: StopTarget::Start,
+            audio: DeviceChoice::default(),
+            midi_inputs: true,
         }
     }
 }
 
-/// Rohwert eines Schlüssels aus der kleinen Einstellungsdatei (`"key": wert`), ohne Anführungszeichen.
-fn field<'a>(text: &'a str, key: &str) -> Option<&'a str> {
-    let rest = text.split(&format!("\"{key}\"")).nth(1)?;
-    let value = rest.trim_start().strip_prefix(':')?.trim_start();
-    let end = value.find([',', '\n', '}']).unwrap_or(value.len());
-    Some(value[..end].trim().trim_matches('"'))
+/// So liegt es in der Datei; fehlende Felder bekommen ihren Standard (ältere Dateien).
+#[derive(serde::Serialize, serde::Deserialize)]
+#[serde(default)]
+struct File {
+    theme: String,
+    return_on_stop: bool,
+    stop_twice: String,
+    audio: AudioFile,
+    midi_inputs: bool,
+}
+
+#[derive(Default, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
+struct AudioFile {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    host: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    output: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    input: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    sample_rate: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    block_frames: Option<u32>,
+}
+
+impl Default for File {
+    fn default() -> Self {
+        Settings::default().to_file()
+    }
+}
+
+/// Längste Zeichenkette aus der Datei (Gerätenamen); fremde Eingabe.
+const MAX_TEXT: usize = 256;
+
+fn text(v: Option<String>) -> Option<String> {
+    v.map(|s| s.chars().take(MAX_TEXT).collect::<String>())
+        .filter(|s| !s.is_empty())
 }
 
 /// Ordner der Einstellungen (auch für die Tastaturbelegung).
@@ -75,40 +114,64 @@ fn theme_name(t: ThemePreference) -> &'static str {
 }
 
 impl Settings {
-    /// Liest die Einstellungen; fehlt die Datei oder ist sie unlesbar, gelten die Vorgaben.
-    pub fn load() -> Self {
-        let Some(text) = dir().and_then(|d| std::fs::read_to_string(d.join("settings.json")).ok())
-        else {
-            return Self::default();
-        };
-        let theme = match field(&text, "theme") {
-            Some("light") => ThemePreference::Light,
-            Some("system") => ThemePreference::System,
-            _ => ThemePreference::Dark,
-        };
+    fn to_file(&self) -> File {
+        File {
+            theme: theme_name(self.theme).into(),
+            return_on_stop: self.return_on_stop,
+            stop_twice: match self.stop_twice {
+                StopTarget::Start => "start",
+                StopTarget::LeftLocator => "left_locator",
+            }
+            .into(),
+            audio: AudioFile {
+                host: self.audio.host.clone(),
+                output: self.audio.output.clone(),
+                input: self.audio.input.clone(),
+                sample_rate: self.audio.sample_rate,
+                block_frames: self.audio.block_frames,
+            },
+            midi_inputs: self.midi_inputs,
+        }
+    }
+
+    fn from_file(f: File) -> Self {
+        let rate = |v: Option<u32>| v.filter(|r| (8_000..=768_000).contains(r));
         Self {
-            theme,
-            return_on_stop: field(&text, "return_on_stop") == Some("true"),
-            stop_twice: match field(&text, "stop_twice") {
-                Some("left_locator") => StopTarget::LeftLocator,
+            theme: match f.theme.as_str() {
+                "light" => ThemePreference::Light,
+                "system" => ThemePreference::System,
+                _ => ThemePreference::Dark,
+            },
+            return_on_stop: f.return_on_stop,
+            stop_twice: match f.stop_twice.as_str() {
+                "left_locator" => StopTarget::LeftLocator,
                 _ => StopTarget::Start,
             },
+            audio: DeviceChoice {
+                host: text(f.audio.host),
+                output: text(f.audio.output),
+                input: text(f.audio.input),
+                sample_rate: rate(f.audio.sample_rate),
+                block_frames: f.audio.block_frames.filter(|b| (16..=8192).contains(b)),
+            },
+            midi_inputs: f.midi_inputs,
         }
+    }
+
+    /// Liest die Einstellungen; fehlt die Datei oder ist sie unlesbar, gelten die Vorgaben.
+    pub fn load() -> Self {
+        dir()
+            .and_then(|d| std::fs::read_to_string(d.join("settings.json")).ok())
+            .and_then(|text| serde_json::from_str::<File>(&text).ok())
+            .map_or_else(Self::default, Self::from_file)
     }
 
     pub fn save(&self) -> Result<(), String> {
         let d = dir().ok_or("kein Ort für Einstellungen")?;
         std::fs::create_dir_all(&d).map_err(|e| format!("{}: {e}", d.display()))?;
-        let stop_twice = match self.stop_twice {
-            StopTarget::Start => "start",
-            StopTarget::LeftLocator => "left_locator",
-        };
-        let text = format!(
-            "{{\n  \"theme\": \"{}\",\n  \"return_on_stop\": {},\n  \"stop_twice\": \"{stop_twice}\"\n}}\n",
-            theme_name(self.theme),
-            self.return_on_stop
-        );
-        std::fs::write(d.join("settings.json"), text).map_err(|e| format!("{}: {e}", d.display()))
+        let text = serde_json::to_string_pretty(&self.to_file()).map_err(|e| e.to_string())?;
+        std::fs::write(d.join("settings.json"), text + "\n")
+            .map_err(|e| format!("{}: {e}", d.display()))
     }
 }
 
@@ -121,17 +184,18 @@ mod tests {
         let d = std::env::temp_dir().join(format!("sc-settings-{}", std::process::id()));
         // SAFETY: nur dieser Test setzt die Variable.
         unsafe { std::env::set_var("STUDIOCRAFT_CONFIG_DIR", &d) };
-        Settings {
-            theme: ThemePreference::Light,
-            ..Settings::default()
-        }
-        .save()
-        .unwrap();
-        assert_eq!(Settings::load().theme, ThemePreference::Light);
         let s = Settings {
             theme: ThemePreference::System,
             return_on_stop: true,
             stop_twice: StopTarget::LeftLocator,
+            audio: DeviceChoice {
+                host: Some("ALSA".into()),
+                output: Some("HDA Intel PCH, ALC892 \"Analog\"".into()),
+                input: None,
+                sample_rate: Some(96_000),
+                block_frames: Some(128),
+            },
+            midi_inputs: false,
         };
         s.save().unwrap();
         assert_eq!(Settings::load(), s);
@@ -139,8 +203,23 @@ mod tests {
         std::fs::write(d.join("settings.json"), "{\n  \"theme\": \"light\"\n}\n").unwrap();
         let old = Settings::load();
         assert_eq!(old.theme, ThemePreference::Light);
-        assert!(!old.return_on_stop);
-        assert_eq!(old.stop_twice, StopTarget::Start);
+        assert!(!old.return_on_stop && old.midi_inputs);
+        assert_eq!(old.audio, DeviceChoice::default());
+        // Hostile values fall back.
+        std::fs::write(
+            d.join("settings.json"),
+            format!(
+                "{{\"audio\": {{\"sample_rate\": 0, \"block_frames\": 99999999, \"output\": \"{}\"}}}}",
+                "x".repeat(5000)
+            ),
+        )
+        .unwrap();
+        let bad = Settings::load();
+        assert_eq!(bad.audio.sample_rate, None);
+        assert_eq!(bad.audio.block_frames, None);
+        assert_eq!(bad.audio.output.map(|o| o.len()), Some(MAX_TEXT));
+        std::fs::write(d.join("settings.json"), "kaputt").unwrap();
+        assert_eq!(Settings::load(), Settings::default());
         unsafe { std::env::remove_var("STUDIOCRAFT_CONFIG_DIR") };
     }
 }
