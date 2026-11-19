@@ -332,6 +332,27 @@ impl PluginHandle {
         unsafe { save(self.plugin, &stream) }.then_some(out)
     }
 
+    /// Latenz des Plugins in Frames (`clap.latency`; ohne Erweiterung 0). Nur im
+    /// Hauptthread, solange die Instanz aktiviert ist.
+    pub fn latency(&self) -> u32 {
+        let ext = self.extension::<clap_sys::ext::latency::clap_plugin_latency>(
+            clap_sys::ext::latency::CLAP_EXT_LATENCY,
+        );
+        // SAFETY: `ext` ist null oder gültig, solange das Plugin lebt (Vertrag oben); Aufruf
+        // im Hauptthread.
+        let get = unsafe { ext.as_ref() }.and_then(|e| e.get);
+        // SAFETY: wie oben.
+        get.map_or(0, |f| unsafe { f(self.plugin) })
+            .min(MAX_LATENCY)
+    }
+
+    /// Hat das Plugin seit dem letzten Aufruf eine geänderte Latenz gemeldet?
+    pub fn take_latency_changed(&self) -> bool {
+        self.shared
+            .latency_changed
+            .swap(false, std::sync::atomic::Ordering::AcqRel)
+    }
+
     /// Zustand laden. Nur im Hauptthread.
     pub fn load_state(&self, data: &[u8]) -> bool {
         let Some(load) = self.state_ext().and_then(|s| s.load) else {
@@ -409,6 +430,10 @@ impl PortSet {
         self.main.and_then(|m| self.bufs.get(m)).map_or(0, Vec::len)
     }
 }
+
+/// Höchste Latenz, die der Host ausgleicht (frames; 2 s bei 48 kHz). Mehr meldet nur ein
+/// fehlerhaftes Plugin.
+pub const MAX_LATENCY: u32 = 96_000;
 
 /// Eine laufende Plugin-Instanz mit Stereo-Ein- und -Ausgang.
 pub struct ClapInstance {

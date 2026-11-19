@@ -19,3 +19,7 @@ libc = "0.2"
 [[test]]
 name = "gui_main_thread"
 harness = false
+
+[[test]]
+name = "latency_main_thread"
+harness = false

@@ -28,6 +28,6 @@ mod host;
 mod scan;
 
 #[cfg(not(target_arch = "wasm32"))]
-pub use clap::{ClapInstance, ParamInfo, PluginHandle};
+pub use clap::{ClapInstance, MAX_LATENCY, ParamInfo, PluginHandle};
 #[cfg(not(target_arch = "wasm32"))]
 pub use scan::{PluginInfo, default_paths, scan};

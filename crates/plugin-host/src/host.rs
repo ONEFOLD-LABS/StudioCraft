@@ -47,6 +47,8 @@ pub(crate) struct HostShared {
     pub fds: Mutex<Vec<(i32, u32)>>,
     /// Das Plugin meldet geänderten Zustand (z. B. Einstellung im eigenen Fenster).
     pub state_dirty: AtomicBool,
+    /// Das Plugin meldet eine geänderte Latenz (`clap.latency`): neu abfragen.
+    pub latency_changed: AtomicBool,
 }
 
 impl HostShared {
@@ -210,6 +212,18 @@ static HOST_STATE: clap_sys::ext::state::clap_host_state = clap_sys::ext::state:
     mark_dirty: Some(state_mark_dirty),
 };
 
+// --- clap.latency (Host) ---
+unsafe extern "C" fn latency_changed(host: *const clap_host) {
+    // SAFETY: wie oben.
+    if let Some(s) = unsafe { shared(host) } {
+        s.latency_changed.store(true, Ordering::Release);
+    }
+}
+static HOST_LATENCY: clap_sys::ext::latency::clap_host_latency =
+    clap_sys::ext::latency::clap_host_latency {
+        changed: Some(latency_changed),
+    };
+
 // --- clap.thread-check (Host) ---
 unsafe extern "C" fn is_main_thread(_: *const clap_host) -> bool {
     on_main_thread()
@@ -237,6 +251,8 @@ pub(crate) unsafe extern "C" fn get_extension(
         &HOST_TIMER as *const _ as *const c_void
     } else if id == clap_sys::ext::state::CLAP_EXT_STATE {
         &HOST_STATE as *const _ as *const c_void
+    } else if id == clap_sys::ext::latency::CLAP_EXT_LATENCY {
+        &HOST_LATENCY as *const _ as *const c_void
     } else if id == CLAP_EXT_THREAD_CHECK {
         &HOST_THREAD_CHECK as *const _ as *const c_void
     } else {

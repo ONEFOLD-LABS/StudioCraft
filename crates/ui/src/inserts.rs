@@ -494,6 +494,11 @@ impl ProjectWindow {
 
     /// Insert-Bereich des Inspectors.
     pub(crate) fn inserts_ui(&mut self, ui: &mut Ui, track: usize) {
+        // Latenz der Spur durch Plugins (Latenzausgleich, Issue #51).
+        let lat = self.track_latency(track);
+        if lat > 0 {
+            ui.label(egui::RichText::new(format!("Latenz: {}", self.latency_text(lat))).weak());
+        }
         let count = self.project.tracks[track].inserts.len();
         let mut remove = None;
         for k in 0..count {

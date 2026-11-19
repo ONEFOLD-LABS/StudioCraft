@@ -31,6 +31,7 @@ mod inserts;
 mod keyeditor;
 mod keymap;
 pub mod keypad;
+mod latency;
 mod layouts_ui;
 mod macros;
 mod markers_ui;
@@ -190,6 +191,8 @@ pub struct ProjectWindow {
     lanes_rect: egui::Rect,
     /// Projektdatei, unter der zuletzt gespeichert oder geöffnet wurde.
     project_path: Option<PathBuf>,
+    /// Latenzausgleich (Issue #51).
+    latency: latency::LatencyState,
     /// Automatische Sicherung und Wiederherstellung (Issue #52).
     autosave: autosave::Autosave,
     /// Zuletzt gespeicherter Stand, um ungesicherte Änderungen zu erkennen.
@@ -332,6 +335,7 @@ impl ProjectWindow {
             drag_before: None,
             lanes_rect: egui::Rect::NOTHING,
             project_path: None,
+            latency: latency::LatencyState::default(),
             autosave: autosave::Autosave::new(prefs.autosave_minutes, prefs.autosave_keep),
             saved: None,
             pending: None,
@@ -809,17 +813,22 @@ impl ProjectWindow {
 
     /// Baut die Abspielliste neu und übergibt sie der Engine.
     fn rebuild_song(&mut self) {
-        let Some(t) = &mut self.transport else { return };
+        if self.transport.is_none() {
+            return;
+        }
         let samples: HashMap<ClipId, Arc<[f32]>> = self
             .clips
             .iter()
             .map(|(&id, c)| (id, c.samples.clone()))
             .collect();
         let song = Song::build(&self.project, &samples, self.sample_rate);
+        // Latenzausgleich passend zum neuen Song (nur bei Änderung neu angelegt).
+        self.sync_constrain();
+        self.sync_delays(&song);
         if let Some(out) = &self.midi_out {
             out.set_ports(song.midi_ports.clone());
         }
-        t.send(Command::SetSong(Arc::new(song)));
+        self.send(Command::SetSong(Arc::new(song)));
     }
 
     fn sync_from_engine(&mut self) {
@@ -867,6 +876,7 @@ impl ProjectWindow {
         if self.autosave.dir.is_some() {
             self.tick_autosave(std::time::Instant::now());
         }
+        self.poll_latency();
         if self.idle_plugins() {
             // Plugin-Fenster brauchen ihre Timer auch ohne Mausbewegung.
             ui.ctx()
