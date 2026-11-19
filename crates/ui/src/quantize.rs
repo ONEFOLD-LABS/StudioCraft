@@ -85,7 +85,9 @@ pub(crate) fn panel(w: &mut ProjectWindow, ctx: &Context) {
 impl ProjectWindow {
     /// Der Key-Editor hat den Fokus und ist sichtbar.
     pub(crate) fn key_editor_active(&self) -> bool {
-        self.key_editor.focused && self.show_lower && self.lower == LowerZone::Editor
+        let in_lower = self.show_lower && self.lower == LowerZone::Editor;
+        let in_window = self.windows.editor == Some(crate::windows::EditorWindow::Key);
+        self.key_editor.focused && (in_lower || in_window)
     }
 
     /// Taste Q: gewählte Noten im Key-Editor (ohne Auswahl alle Noten des Parts),
