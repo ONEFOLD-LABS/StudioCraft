@@ -101,7 +101,7 @@ Gruppen von links nach rechts, durch Trenner getrennt:
 1. Locatoren: L und R mit Position, Punch-In, Cycle, Punch-Out dazwischen
 2. Hauptanzeige: Position in Takten groß, darunter/daneben Zeit
 3. Transportknöpfe: Zum Anfang, Zurückspulen, Vorspulen, Stopp, Start, Aufnahme, Cycle
-4. Automationsmodus „Auto: Touch / Auto-Latch“, rot während geschrieben wird
+4. Automationsmodus „Auto“: Touch, Auto-Latch, Overwrite, Trim; rot während geschrieben wird
 5. Tempo und Taktart, Metronom (Klick), Vorzähler
 
 Gerät, Last und Meldungen stehen in der Statuszeile darunter; ist sie ausgeblendet, erscheinen
@@ -135,7 +135,7 @@ Die Positionsanzeige hat einen dunklen Hintergrund (`counter_bg`) mit heller Sch
 12. ✅ Zeitbasis (musikalisch/linear) und Lanes ein/aus in Spurkopf und Inspector (#75, Issue #19)
 13. ✅ Feine Rasterlinien in Event-Anzeige und Key-Editor (#76)
 14. ✅ Automation (Issue #34): Kurven abspielen mit R (#77), unter der Spur bearbeiten (#78),
-    schreiben mit W in Touch und Auto-Latch (#81), Sends (#83)
+    schreiben mit W in Touch und Auto-Latch (#81), Sends (#83), Overwrite und Trim
 15. ✅ Statusanzeige der Transportleiste läuft nicht mehr über Tempo und Takt (#79)
 16. ✅ Titelleiste wie in den Craft-Apps: Symbol, Menü, Titel und Fensterknöpfe in einer Zeile,
     `craft-window` entscheidet pro Desktop (#80)

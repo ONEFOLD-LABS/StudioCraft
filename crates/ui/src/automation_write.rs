@@ -7,6 +7,12 @@
 //! - Touch: schreibt, solange berührt; beim Loslassen kehrt die Kurve kurz danach zur
 //!   bisherigen zurück.
 //! - Auto-Latch: schreibt ab der Berührung bis zum Stopp mit dem letzten Wert.
+//! - Overwrite: schreibt die Lautstärke vom Start bis zum Stopp, auch ohne Berührung; andere
+//!   Parameter wie Touch.
+//! - Trim: verschiebt die bestehende Kurve, solange berührt, um die Bewegung seit der Berührung
+//!   (Fader 3 dB hoch: Kurve 3 dB höher, Form bleibt). Ohne Kurve und für Mute wie Touch.
+//!   Während des Schreibens klingt der Wert des Bedienelements, erst danach die verschobene
+//!   Kurve.
 //!
 //! Fehlt die Automationsspur, wird sie angelegt. Während des Schreibens klingt der Wert des
 //! Bedienelements, nicht die Kurve. Beim Stopp werden die geschriebenen Punkte ausgedünnt; der
@@ -25,15 +31,24 @@ pub enum WriteMode {
     #[default]
     Touch,
     Latch,
+    Overwrite,
+    Trim,
 }
 
 impl WriteMode {
-    pub const ALL: [WriteMode; 2] = [WriteMode::Touch, WriteMode::Latch];
+    pub const ALL: [WriteMode; 4] = [
+        WriteMode::Touch,
+        WriteMode::Latch,
+        WriteMode::Overwrite,
+        WriteMode::Trim,
+    ];
 
     pub fn label(self) -> &'static str {
         match self {
             WriteMode::Touch => "Touch",
             WriteMode::Latch => "Auto-Latch",
+            WriteMode::Overwrite => "Overwrite",
+            WriteMode::Trim => "Trim",
         }
     }
 }
@@ -50,6 +65,8 @@ struct Pass {
     start: u64,
     last: u64,
     value: f64,
+    /// Wert des Bedienelements vor der Berührung (Bezug für Trim).
+    base: f64,
     /// Bedienelement gehalten.
     touching: bool,
     /// Touch losgelassen: der Durchgang ist zu Ende.
@@ -148,6 +165,20 @@ impl ProjectWindow {
             self.touch(key, v, old, cursor);
         }
         let mode = self.auto_writer.mode;
+        // Overwrite: die Lautstärke jeder Spur mit W schreibt ab dem Start mit.
+        if mode == WriteMode::Overwrite {
+            let volumes: Vec<_> = now
+                .iter()
+                .filter(|(k, _)| k.1 == AutoParam::Volume)
+                .map(|(k, v)| (*k, *v))
+                .collect();
+            for (key, v) in volumes {
+                match self.auto_writer.passes.get_mut(&key) {
+                    Some(p) => p.touching = !p.done,
+                    None => self.touch(key, v, Some(v), cursor),
+                }
+            }
+        }
         let keys: Vec<_> = self.auto_writer.passes.keys().copied().collect();
         for key in keys {
             let Some(pass) = self.auto_writer.passes.get_mut(&key) else {
@@ -163,11 +194,13 @@ impl ProjectWindow {
             if cursor < pass.last {
                 pass.last = cursor;
             }
-            let released = pass.touching && !held;
+            let held_on = mode == WriteMode::Overwrite && key.1 == AutoParam::Volume;
+            let released = pass.touching && !held && !held_on;
             let (from, value) = (pass.last, pass.value);
             if pass.touching || mode == WriteMode::Latch {
+                let written = self.written_value(key, cursor);
                 if let Some(lane) = self.lane_mut(key) {
-                    lane.overwrite(from.saturating_add(1).min(cursor), cursor, value);
+                    lane.overwrite(from.saturating_add(1).min(cursor), cursor, written);
                 }
                 if let Some(p) = self.auto_writer.passes.get_mut(&key) {
                     p.last = cursor;
@@ -175,7 +208,10 @@ impl ProjectWindow {
             }
             if released && let Some(p) = self.auto_writer.passes.get_mut(&key) {
                 p.touching = false;
-                if mode == WriteMode::Touch {
+                if mode == WriteMode::Trim {
+                    // Hinter dem Cursor gilt die alte Kurve unverändert weiter.
+                    p.done = true;
+                } else if matches!(mode, WriteMode::Touch | WriteMode::Overwrite) {
                     // Zurück zur bisherigen Kurve (oder zum Wert beim Loslassen, wenn es keine gab).
                     let back = cursor.saturating_add(RETURN_TICKS);
                     let target = p.original.value_at(back).unwrap_or(value);
@@ -193,6 +229,28 @@ impl ProjectWindow {
             }
         }
         self.auto_writer.last = now;
+    }
+
+    /// Was bei `cursor` geschrieben wird: der Wert des Bedienelements, bei Trim die alte Kurve
+    /// plus die Bewegung seit der Berührung (im Wertebereich des Parameters).
+    fn written_value(&self, key: (usize, AutoParam), cursor: u64) -> f64 {
+        let Some(p) = self.auto_writer.passes.get(&key) else {
+            return 0.0;
+        };
+        if self.auto_writer.mode != WriteMode::Trim || key.1 == AutoParam::Mute {
+            return p.value;
+        }
+        let Some(old) = p.original.value_at(cursor) else {
+            return p.value;
+        };
+        let (lo, hi) = self
+            .project
+            .tracks
+            .get(key.0)
+            .map_or((f64::MIN, f64::MAX), |t| {
+                crate::timeline::param_range(self, t, key.1)
+            });
+        (old + p.value - p.base).clamp(lo.min(hi), hi.max(lo))
     }
 
     fn lane_mut(&mut self, (track, param): (usize, AutoParam)) -> Option<&mut AutomationLane> {
@@ -224,7 +282,7 @@ impl ProjectWindow {
         {
             lane.set_point(cursor.saturating_sub(1), old);
         }
-        lane.set_point(cursor, value);
+        let base = old.unwrap_or(value);
         self.auto_writer.passes.insert(
             key,
             Pass {
@@ -232,10 +290,15 @@ impl ProjectWindow {
                 start: cursor,
                 last: cursor,
                 value,
+                base,
                 touching: true,
                 done: false,
             },
         );
+        let written = self.written_value(key, cursor);
+        if let Some(lane) = self.lane_mut(key) {
+            lane.set_point(cursor, written);
+        }
         // Engine neu versorgen: die Spur folgt jetzt dem Bedienelement.
         self.dirty = true;
     }
@@ -404,6 +467,69 @@ mod tests {
         frame(&mut w, 1920, false);
         let pts = points(&w, AutoParam::Send { index: 0 });
         assert!(pts.contains(&(960, -9.0)), "{pts:?}");
+    }
+
+    #[test]
+    fn overwrite_writes_volume_from_start_to_stop_without_touch() {
+        let mut w = window();
+        w.auto_writer.mode = WriteMode::Overwrite;
+        w.project.tracks[0].volume_db = -6.0;
+        frame(&mut w, 0, false);
+        frame(&mut w, 960, false);
+        w.project.tracks[0].volume_db = -9.0;
+        frame(&mut w, 1920, false);
+        frame(&mut w, 2880, false);
+        assert!(w.writing_automation());
+        frame_stopped(&mut w);
+        let pts = points(&w, AutoParam::Volume);
+        assert_eq!(pts.first(), Some(&(0, -6.0)));
+        assert_eq!(pts.last(), Some(&(2880, -9.0)));
+        assert!(pts.contains(&(1920, -9.0)), "{pts:?}");
+        // Only the volume: pan was not moved and got no lane.
+        assert!(
+            w.project.tracks[0]
+                .automation_lane(AutoParam::Pan)
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn trim_shifts_the_existing_curve_by_the_move() {
+        let mut w = window();
+        w.auto_writer.mode = WriteMode::Trim;
+        {
+            let lane = w.project.tracks[0].automation_lane_mut(AutoParam::Volume);
+            lane.set_point(0, 0.0);
+            lane.set_point(3840, -12.0);
+        }
+        frame(&mut w, 0, false);
+        // Fader 3 dB up while held: the curve is written 3 dB higher where the cursor passes.
+        w.project.tracks[0].volume_db = 3.0;
+        frame(&mut w, 960, true);
+        frame(&mut w, 1920, true);
+        let pts = points(&w, AutoParam::Volume);
+        assert!(pts.contains(&(960, 0.0)), "{pts:?}");
+        assert!(pts.contains(&(1920, -3.0)), "{pts:?}");
+        frame(&mut w, 2880, false);
+        frame_stopped(&mut w);
+        let pts = points(&w, AutoParam::Volume);
+        assert_eq!(pts.first(), Some(&(0, 0.0)), "before the touch untouched");
+        assert!(pts.contains(&(2880, -6.0)), "{pts:?}");
+        assert_eq!(
+            pts.last(),
+            Some(&(3840, -12.0)),
+            "after the release untouched"
+        );
+    }
+
+    #[test]
+    fn trim_without_a_curve_writes_the_control_value() {
+        let mut w = window();
+        w.auto_writer.mode = WriteMode::Trim;
+        frame(&mut w, 0, false);
+        w.project.tracks[0].pan = 0.25;
+        frame(&mut w, 960, true);
+        assert!(points(&w, AutoParam::Pan).contains(&(960, 0.25)));
     }
 
     #[test]
