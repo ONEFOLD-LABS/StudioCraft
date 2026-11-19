@@ -44,6 +44,7 @@ mod panel_undo;
 mod pre_ui;
 mod quantize;
 mod recording;
+mod render;
 mod rightzone;
 mod routing;
 mod sampleeditor;
@@ -3282,6 +3283,166 @@ mod tests {
     }
 
     #[test]
+    fn render_in_place_makes_a_new_audio_track_with_or_without_the_channel() {
+        let mut w = ProjectWindow::new(Project::default(), None, String::new());
+        let clip = AudioClip {
+            sample_rate: 48_000,
+            samples: vec![0.5f32; 2 * 48_000].into(),
+        };
+        let id = w.import_clip("Take", None, clip, None).unwrap();
+        w.project.tracks[0].volume_db = -6.0;
+        w.selected_track = Some(0);
+        let range = w.render_range(0).unwrap();
+        assert_eq!(range, {
+            let e = w.project.event(id).unwrap();
+            (e.start.0, e.end())
+        });
+        let level = |w: &ProjectWindow, t: usize| {
+            let ev = &w.project.tracks[t].events[0];
+            let samples = &w.clip(ev.clip.unwrap()).unwrap().samples;
+            (samples[48_000], samples.len(), *samples.last().unwrap())
+        };
+        // Without the channel: the plain take (fader ignored), plus 2 s of tail.
+        w.render_in_place(render::RenderSpec {
+            track: 0,
+            range,
+            with_channel: false,
+        });
+        assert_eq!(w.project.tracks.len(), 2);
+        assert_eq!(w.project.tracks[1].name, "Take (gerendert)");
+        let (mid, len, last) = level(&w, 1);
+        assert!((mid - 0.5).abs() < 1e-3, "{mid}");
+        assert_eq!(len, 2 * (48_000 + 96_000), "one second plus two of tail");
+        assert_eq!(last, 0.0);
+        assert_eq!(w.project.tracks[1].events[0].start.0, range.0);
+        // With the channel: the fader at -6 dB is in the audio.
+        w.render_in_place(render::RenderSpec {
+            track: 0,
+            range,
+            with_channel: true,
+        });
+        let (mid, _, _) = level(&w, 1);
+        assert!(
+            (mid - 0.5 * studiocraft_project::db_to_gain(-6.0)).abs() < 1e-3,
+            "{mid}"
+        );
+        // One undo step each.
+        w.undo();
+        w.undo();
+        assert_eq!(w.project.tracks.len(), 1);
+    }
+
+    #[test]
+    fn render_offline_runs_an_instrument_plugin_in_its_own_thread() {
+        let mut w = ProjectWindow::new(Project::default(), None, String::new());
+        // A synthesizer sounds without content; samplers (e.g. LSP) stay silent unloaded.
+        const SYNTHS: [&str; 4] = ["Surge XT", "Vital", "Dexed", "Odin2"];
+        let list = w.plugin_list().to_vec();
+        let synth = list.iter().find(|p| SYNTHS.contains(&p.name.as_str()));
+        let Some(instr) = synth
+            .or_else(|| list.iter().find(|p| p.is_instrument()))
+            .cloned()
+        else {
+            eprintln!("kein CLAP-Instrument installiert – übersprungen");
+            return;
+        };
+        w.add_instrument_track(Some(instr.clone()));
+        melody(&mut w, 0, 0);
+        let range = w.render_range(0).unwrap();
+        let audio = w
+            .render_offline(render::RenderSpec {
+                track: 0,
+                range,
+                with_channel: false,
+            })
+            .unwrap();
+        let seconds = w
+            .project
+            .tempo
+            .seconds(studiocraft_project::Position(range.1))
+            - w.project
+                .tempo
+                .seconds(studiocraft_project::Position(range.0))
+            + render::TAIL_SECONDS;
+        let frames = (seconds * 48_000.0).round() as usize;
+        assert!(
+            audio.len().abs_diff(2 * frames) <= 4,
+            "{} vs {}",
+            audio.len(),
+            2 * frames
+        );
+        assert!(audio.iter().all(|s| s.is_finite()));
+        if SYNTHS.contains(&instr.name.as_str()) {
+            assert!(
+                audio.iter().any(|s| s.abs() > 1e-4),
+                "{} sounds",
+                instr.name
+            );
+        }
+        // The live chain of the window is untouched by the offline render.
+        assert_eq!(w.project.tracks.len(), 1);
+    }
+
+    #[test]
+    fn render_in_place_runs_an_audio_track_through_its_effect_insert() {
+        let mut w = ProjectWindow::new(Project::default(), None, String::new());
+        let Some(fx) = test_effect(&mut w) else {
+            eprintln!("kein CLAP-Effekt installiert – übersprungen");
+            return;
+        };
+        let clip = AudioClip {
+            sample_rate: 48_000,
+            samples: (0..48_000)
+                .flat_map(|i| {
+                    let v = (i as f32 * 0.05).sin() * 0.3;
+                    [v, v]
+                })
+                .collect::<Vec<f32>>()
+                .into(),
+        };
+        w.import_clip("Take", None, clip, None).unwrap();
+        w.project.tracks[0]
+            .inserts
+            .push(studiocraft_project::InsertSlot {
+                plugin_id: fx.id.clone(),
+                name: fx.name.clone(),
+                bypass: false,
+                params: Vec::new(),
+                state: None,
+            });
+        let range = w.render_range(0).unwrap();
+        w.render_in_place(render::RenderSpec {
+            track: 0,
+            range,
+            with_channel: false,
+        });
+        assert_eq!(w.project.tracks.len(), 2, "{:?}", w.message);
+        let ev = &w.project.tracks[1].events[0];
+        let samples = &w.clip(ev.clip.unwrap()).unwrap().samples;
+        assert!(samples.iter().all(|s| s.is_finite()));
+        assert!(
+            samples[..96_000].iter().any(|s| s.abs() > 1e-3),
+            "{} passes signal",
+            fx.name
+        );
+    }
+
+    #[test]
+    fn the_edit_menu_renders_the_selected_track_in_place() {
+        let (mut w, _) = one_event_window();
+        w.selected_track = Some(0);
+        let mut h = window_harness(w);
+        h.get_by_label("Bearbeiten").click();
+        h.run_steps(2);
+        h.get_by_label("An Ort und Stelle rendern").click();
+        h.run_steps(2);
+        h.get_by_label("Mit Kanaleinstellungen").click();
+        h.run_steps(3);
+        assert_eq!(h.state().project.tracks.len(), 2);
+        assert!(h.state().project.tracks[1].name.ends_with("(gerendert)"));
+    }
+
+    #[test]
     fn audio_connections_dialog_adds_busses_tracks_use_them() {
         let (mut w, _) = one_event_window();
         w.selected_track = Some(0);
@@ -3338,6 +3499,31 @@ mod tests {
         // Undo: back to the main mix.
         h.state_mut().undo();
         assert_eq!(h.state().project.tracks[0].out_bus, None);
+    }
+
+    /// Wellenform bei nicht ganzzahliger Skalierung (Bild für den Vergleich mit
+    /// `STUDIOCRAFT_SHOTS`): keine senkrechten Streifen.
+    #[test]
+    fn waveform_has_no_seams_at_fractional_scale() {
+        let (mut w, _) = one_event_window();
+        w.view.scroll_ticks = 0.0;
+        w.view.row_h = 80.0;
+        w.show_lower = false;
+        w.show_inspector = false;
+        let mut h = Harness::builder()
+            .with_size(egui::vec2(1200.0, 500.0))
+            .with_pixels_per_point(1.25)
+            .wgpu()
+            .build_ui_state(|ui, w: &mut ProjectWindow| w.ui(ui), w);
+        h.run_steps(3);
+        let Ok(img) = h.render() else {
+            eprintln!("kein GPU-Renderer verfügbar, Bild übersprungen");
+            return;
+        };
+        if let Ok(dir) = std::env::var("STUDIOCRAFT_SHOTS") {
+            img.save(std::path::Path::new(&dir).join("waveform-125.png"))
+                .unwrap();
+        }
     }
 
     #[test]

@@ -153,6 +153,10 @@ Snap ist global ein- und ausschaltbar (Taste J); wohin eingerastet wird, bestimm
 - Überlappen sich zwei Events auf einer Spur, erzeugt X einen Crossfade; beide Events klingen durch die Überlappung. Doppelklick auf einen seiner Fade-Griffe öffnet den Crossfade-Editor: eine Kurve für beide Seiten („Gleiche Lautstärke“, „Gleiche Leistung“, S-Kurve, Exponentiell) oder je Seite einzeln, mit Vorschau
 - Fades sind nicht-destruktiv und Teil des Events
 
+**An Ort und Stelle rendern**
+
+Bearbeiten → „An Ort und Stelle rendern“ verwandelt die gewählte Audio- oder Instrument-Spur in Audio: die Bereichsauswahl, sonst die gewählten Events, sonst alle Events der Spur. „Nur Instrument und Inserts“ rendert ohne Fader, Panorama und EQ, „Mit Kanaleinstellungen“ mit ihnen; Sends fehlen. Das Ergebnis (mit 2 s Nachklang) liegt als neuer Clip auf einer neuen Audio-Spur unter der Quelle und wird beim Speichern als WAV im Projektordner abgelegt. Gerendert wird offline mit eigenen Plugin-Instanzen, schneller als Echtzeit; die Wiedergabe läuft dabei weiter.
+
 **Verschieben und Kopieren**
 
 | Aktion | Eingabe |
