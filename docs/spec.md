@@ -54,6 +54,8 @@ Ein Projekt besteht aus Spuren, auf denen Events liegen; Audio-Events verweisen 
 
 **Undo:** Jede Bearbeitung ist ein Befehl im Undo-Verlauf. Der Verlauf ist unbegrenzt konfigurierbar und wird mit dem Projekt nicht gespeichert.
 
+**Automatische Sicherung:** In einstellbarem Abstand (Datei → „Automatisch sichern“, Standard 5 Minuten, „Aus“ möglich) sichert StudioCraft geänderte Projekte als nummerierte Dateien neben der Projektdatei (`Name.backup-07.studiocraft`), ungespeicherte Projekte im Einstellungsordner. Die ältesten Sicherungen über der eingestellten Anzahl (Standard 10) werden gelöscht. Sicherungen schreiben atomar im Hintergrund und markieren das Projekt nicht als gespeichert. Wurde StudioCraft nicht sauber beendet, bietet es beim nächsten Start die neueste Sicherung an; sie öffnet sich als ungespeicherte Fassung des ursprünglichen Projekts.
+
 ## Fenster-Architektur
 
 Alles passiert in einem Projektfenster: In der Mitte liegt die Event-Anzeige, um sie herum liegen Zonen, die einzeln ein- und ausgeblendet werden. Editoren und Mixer laufen wahlweise in der unteren Zone oder als eigene Fenster.
@@ -147,7 +149,7 @@ Snap ist global ein- und ausschaltbar (Taste J); wohin eingerastet wird, bestimm
 **Fades und Crossfades**
 
 - Fade-In und Fade-Out am Griff oben links bzw. rechts ziehen; Doppelklick öffnet den Kurveneditor
-- Überlappen sich zwei Events auf einer Spur, erzeugt X einen Crossfade
+- Überlappen sich zwei Events auf einer Spur, erzeugt X einen Crossfade; beide Events klingen durch die Überlappung. Doppelklick auf einen seiner Fade-Griffe öffnet den Crossfade-Editor: eine Kurve für beide Seiten („Gleiche Lautstärke“, „Gleiche Leistung“, S-Kurve, Exponentiell) oder je Seite einzeln, mit Vorschau
 - Fades sind nicht-destruktiv und Teil des Events
 
 **Verschieben und Kopieren**
