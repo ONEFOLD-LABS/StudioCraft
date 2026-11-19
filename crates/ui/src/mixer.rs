@@ -10,6 +10,10 @@ use studiocraft_project::{MAX_DB, MIN_DB, TrackKind};
 use crate::ProjectWindow;
 
 const STRIP_W: f32 = 76.0;
+/// Breite eines schmalen Kanalzugs (ohne Panorama und Skala).
+const NARROW_W: f32 = 48.0;
+/// Höhe des Racks über den Fadern (Inserts, EQ, Sends).
+const RACK_H: f32 = 132.0;
 /// So lange hält die Peak-Hold-Linie den Spitzenwert, in Sekunden.
 const HOLD_SECONDS: f32 = 2.0;
 /// Ab diesem Pegel (0 dBFS) leuchtet die Übersteuerungsanzeige.
@@ -136,42 +140,77 @@ fn update_hold(
 }
 
 pub(crate) fn show(w: &mut ProjectWindow, ui: &mut Ui) {
-    let height = ui.available_height();
-    let mut changed = false;
+    let mut changed = header(w, ui);
     let mut exclusive = None;
+    let height = ui.available_height();
     ui.horizontal(|ui| {
+        if w.mixer_list {
+            changed |= channel_list(w, ui, height);
+            ui.separator();
+        }
         let master_w = STRIP_W + 16.0;
-        let tracks_w = (ui.available_width() - master_w).max(STRIP_W);
+        let tracks_w = (ui.available_width() - master_w).max(NARROW_W);
         ui.allocate_ui_with_layout(
             vec2(tracks_w, height),
             Layout::left_to_right(Align::Min),
             |ui| {
                 // Nur sichtbare Kanalzüge bauen: auch bei hunderten Spuren bleibt
-                // der Aufwand pro Frame konstant.
-                let channels: Vec<usize> = (0..w.project.tracks.len())
-                    .filter(|&i| has_channel(w.project.tracks[i].kind))
+                // der Aufwand pro Frame klein. Breiten sind verschieden (schmal/breit),
+                // deshalb über aufaddierte Positionen.
+                let gap = ui.spacing().item_spacing.x;
+                let channels: Vec<(usize, f32)> = (0..w.project.tracks.len())
+                    .filter(|&i| {
+                        let t = &w.project.tracks[i];
+                        has_channel(t.kind) && !t.mixer_hidden
+                    })
+                    .map(|i| {
+                        let narrow = w.project.tracks[i].mixer_narrow;
+                        (i, if narrow { NARROW_W } else { STRIP_W })
+                    })
                     .collect();
-                let pitch = STRIP_W + ui.spacing().item_spacing.x;
+                let mut xs = Vec::with_capacity(channels.len() + 1);
+                let mut x = 0.0;
+                for &(_, width) in &channels {
+                    xs.push(x);
+                    x += width + gap;
+                }
+                xs.push(x);
+                let total = x;
                 egui::ScrollArea::horizontal()
                     .id_salt("mixer-kanaele")
                     .show_viewport(ui, |ui, viewport| {
                         let origin = ui.max_rect().min;
-                        ui.set_min_size(vec2(channels.len() as f32 * pitch, height));
-                        let first = (viewport.min.x / pitch).floor().max(0.0) as usize;
-                        let last =
-                            ((viewport.max.x / pitch).ceil() as usize + 1).min(channels.len());
-                        for (k, &i) in channels.iter().enumerate().take(last).skip(first) {
-                            let rect = Rect::from_min_size(
-                                origin + vec2(k as f32 * pitch, 0.0),
-                                vec2(STRIP_W, height),
-                            );
+                        ui.set_min_size(vec2(total, height));
+                        let first = xs
+                            .partition_point(|&x| x <= viewport.min.x)
+                            .saturating_sub(1);
+                        let last = xs
+                            .partition_point(|&x| x < viewport.max.x)
+                            .min(channels.len());
+                        for k in first..last {
+                            let (i, width) = channels[k];
+                            let rect =
+                                Rect::from_min_size(origin + vec2(xs[k], 0.0), vec2(width, height));
+                            let names: Vec<String> = w.project.tracks[i]
+                                .sends
+                                .iter()
+                                .map(|s| w.track_name(s.target))
+                                .collect();
                             let meter = w.meter_levels.get(i).copied().unwrap_or_default();
                             let hold = hold_of(&w.meter_hold, i);
                             let selected = w.selected_track == Some(i);
+                            let show_rack = w.mixer_rack;
                             let t = &mut w.project.tracks[i];
                             let color = Color32::from_rgb(t.color[0], t.color[1], t.color[2]);
                             let (holds_events, audio) =
                                 (t.kind.holds_events(), t.kind == TrackKind::Audio);
+                            let wide = width >= STRIP_W;
+                            let rack = (show_rack && wide).then(|| Rack {
+                                inserts: &mut t.inserts,
+                                eq_on: &mut t.eq.on,
+                                sends: &mut t.sends,
+                                send_names: names,
+                            });
                             let strip = Strip {
                                 id: i,
                                 name: &t.name,
@@ -186,6 +225,9 @@ pub(crate) fn show(w: &mut ProjectWindow, ui: &mut Ui) {
                                 record: holds_events.then_some(&mut t.record),
                                 monitor: audio.then_some(&mut t.monitor),
                                 button_row: true,
+                                width,
+                                rack,
+                                rack_space: show_rack,
                                 meter,
                                 hold,
                                 clipped: w.clipped.get_mut(i),
@@ -222,6 +264,9 @@ pub(crate) fn show(w: &mut ProjectWindow, ui: &mut Ui) {
             record: None,
             monitor: None,
             button_row: true,
+            width: STRIP_W,
+            rack: None,
+            rack_space: w.mixer_rack,
             meter: w.master_meter,
             hold: hold_of(&w.meter_hold, n),
             clipped: w.clipped.get_mut(n),
@@ -234,6 +279,99 @@ pub(crate) fn show(w: &mut ProjectWindow, ui: &mut Ui) {
     if changed {
         w.dirty = true;
     }
+}
+
+/// Kopfzeile des Mixers: Kanalliste, Rack, Breite aller Kanäle, gespeicherte Ansichten.
+fn header(w: &mut ProjectWindow, ui: &mut Ui) -> bool {
+    let mut changed = false;
+    ui.horizontal(|ui| {
+        ui.toggle_value(&mut w.mixer_list, "Kanalliste")
+            .on_hover_text("Liste aller Kanäle mit Sichtbarkeit");
+        ui.toggle_value(&mut w.mixer_rack, "Rack")
+            .on_hover_text("Inserts, EQ und Sends über den Fadern");
+        ui.separator();
+        for (label, narrow) in [("Alle breit", false), ("Alle schmal", true)] {
+            if ui.button(label).clicked() {
+                for t in &mut w.project.tracks {
+                    t.mixer_narrow = narrow;
+                }
+                changed = true;
+            }
+        }
+        ui.separator();
+        ui.menu_button("Ansichten", |ui| {
+            ui.horizontal(|ui| {
+                let l = ui.label("Name");
+                ui.add(egui::TextEdit::singleline(&mut w.mixer_view_name).desired_width(120.0))
+                    .labelled_by(l.id);
+                if ui.button("Speichern").clicked() {
+                    let name = std::mem::take(&mut w.mixer_view_name);
+                    if !w.project.save_mixer_view(&name) {
+                        w.message = Some(format!(
+                            "Ansicht nicht gespeichert (Name leer oder schon {} Ansichten)",
+                            studiocraft_project::MAX_MIXER_VIEWS
+                        ));
+                    }
+                }
+            });
+            let mut apply = None;
+            let mut remove = None;
+            for (k, v) in w.project.mixer_views.iter().enumerate() {
+                ui.horizontal(|ui| {
+                    if ui.button(&v.name).clicked() {
+                        apply = Some(k);
+                    }
+                    if ui
+                        .small_button("x")
+                        .on_hover_text(format!("Ansicht „{}“ entfernen", v.name))
+                        .clicked()
+                    {
+                        remove = Some(k);
+                    }
+                });
+            }
+            if let Some(k) = apply {
+                w.project.apply_mixer_view(k);
+                changed = true;
+                ui.close();
+            }
+            if let Some(k) = remove {
+                w.project.mixer_views.remove(k);
+            }
+        });
+    });
+    changed
+}
+
+/// Kanalliste links im Mixer: alle Kanäle mit Sichtbarkeit und Breite.
+fn channel_list(w: &mut ProjectWindow, ui: &mut Ui, height: f32) -> bool {
+    let mut changed = false;
+    ui.allocate_ui_with_layout(vec2(160.0, height), Layout::top_down(Align::Min), |ui| {
+        ui.set_min_width(160.0);
+        egui::ScrollArea::vertical()
+            .id_salt("mixer-kanalliste")
+            .show(ui, |ui| {
+                for t in w.project.tracks.iter_mut().filter(|t| has_channel(t.kind)) {
+                    ui.horizontal(|ui| {
+                        let mut visible = !t.mixer_hidden;
+                        if ui.checkbox(&mut visible, &t.name).changed() {
+                            t.mixer_hidden = !visible;
+                            changed = true;
+                        }
+                        let mut narrow = t.mixer_narrow;
+                        if ui
+                            .toggle_value(&mut narrow, "schmal")
+                            .on_hover_text(format!("„{}“ schmal anzeigen", t.name))
+                            .changed()
+                        {
+                            t.mixer_narrow = narrow;
+                            changed = true;
+                        }
+                    });
+                }
+            });
+    });
+    changed
 }
 
 /// Breite der Kanalzug-Spalte in der linken Zone.
@@ -329,6 +467,9 @@ pub(crate) fn channel_column(w: &mut ProjectWindow, ui: &mut Ui) {
         record: None,
         monitor: None,
         button_row: false,
+        width: STRIP_W,
+        rack: None,
+        rack_space: false,
         meter,
         hold: hold_of(&w.meter_hold, i),
         clipped: w.clipped.get_mut(i),
@@ -389,6 +530,11 @@ struct Strip<'a> {
     /// Platz für die Knopfreihe auch ohne Knöpfe, damit die Fader im Mixer auf einer Höhe
     /// stehen.
     button_row: bool,
+    /// Breite des Kanalzugs (schmal: ohne Panorama und Skala).
+    width: f32,
+    /// Rack über den Fadern; `rack_space`: Platz dafür auch ohne Rack (Ausrichtung).
+    rack: Option<Rack<'a>>,
+    rack_space: bool,
     meter: [f32; 2],
     /// Peak-Hold je Kanal (linear).
     hold: [f32; 2],
@@ -412,7 +558,8 @@ impl Strip<'_> {
         let mut exclusive_solo = false;
         // Klickfläche des ganzen Kanalzugs (Kanal wählen) zuerst anlegen: Was danach kommt,
         // liegt obenauf, so erreichen Klicks M, S, Pan und Fader und nur der Rest wählt.
-        let area = egui::Rect::from_min_size(ui.cursor().min, vec2(STRIP_W, height));
+        let area = egui::Rect::from_min_size(ui.cursor().min, vec2(self.width, height));
+        let narrow = self.width < STRIP_W;
         let select = ui.interact(
             area,
             ui.make_persistent_id(("kanalzug", self.id)),
@@ -428,11 +575,18 @@ impl Strip<'_> {
             .corner_radius(4.0)
             .inner_margin(4.0);
         let resp = frame.show(ui, |ui| {
-            ui.set_width(STRIP_W - 8.0);
+            ui.set_width(self.width - 8.0);
             ui.set_height(height - 8.0);
             ui.with_layout(Layout::top_down(Align::Center), |ui| {
                 ui.spacing_mut().item_spacing.y = 4.0;
-                if let Some(pan) = self.pan {
+                if let Some(rack) = self.rack {
+                    changed |= rack_ui(ui, rack, self.id, self.width - 8.0);
+                } else if self.rack_space {
+                    ui.add_space(RACK_H + 4.0);
+                }
+                if narrow {
+                    ui.add_space(18.0);
+                } else if let Some(pan) = self.pan {
                     let (c, resp) = pan_control(ui, self.id, pan);
                     changed |= c;
                     if let Some(mode) = self.pan_mode {
@@ -532,6 +686,7 @@ impl Strip<'_> {
                 changed |= fader(
                     ui,
                     self.name,
+                    self.width,
                     self.volume_db,
                     Meter {
                         level: self.meter,
@@ -541,7 +696,8 @@ impl Strip<'_> {
                     fader_h,
                 )
                 .changed();
-                let (rect, _) = ui.allocate_exact_size(vec2(STRIP_W - 8.0, 18.0), Sense::hover());
+                let (rect, _) =
+                    ui.allocate_exact_size(vec2(self.width - 8.0, 18.0), Sense::hover());
                 ui.painter().rect_filled(rect, 2.0, self.color);
                 ui.painter().with_clip_rect(rect).text(
                     rect.center(),
@@ -559,6 +715,83 @@ impl Strip<'_> {
             exclusive_solo,
         }
     }
+}
+
+/// Rack eines Kanalzugs (Spec „Sichtbarkeit und Ansicht“): Inserts (Klick: an/umgehen),
+/// EQ an/aus, Sends (an/aus und Pegel).
+struct Rack<'a> {
+    inserts: &'a mut [studiocraft_project::InsertSlot],
+    eq_on: &'a mut bool,
+    sends: &'a mut [studiocraft_project::SendSlot],
+    /// Namen der Send-Ziele, wie `sends`.
+    send_names: Vec<String>,
+}
+
+/// Kurzname für die schmale Rack-Spalte.
+fn short_name(s: &str) -> String {
+    let n: String = s.chars().take(9).collect();
+    if s.chars().count() > 9 {
+        format!("{n}…")
+    } else {
+        n
+    }
+}
+
+fn rack_ui(ui: &mut Ui, rack: Rack, id: usize, width: f32) -> bool {
+    let mut changed = false;
+    ui.allocate_ui(vec2(width, RACK_H), |ui| {
+        ui.set_min_size(vec2(width, RACK_H));
+        ui.set_max_height(RACK_H);
+        ui.spacing_mut().item_spacing.y = 1.0;
+        let small = |s: &str| RichText::new(s).size(10.0);
+        ui.weak(small("Inserts"));
+        if rack.inserts.is_empty() {
+            ui.weak(small("–"));
+        }
+        for (k, slot) in rack.inserts.iter_mut().enumerate() {
+            let mut on = !slot.bypass;
+            if ui
+                .toggle_value(&mut on, small(&short_name(&slot.name)))
+                .on_hover_text(format!(
+                    "Insert {}: {} – Klick: an/umgehen",
+                    k + 1,
+                    slot.name
+                ))
+                .changed()
+            {
+                slot.bypass = !on;
+                changed = true;
+            }
+        }
+        changed |= ui
+            .toggle_value(rack.eq_on, small("EQ"))
+            .on_hover_text("Kanal-EQ an/aus")
+            .changed();
+        ui.weak(small("Sends"));
+        if rack.sends.is_empty() {
+            ui.weak(small("–"));
+        }
+        for (k, (s, name)) in rack.sends.iter_mut().zip(&rack.send_names).enumerate() {
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 2.0;
+                let l = ui
+                    .toggle_value(&mut s.on, small(&short_name(name)))
+                    .on_hover_text(format!("Send {} an {name}: an/aus", k + 1));
+                changed |= l.changed();
+                changed |= ui
+                    .add(
+                        egui::DragValue::new(&mut s.level_db)
+                            .range(MIN_DB..=MAX_DB)
+                            .speed(0.2)
+                            .max_decimals(1),
+                    )
+                    .labelled_by(l.id)
+                    .changed();
+            });
+        }
+        let _ = id;
+    });
+    changed
 }
 
 /// Solo-Knopf: gelb bei Solo; bei Solo-Defeat gelb umrandet mit gelber Schrift.
@@ -628,8 +861,9 @@ fn pan_control(ui: &mut Ui, id: usize, pan: &mut f32) -> (bool, Response) {
 }
 
 /// Fader mit Pegelanzeige daneben. Strg + Klick: 0 dB, Umschalt + Ziehen: fein.
-fn fader(ui: &mut Ui, name: &str, db: &mut f32, meter: Meter, height: f32) -> Response {
-    let size = vec2(STRIP_W - 12.0, height);
+fn fader(ui: &mut Ui, name: &str, width: f32, db: &mut f32, meter: Meter, height: f32) -> Response {
+    let size = vec2(width - 12.0, height);
+    let scale_labels = width >= STRIP_W;
     let (rect, mut resp) = ui.allocate_exact_size(size, Sense::click_and_drag());
     let track = Rect::from_min_max(
         pos2(rect.left() + 6.0, rect.top() + 6.0),
@@ -662,13 +896,15 @@ fn fader(ui: &mut Ui, name: &str, db: &mut f32, meter: Meter, height: f32) -> Re
             y,
             Stroke::new(1.0, v.weak_text_color()),
         );
-        p.text(
-            pos2(rect.right() - 1.0, y),
-            Align2::RIGHT_CENTER,
-            format!("{}", mark as i32),
-            FontId::proportional(8.5),
-            v.weak_text_color(),
-        );
+        if scale_labels {
+            p.text(
+                pos2(rect.right() - 1.0, y),
+                Align2::RIGHT_CENTER,
+                format!("{}", mark as i32),
+                FontId::proportional(8.5),
+                v.weak_text_color(),
+            );
+        }
     }
     // Übersteuerung: rotes Feld über den Pegelbalken, Klick setzt zurück.
     if let Some(clipped) = meter.clipped {
