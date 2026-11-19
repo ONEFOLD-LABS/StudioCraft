@@ -1,6 +1,6 @@
 # UI-Parität: Anordnung des Projektfensters
 
-Stand: 2026-11-19
+Stand: 2026-11-19 (Status nach #62–#69)
 
 Ziel: Wer klassische DAWs kennt, findet sich in StudioCraft ohne Suchen zurecht. Dazu folgt das
 Projektfenster der Anordnung, die `docs/spec.md` (Abschnitt „Fenster-Architektur“) beschreibt,
@@ -19,11 +19,11 @@ Status: ✅ umgesetzt · 🟡 teilweise · ⬜ offen
 | # | Element | Inhalt | Status |
 |---|---|---|---|
 | 1 | Menüzeile | Datei, Bearbeiten, Projekt, Ansicht, … | ✅ |
-| 2 | Werkzeugzeile | Zonen-Schalter links, Transport-Kurzform, Werkzeuge, Snap/Raster, Zonen-Schalter rechts | 🟡 |
-| 3 | Info-Zeile | Werte des gewählten Events, direkt editierbar; ein-/ausblendbar | ⬜ |
-| 4 | Mitte | linke Zone · Spurliste · Lineal/Event-Anzeige · rechte Zone | 🟡 |
-| 5 | Untere Zone | Reiter (Mixer, Editor, …) am unteren Rand der Zone | 🟡 |
-| 6 | Transportleiste | fest am unteren Fensterrand | 🟡 |
+| 2 | Werkzeugzeile | Zonen-Schalter links, Transport-Kurzform, Werkzeuge, Snap/Raster, Zonen-Schalter rechts | 🟡 (Snap-Modus, Quantisierung fehlen) |
+| 3 | Info-Zeile | Werte des gewählten Events, direkt editierbar; ein-/ausblendbar | ✅ (Mehrfachauswahl relativ: offen) |
+| 4 | Mitte | linke Zone · Spurliste · Lineal/Event-Anzeige · rechte Zone | ✅ (Spurköpfe: Monitor, R/W offen) |
+| 5 | Untere Zone | Reiter (Mixer, Editor, …) am unteren Rand der Zone | ✅ |
+| 6 | Transportleiste | fest am unteren Fensterrand, F2 blendet aus | ✅ |
 | 7 | Statuszeile | Audio-Gerät, Abtastrate, Last, Meldungen | 🟡 (in Transportleiste) |
 
 ## Werkzeugzeile
@@ -102,9 +102,14 @@ Die Positionsanzeige hat einen dunklen Hintergrund (`counter_bg`) mit heller Sch
 
 ## Reihenfolge der Umsetzung
 
-1. Werkzeugzeile mit eigenen Symbolen und Zonen-Schaltern
-2. Info-Zeile
-3. Spurköpfe (Issue #19)
-4. Transportleiste und Reiter der unteren Zone
-5. Farben: neutralere Grautöne, Akzent sparsamer
-6. Rechte Zone (Issue #27)
+1. ✅ Werkzeugzeile mit eigenen Symbolen und Zonen-Schaltern (#62)
+2. ✅ Info-Zeile (#63)
+3. 🟡 Spurköpfe: Aufnahme-Punkt und neutrale Auswahl (#64); Monitor, R/W, Lanes folgen mit
+   Issue #19 und der Automation (#34)
+4. ✅ Transportleiste (#64) und Reiter der unteren Zone (#65)
+5. ✅ Farben: neutrale Grautöne, Akzent sparsamer (#65)
+6. 🟡 Rechte Zone: Medien und Plugins (#67); Dateibrowser und Vorhören folgen (Issue #27)
+7. ✅ Inspector-Kopf in Spurfarbe (#69)
+
+**Als Nächstes:** Snap-Modus und Quantisierungswert in der Werkzeugzeile (Issues #12, #21),
+Spurkopf-Schalter Monitor und R/W (#19), Fokusrahmen der Zonen (Spec „Fokus-Regel“).
