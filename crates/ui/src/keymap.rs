@@ -35,6 +35,8 @@ pub(crate) enum Cmd {
     PunchOut,
     LocatorsToSelection,
     ToggleMixer,
+    /// Strg+E: Editor des gewählten Events im eigenen Fenster.
+    OpenEditorWindow,
     ToggleInspector,
     ToggleRightZone,
     InsertMarker,
@@ -350,9 +352,16 @@ pub(crate) const COMMANDS: &[CommandInfo] = &[
     cmd!(
         Cmd::ToggleMixer,
         "window.mixer",
-        "Mixer",
+        "Mixer-Fenster",
         "Fenster",
         [k(N, Key::F3)]
+    ),
+    cmd!(
+        Cmd::OpenEditorWindow,
+        "window.editor",
+        "Editor im eigenen Fenster",
+        "Fenster",
+        [k(C, Key::E)]
     ),
     cmd!(
         Cmd::ToggleInspector,
@@ -997,15 +1006,10 @@ impl crate::ProjectWindow {
             Cmd::PunchIn => self.punch_in = !self.punch_in,
             Cmd::PunchOut => self.punch_out = !self.punch_out,
             Cmd::LocatorsToSelection => self.locators_to_selection(),
-            Cmd::ToggleMixer => {
-                // Mixer ein/aus; ist gerade der Editor zu sehen, zum Mixer wechseln.
-                if self.show_lower && self.lower == LowerZone::Mixer {
-                    self.show_lower = false;
-                } else {
-                    self.show_lower = true;
-                    self.lower = LowerZone::Mixer;
-                }
-            }
+            // F3: Mixer als eigenes Fenster (Spec „Fenster-Architektur“); in der unteren
+            // Zone bleibt er über den Reiter und das Menü Ansicht erreichbar.
+            Cmd::ToggleMixer => self.toggle_mixer_window(),
+            Cmd::OpenEditorWindow => self.open_editor_window(),
             // Alt+I: Inspector-Spalte; ist die linke Zone zu, öffnet sie mit Inspector.
             Cmd::ToggleInspector => {
                 if self.show_inspector {

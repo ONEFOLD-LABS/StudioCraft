@@ -20,6 +20,42 @@ pub struct Settings {
     pub audio: DeviceChoice,
     /// MIDI-Eingänge öffnen.
     pub midi_inputs: bool,
+    /// Lage der eigenen Fenster (Mixer, Editor).
+    pub windows: WindowRects,
+}
+
+/// Lage eines eigenen Fensters: Position (fehlt, wo das System sie nicht verrät, etwa unter
+/// Wayland) und Innengröße in Punkten.
+#[derive(Debug, Clone, Copy, PartialEq, Default, serde::Serialize, serde::Deserialize)]
+pub struct WindowRect {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pos: Option<[f32; 2]>,
+    pub size: [f32; 2],
+}
+
+impl WindowRect {
+    /// Fremde Dateiwerte in vernünftige Grenzen bringen; unbrauchbare Größen verwerfen.
+    fn sanitized(self) -> Option<Self> {
+        let ok = |v: f32, lo: f32, hi: f32| v.is_finite() && (lo..=hi).contains(&v);
+        let size = self.size;
+        if !(ok(size[0], 100.0, 10_000.0) && ok(size[1], 100.0, 10_000.0)) {
+            return None;
+        }
+        let pos = self
+            .pos
+            .filter(|p| ok(p[0], -20_000.0, 20_000.0) && ok(p[1], -20_000.0, 20_000.0));
+        Some(Self { pos, size })
+    }
+}
+
+/// Gemerkte Lage der eigenen Fenster.
+#[derive(Debug, Clone, Copy, PartialEq, Default, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
+pub struct WindowRects {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mixer: Option<WindowRect>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub editor: Option<WindowRect>,
 }
 
 /// Ziel von zweimal Stopp (Spec „Stopp-Verhalten“).
@@ -39,6 +75,7 @@ impl Default for Settings {
             stop_twice: StopTarget::Start,
             audio: DeviceChoice::default(),
             midi_inputs: true,
+            windows: WindowRects::default(),
         }
     }
 }
@@ -52,6 +89,7 @@ struct File {
     stop_twice: String,
     audio: AudioFile,
     midi_inputs: bool,
+    windows: WindowRects,
 }
 
 #[derive(Default, serde::Serialize, serde::Deserialize)]
@@ -131,6 +169,7 @@ impl Settings {
                 block_frames: self.audio.block_frames,
             },
             midi_inputs: self.midi_inputs,
+            windows: self.windows,
         }
     }
 
@@ -155,6 +194,10 @@ impl Settings {
                 block_frames: f.audio.block_frames.filter(|b| (16..=8192).contains(b)),
             },
             midi_inputs: f.midi_inputs,
+            windows: WindowRects {
+                mixer: f.windows.mixer.and_then(WindowRect::sanitized),
+                editor: f.windows.editor.and_then(WindowRect::sanitized),
+            },
         }
     }
 
@@ -196,6 +239,13 @@ mod tests {
                 block_frames: Some(128),
             },
             midi_inputs: false,
+            windows: WindowRects {
+                mixer: Some(WindowRect {
+                    pos: Some([120.0, 80.0]),
+                    size: [900.0, 500.0],
+                }),
+                editor: None,
+            },
         };
         s.save().unwrap();
         assert_eq!(Settings::load(), s);
@@ -221,5 +271,19 @@ mod tests {
         std::fs::write(d.join("settings.json"), "kaputt").unwrap();
         assert_eq!(Settings::load(), Settings::default());
         unsafe { std::env::remove_var("STUDIOCRAFT_CONFIG_DIR") };
+    }
+
+    #[test]
+    fn hostile_window_rects_are_dropped_or_fixed() {
+        let r = WindowRect {
+            pos: Some([f32::NAN, 0.0]),
+            size: [800.0, 600.0],
+        };
+        assert_eq!(r.sanitized().map(|r| r.pos), Some(None));
+        let tiny = WindowRect {
+            pos: None,
+            size: [5.0, 1e9],
+        };
+        assert_eq!(tiny.sanitized(), None);
     }
 }

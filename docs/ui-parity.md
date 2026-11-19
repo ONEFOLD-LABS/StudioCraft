@@ -100,6 +100,14 @@ Inspector“). Sektionen, die ein Spurtyp nicht hat, fehlen.
 Inhalt oben, eine schmale Reiterleiste am **unteren** Rand der Zone: Mixer, Editor, Sample-Editor
 (später). Reiter mit Text, aktiver Reiter hervorgehoben.
 
+Mixer und Editoren laufen wahlweise im eigenen Fenster: F3 öffnet bzw. schließt das
+Mixer-Fenster, Strg+E öffnet den Editor des gewählten Events (Key-Editor für MIDI-Parts,
+Sample-Editor für Audio). Solange ein Inhalt im eigenen Fenster liegt, zeigt die untere Zone
+an seiner Stelle „Läuft im eigenen Fenster.“ mit „Zurückholen“; im Fenster holt „In die untere
+Zone“ ihn zurück. Jedes Fenster merkt sich Größe und Position in den Einstellungen (unter
+Wayland nur die Größe, weil das System die Position nicht verrät). Wo keine eigenen Fenster
+möglich sind (Web, Tests), erscheinen sie eingebettet im Projektfenster.
+
 ## Rechte Zone
 
 Reiter oben: **Start** (Standard), Medien (Pool), Dateien (Dateibrowser: Ordner öffnen, ein Klick hört vor, Doppelklick
@@ -166,6 +174,7 @@ Die Positionsanzeige hat einen dunklen Hintergrund (`counter_bg`) mit heller Sch
 22. ✅ Werkzeugzeile: globale Zustände links, Werkzeuge zentriert, Zonen-Schalter rechts
 23. ✅ Rechte Zone: Startseite mit Kacheln, Plugin-Filter Instrumente/Effekte
 24. ✅ Zonen: Größen und Sichtbarkeit im Projekt gespeichert, Alt+L linke Zone, Alt+I Inspector-Spalte, benannte Layouts (Ansicht → Layouts, Strg+Alt+1 bis 9)
+25. ✅ Eigene Fenster: Mixer (F3) und Editoren (Strg+E), Größe und Position gemerkt
 
 **Als Nächstes:** Aus dieser Liste ist nichts mehr offen. Weitere Angleichungen ergeben sich aus
 `docs/spec.md`.
