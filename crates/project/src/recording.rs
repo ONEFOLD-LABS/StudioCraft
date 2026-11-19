@@ -64,7 +64,9 @@ impl RecordSettings {
     }
 }
 
-/// Eine aufgenommene Note in Ticks, mit ihrem Cycle-Durchgang (0 ohne Cycle).
+/// Eine aufgenommene Note oder ein Controller-Wert in Ticks, mit ihrem Cycle-Durchgang
+/// (0 ohne Cycle). Mit `ctrl` ist es ein Controller-Punkt bei `start`; `end`, `key` und
+/// `velocity` gelten dann nicht.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TakeNote {
     pub start: u64,
@@ -72,6 +74,32 @@ pub struct TakeNote {
     pub key: u8,
     pub velocity: u8,
     pub pass: u32,
+    pub ctrl: Option<(crate::CtrlKind, u16)>,
+}
+
+/// Noten einer Aufnahme relativ zu `origin`.
+fn to_notes(notes: &[TakeNote], origin: u64) -> impl Iterator<Item = Note> + '_ {
+    notes
+        .iter()
+        .filter(|n| n.ctrl.is_none())
+        .map(move |n| Note {
+            pitch: n.key.min(127),
+            velocity: n.velocity.clamp(1, 127),
+            start: n.start as i64 - origin as i64,
+            length: n.end.saturating_sub(n.start).max(1),
+        })
+}
+
+/// Controller-Punkte einer Aufnahme relativ zu `origin`.
+fn to_ctrls(notes: &[TakeNote], origin: u64) -> impl Iterator<Item = crate::CtrlPoint> + '_ {
+    notes.iter().filter_map(move |n| {
+        let (kind, value) = n.ctrl?;
+        Some(crate::CtrlPoint {
+            kind,
+            start: n.start as i64 - origin as i64,
+            value,
+        })
+    })
 }
 
 impl Project {
@@ -83,17 +111,14 @@ impl Project {
         notes: &[TakeNote],
         name: &str,
     ) -> Option<EventId> {
-        let notes: Vec<Note> = notes
+        let inside: Vec<TakeNote> = notes
             .iter()
+            .copied()
             .filter(|n| n.start >= a && n.start < b)
-            .map(|n| Note {
-                pitch: n.key.min(127),
-                velocity: n.velocity.clamp(1, 127),
-                start: (n.start - a) as i64,
-                length: n.end.saturating_sub(n.start).max(1),
-            })
             .collect();
-        if notes.is_empty() {
+        let ctrls: Vec<crate::CtrlPoint> = to_ctrls(&inside, a).collect();
+        let notes: Vec<Note> = to_notes(&inside, a).collect();
+        if notes.is_empty() && ctrls.is_empty() {
             return None;
         }
         let id = self.create_event(track, a, b.checked_sub(a)?)?;
@@ -102,6 +127,8 @@ impl Project {
         let mut ev = self.tracks[t].events.remove(i);
         ev.name = name.to_owned();
         ev.notes = notes;
+        ev.controllers = ctrls;
+        ev.controllers.sort_by_key(|c| c.start);
         self.tracks[t].events.push(ev);
         Some(id)
     }
@@ -156,10 +183,12 @@ impl Project {
                 let (a, b) = range;
                 for ev in &mut self.tracks[track].events {
                     let start = ev.start.0 as i64;
-                    ev.notes.retain(|n| {
-                        let at = start + n.start;
+                    let outside = |rel: i64| {
+                        let at = start + rel;
                         at < a as i64 || at >= b as i64
-                    });
+                    };
+                    ev.notes.retain(|n| outside(n.start));
+                    ev.controllers.retain(|c| outside(c.start));
                 }
                 self.take_part(track, range, notes, name)
                     .into_iter()
@@ -189,17 +218,15 @@ impl Project {
                 for n in &mut ev.notes {
                     n.start += shift;
                 }
+                for c in &mut ev.controllers {
+                    c.start += shift;
+                }
                 ev.start = crate::Position(new_start);
                 ev.length = new_end - new_start;
-                for n in notes {
-                    ev.notes.push(Note {
-                        pitch: n.key.min(127),
-                        velocity: n.velocity.clamp(1, 127),
-                        start: n.start as i64 - new_start as i64,
-                        length: n.end.saturating_sub(n.start).max(1),
-                    });
-                }
+                ev.notes.extend(to_notes(notes, new_start));
                 ev.notes.sort_by_key(|n| (n.start, n.pitch));
+                ev.controllers.extend(to_ctrls(notes, new_start));
+                ev.controllers.sort_by_key(|c| c.start);
                 vec![id]
             }
         }
@@ -218,6 +245,7 @@ mod tests {
             key,
             velocity: 100,
             pass,
+            ctrl: None,
         }
     }
 

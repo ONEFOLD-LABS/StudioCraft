@@ -34,6 +34,9 @@ pub struct RecordedMidi {
     pub running: bool,
     /// Frei laufender Frame-Zähler der Engine (für Noten im Stillstand).
     pub clock: u64,
+    /// Aufgenommener Controller (Pitchbend, CC außer Haltepedal, Aftertouch) als rohe
+    /// MIDI-Nachricht; dann gelten `key`, `velocity` und `on` nicht.
+    pub ctrl: Option<[u8; 3]>,
 }
 
 /// Wertet eine MIDI-Nachricht aus: Noten (Note-On mit Velocity 0 = Off),

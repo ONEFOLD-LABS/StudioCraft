@@ -426,6 +426,7 @@ impl ProjectWindow {
             self.toggle_metronome();
             ui.close();
         }
+        self.click_menu(ui);
         ui.separator();
         let mut changed = ui
             .checkbox(&mut self.return_on_stop, "Beim Stoppen zur Startposition")

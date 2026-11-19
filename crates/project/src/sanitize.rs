@@ -98,6 +98,11 @@ impl Project {
         sigs.sort_by_key(|e| e.bar);
         sigs.dedup_by_key(|e| e.bar);
         fix(*sigs != before);
+        let click = self.click.sanitized();
+
+        fix(click != self.click);
+
+        self.click = click;
 
         for c in &mut self.pool {
             clamp!(
@@ -163,6 +168,18 @@ impl Project {
                     clamp!(n.length, n.length.min(MAX_TICKS));
                     clamp!(n.pitch, n.pitch.min(127));
                     clamp!(n.velocity, n.velocity.clamp(1, 127));
+                }
+                if e.controllers.len() > crate::controllers::MAX_CTRL_POINTS {
+                    e.controllers.truncate(crate::controllers::MAX_CTRL_POINTS);
+                    fix(true);
+                }
+                for c in &mut e.controllers {
+                    let max = MAX_TICKS as i64;
+                    clamp!(c.start, c.start.clamp(-max, max));
+                    clamp!(c.value, c.value.min(c.kind.max()));
+                    if let crate::CtrlKind::Cc(n) = c.kind {
+                        clamp!(c.kind, crate::CtrlKind::Cc(n.min(127)));
+                    }
                 }
             }
         }
