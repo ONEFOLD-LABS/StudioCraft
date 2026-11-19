@@ -4,12 +4,23 @@
 use crate::{Project, TrackInput};
 
 /// Ein Ein- oder Ausgangsbus: Mono oder Stereo ab Hardware-Kanal `first` (ab 0).
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct IoBus {
     pub id: u32,
     pub name: String,
     pub stereo: bool,
     pub first: u16,
+    /// Kanalzug im Mixer: Pegel in dB (Eingänge vor der Aufnahme, Ausgänge vor dem Gerät).
+    /// Beim Hauptmix gilt stattdessen der Ausgangsfader des Projekts.
+    #[serde(default, skip_serializing_if = "is_zero_db")]
+    pub gain_db: f32,
+    /// Stumm (nur Ausgangsbusse).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub mute: bool,
+}
+
+fn is_zero_db(v: &f32) -> bool {
+    *v == 0.0
 }
 
 impl IoBus {
@@ -31,7 +42,7 @@ impl IoBus {
 }
 
 /// Ein- und Ausgangsbusse eines Projekts. `outputs[0]` ist der Hauptmix (Summe).
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(default)]
 pub struct AudioIo {
     pub inputs: Vec<IoBus>,
@@ -53,12 +64,16 @@ impl Default for AudioIo {
                 name: "Eingang 1/2".into(),
                 stereo: true,
                 first: 0,
+                gain_db: 0.0,
+                mute: false,
             }],
             outputs: vec![IoBus {
                 id: MAIN_OUT,
                 name: "Stereo Out".into(),
                 stereo: true,
                 first: 0,
+                gain_db: 0.0,
+                mute: false,
             }],
         }
     }
@@ -107,6 +122,8 @@ impl AudioIo {
             name: String::new(),
             stereo,
             first,
+            gain_db: 0.0,
+            mute: false,
         };
         let kind = if output { "Ausgang" } else { "Eingang" };
         bus.name = format!("{kind} {}", bus.ports_label());
@@ -123,6 +140,11 @@ impl AudioIo {
             for b in list.iter_mut() {
                 b.first = b.first.min(MAX_HW_CHANNEL);
                 b.name = b.name.chars().take(64).collect();
+                b.gain_db = if b.gain_db.is_finite() {
+                    b.gain_db.clamp(crate::MIN_DB, crate::MAX_DB)
+                } else {
+                    0.0
+                };
             }
         }
         if !self.outputs.iter().any(|b| b.id == MAIN_OUT) {
@@ -183,6 +205,26 @@ mod tests {
     use crate::TrackKind;
 
     #[test]
+    fn bus_strip_level_and_mute_are_saved_and_sanitized() {
+        let mut p = Project::default();
+        let id = p.io.add(true, true).unwrap_or_default();
+        let json = crate::file::to_json(&p);
+        assert!(!json.contains("gain_db"), "defaults stay out of the file");
+        for b in &mut p.io.outputs {
+            b.gain_db = -3.0;
+            b.mute = b.id == id;
+        }
+        let back = crate::file::from_json(&crate::file::to_json(&p)).map(|p| p.io);
+        assert_eq!(back.as_ref().ok(), Some(&p.io));
+        let mut io = p.io.clone();
+        io.outputs[0].gain_db = f32::NAN;
+        io.outputs[1].gain_db = 99.0;
+        let io = io.sanitized();
+        assert_eq!(io.outputs[0].gain_db, 0.0);
+        assert_eq!(io.outputs[1].gain_db, crate::MAX_DB);
+    }
+
+    #[test]
     fn busses_resolve_inputs_and_removing_falls_back() {
         let mut p = Project::default();
         let t = p.add_track(TrackKind::Audio, "Gesang");
@@ -232,18 +274,24 @@ mod tests {
                     name: "x".into(),
                     stereo: true,
                     first: 9,
+                    gain_db: 0.0,
+                    mute: false,
                 },
                 IoBus {
                     id: 2,
                     name: "y".repeat(500),
                     stereo: true,
                     first: u16::MAX,
+                    gain_db: 0.0,
+                    mute: false,
                 },
                 IoBus {
                     id: 2,
                     name: "dup".into(),
                     stereo: true,
                     first: 0,
+                    gain_db: 0.0,
+                    mute: false,
                 },
             ],
             outputs: vec![IoBus {
@@ -251,6 +299,8 @@ mod tests {
                 name: "A".into(),
                 stereo: true,
                 first: 2,
+                gain_db: 0.0,
+                mute: false,
             }],
         }
         .sanitized();

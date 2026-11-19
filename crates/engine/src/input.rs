@@ -24,6 +24,7 @@ use cpal::{
 };
 
 use crate::clock::{CaptureClock, now_nanos};
+use crate::meters::{InputLevels, MAX_INPUT_CHANNELS};
 use crate::monitor::{MonitorInput, monitor_ring, push_frames};
 
 /// Puffer zwischen Eingangs-Callback und Recorder in Sekunden.
@@ -68,6 +69,8 @@ pub struct Recorder {
 pub struct AudioInput {
     _stream: Stream,
     pub info: InputInfo,
+    /// Pegel und Anzeige je Gerätekanal.
+    pub levels: Arc<InputLevels>,
 }
 
 pub struct PreparedInput {
@@ -150,13 +153,14 @@ impl PreparedInput {
         );
         let overruns = Arc::new(AtomicU64::new(0));
         let clock = Arc::new(CaptureClock::default());
-        let (o, c) = (overruns.clone(), clock.clone());
+        let levels = Arc::new(InputLevels::default());
+        let (o, c, l) = (overruns.clone(), clock.clone(), levels.clone());
         let stream = match format {
-            SampleFormat::F32 => build::<f32>(&device, &config, producer, monitor_tx, o, c),
-            SampleFormat::I16 => build::<i16>(&device, &config, producer, monitor_tx, o, c),
-            SampleFormat::I32 => build::<i32>(&device, &config, producer, monitor_tx, o, c),
-            SampleFormat::U16 => build::<u16>(&device, &config, producer, monitor_tx, o, c),
-            SampleFormat::F64 => build::<f64>(&device, &config, producer, monitor_tx, o, c),
+            SampleFormat::F32 => build::<f32>(&device, &config, producer, monitor_tx, o, c, l),
+            SampleFormat::I16 => build::<i16>(&device, &config, producer, monitor_tx, o, c, l),
+            SampleFormat::I32 => build::<i32>(&device, &config, producer, monitor_tx, o, c, l),
+            SampleFormat::U16 => build::<u16>(&device, &config, producer, monitor_tx, o, c, l),
+            SampleFormat::F64 => build::<f64>(&device, &config, producer, monitor_tx, o, c, l),
             other => Err(format!("Sampleformat {other} wird nicht unterstützt")),
         }?;
         stream.play().map_err(|e| format!("Eingang starten: {e}"))?;
@@ -166,6 +170,7 @@ impl PreparedInput {
             AudioInput {
                 _stream: stream,
                 info,
+                levels,
             },
             recorder,
             monitor,
@@ -180,6 +185,7 @@ fn build<T>(
     mut monitor: rtrb::Producer<f32>,
     overruns: Arc<AtomicU64>,
     clock: Arc<CaptureClock>,
+    levels: Arc<InputLevels>,
 ) -> Result<Stream, String>
 where
     T: SizedSample,
@@ -198,10 +204,29 @@ where
                 clock.publish(frames_seen, now_nanos().saturating_sub(latency));
                 frames_seen += (data.len() / channels) as u64;
 
+                // Pegel der Eingangskanalzüge, einmal je Puffer gelesen.
+                let mut gains = [1.0f32; MAX_INPUT_CHANNELS];
+                for (c, g) in gains.iter_mut().enumerate().take(channels) {
+                    *g = levels.gain(c);
+                }
+                let sample = |i: usize, s: &T| -> f32 {
+                    let v = s.to_sample::<f32>();
+                    gains.get(i % channels).map_or(v, |g| v * g)
+                };
+                let mut peaks = [0.0f32; MAX_INPUT_CHANNELS];
+                for (i, s) in data.iter().enumerate() {
+                    if let Some(p) = peaks.get_mut(i % channels) {
+                        *p = p.max(sample(i, s).abs());
+                    }
+                }
+                for (c, &p) in peaks.iter().enumerate().take(channels) {
+                    levels.feed(c, p);
+                }
+
                 let n = data.len().min(producer.slots());
                 if let Ok(mut chunk) = producer.write_chunk_uninit(n) {
                     let (a, b) = chunk.as_mut_slices();
-                    let mut src = data.iter().map(|s| s.to_sample::<f32>());
+                    let mut src = data.iter().enumerate().map(|(i, s)| sample(i, s));
                     for slot in a.iter_mut().chain(b.iter_mut()) {
                         slot.write(src.next().unwrap_or(0.0));
                     }
@@ -211,7 +236,7 @@ where
                 push_frames(
                     &mut monitor,
                     channels,
-                    data.iter().map(|s| s.to_sample::<f32>()),
+                    data.iter().enumerate().map(|(i, s)| sample(i, s)),
                 );
                 if n < data.len() {
                     overruns.fetch_add((data.len() - n) as u64, Ordering::Relaxed);
