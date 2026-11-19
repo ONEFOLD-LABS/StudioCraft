@@ -51,6 +51,8 @@ pub struct TrackDelay {
     pub direct: u32,
     /// Zusätzlich je Send (in der Reihenfolge von `PlayTrack::sends`).
     pub sends: Vec<u32>,
+    /// MIDI-Spuren an externe Geräte: um so viel später senden (statt Verzögerungsleitung).
+    pub midi: u32,
 }
 
 /// Ergebnis des Latenzausgleichs: Verzögerung je Spur (nach Projektspur) und die Latenz am
@@ -112,10 +114,19 @@ impl Compensation {
             let common = sends.iter().copied().chain([direct]).min().unwrap_or(0);
             let clamp = |v: u64| u32::try_from(v).unwrap_or(u32::MAX);
             if let Some(slot) = tracks.get_mut(t.slot) {
-                *slot = TrackDelay {
-                    common: clamp(common),
-                    direct: clamp(direct - common),
-                    sends: sends.iter().map(|&s| clamp(s - common)).collect(),
+                *slot = if t.midi_out.is_some() {
+                    // Externe Klangerzeuger: Noten so spät senden, wie der Rest am Ausgang ist.
+                    TrackDelay {
+                        midi: clamp(total.saturating_sub(o[i])),
+                        ..TrackDelay::default()
+                    }
+                } else {
+                    TrackDelay {
+                        common: clamp(common),
+                        direct: clamp(direct - common),
+                        sends: sends.iter().map(|&s| clamp(s - common)).collect(),
+                        midi: 0,
+                    }
                 };
             }
         }
@@ -127,9 +138,9 @@ impl Compensation {
 
     /// Ob irgendwo verzögert wird.
     pub fn is_empty(&self) -> bool {
-        self.tracks
-            .iter()
-            .all(|t| t.common == 0 && t.direct == 0 && t.sends.iter().all(|&s| s == 0))
+        self.tracks.iter().all(|t| {
+            t.common == 0 && t.direct == 0 && t.midi == 0 && t.sends.iter().all(|&s| s == 0)
+        })
     }
 }
 
@@ -138,6 +149,8 @@ pub struct TrackLines {
     pub common: Option<DelayLine>,
     pub direct: Option<DelayLine>,
     pub sends: Vec<Option<DelayLine>>,
+    /// MIDI an externe Geräte: Versatz in Frames.
+    pub midi: u32,
 }
 
 /// Alle Verzögerungsleitungen der Engine.
@@ -162,6 +175,7 @@ impl DelayBank {
                     common: DelayLine::new(t.common),
                     direct: DelayLine::new(t.direct),
                     sends: t.sends.iter().map(|&s| DelayLine::new(s)).collect(),
+                    midi: t.midi,
                 })
                 .collect(),
         }
@@ -192,6 +206,28 @@ mod tests {
             sends,
             ..PlayTrack::default()
         }
+    }
+
+    #[test]
+    fn midi_to_external_devices_is_sent_later_by_the_output_latency() {
+        let ext = PlayTrack {
+            slot: 1,
+            midi_out: Some((0, 0)),
+            ..PlayTrack::default()
+        };
+        let song = Song {
+            tracks: vec![track(0, Output::Master, None, vec![]), ext],
+            ..Song::default()
+        };
+        let c = Compensation::compute(&song, &[480, 0], 2);
+        assert_eq!(c.total, 480);
+        assert_eq!(c.tracks[1].midi, 480, "notes leave 480 frames later");
+        assert_eq!(
+            (c.tracks[1].common, c.tracks[1].direct),
+            (0, 0),
+            "no delay line"
+        );
+        assert_eq!(DelayBank::new(&c).tracks[1].midi, 480);
     }
 
     #[test]

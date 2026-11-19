@@ -146,6 +146,9 @@ pub struct EngineControl {
     pub midi: MidiSender,
     /// Während der Aufnahme gespielte Noten (vom Audio-Thread).
     pub recorded_midi: rtrb::Consumer<RecordedMidi>,
+    /// Geplante Nachrichten an externe MIDI-Geräte; die Oberfläche übergibt sie dem
+    /// Ausgabe-Thread ([`crate::midi_out::MidiOutThread::spawn`]).
+    pub midi_out: Option<rtrb::Consumer<crate::midi_out::OutMsg>>,
     pub status: Arc<EngineStatus>,
     pub meters: Arc<Meters>,
     pub tempo: TempoMap,
@@ -215,6 +218,8 @@ pub struct EngineCore {
     send_tmp: Box<[f32]>,
     midi_in: rtrb::Consumer<MidiMsg>,
     midi_rec: rtrb::Producer<RecordedMidi>,
+    /// Nachrichten an externe MIDI-Geräte, mit Fälligkeit (midi_out.rs).
+    midi_out: rtrb::Producer<crate::midi_out::OutMsg>,
     midi_target: Option<usize>,
     /// Puffer der Gruppen und FX-Kanäle, vorab angelegt.
     bus_bufs: Vec<Box<[f32]>>,
@@ -279,6 +284,7 @@ pub fn engine(sample_rate: u32, tempo: TempoMap) -> (EngineCore, EngineControl) 
     let (delay_tx, delay_rx) = rtrb::RingBuffer::new(16);
     let (midi_tx, midi_rx) = rtrb::RingBuffer::new(1024);
     let (rec_tx, rec_rx) = rtrb::RingBuffer::new(8192);
+    let (out_tx, out_rx) = rtrb::RingBuffer::new(crate::midi_out::OUT_RING);
     let status = Arc::new(EngineStatus::default());
     let meters = Arc::new(Meters::default());
     let core = EngineCore {
@@ -297,6 +303,7 @@ pub fn engine(sample_rate: u32, tempo: TempoMap) -> (EngineCore, EngineControl) 
         send_tmp: vec![0.0; SCRATCH_FRAMES * 2].into_boxed_slice(),
         midi_in: midi_rx,
         midi_rec: rec_tx,
+        midi_out: out_tx,
         midi_target: None,
         bus_bufs: (0..crate::song::MAX_BUSES)
             .map(|_| vec![0.0; SCRATCH_FRAMES * 2].into_boxed_slice())
@@ -348,6 +355,7 @@ pub fn engine(sample_rate: u32, tempo: TempoMap) -> (EngineCore, EngineControl) 
         delay_garbage: delay_rx,
         midi: std::sync::Arc::new(std::sync::Mutex::new(midi_tx)),
         recorded_midi: rec_rx,
+        midi_out: Some(out_rx),
         status,
         meters,
         tempo,
@@ -736,6 +744,71 @@ impl EngineCore {
                 None => &[],
             };
             for track in &self.song.tracks {
+                // MIDI-Spuren zu externen Geräten: Nachrichten mit Fälligkeit planen; Audio
+                // haben sie keins. Vor dem Überspringen, damit Stopp ihre Noten beendet.
+                if let Some((port, ch)) = track.midi_out {
+                    let held = &mut self.held[track.slot.min(MAX_METERED_TRACKS - 1)];
+                    let rate = u64::from(self.sample_rate.max(1));
+                    // Ohne Zeitstempel vom Ausgang (manche Backends): jetzt, also sofort senden.
+                    let block = if self.block_played_at > 0 {
+                        self.block_played_at
+                    } else {
+                        crate::clock::now_nanos()
+                    };
+                    // Latenzausgleich: so spät senden, wie der Rest am Ausgang ankommt.
+                    let first = (offset / 2) as u64
+                        + self
+                            .delays
+                            .tracks
+                            .get(track.slot)
+                            .map_or(0, |l| u64::from(l.midi));
+                    let due = |k: u64| block + (first + k) * 1_000_000_000 / rate;
+                    let out = &mut self.midi_out;
+                    let mut send = |at: u64, data: [u8; 3]| {
+                        let _ = out.push(crate::midi_out::OutMsg {
+                            due: due(at),
+                            port,
+                            data,
+                        });
+                    };
+                    if panic {
+                        for key in 0..128u8 {
+                            if *held & (1 << key) != 0 {
+                                send(0, [0x80 | ch, key, 0]);
+                            }
+                        }
+                        *held = 0;
+                    }
+                    if running && !track.notes.is_empty() {
+                        let end = pos + run;
+                        let last = track.notes.partition_point(|nt| nt.start < end);
+                        for nt in &track.notes[..last] {
+                            if nt.end < pos {
+                                continue;
+                            }
+                            if nt.start >= pos {
+                                send(nt.start - pos, [0x90 | ch, nt.key, nt.velocity.max(1)]);
+                                *held |= 1 << nt.key;
+                            }
+                            if nt.end >= pos && nt.end < end {
+                                send(nt.end - pos, [0x80 | ch, nt.key, 0]);
+                                *held &= !(1 << nt.key);
+                            }
+                        }
+                    }
+                    // Controller mit dem Kanal der Spur.
+                    if running && !track.ctrls.is_empty() {
+                        let end = pos + run;
+                        let first = track.ctrls.partition_point(|c| c.at < pos);
+                        let last = track.ctrls.partition_point(|c| c.at < end);
+                        for c in &track.ctrls[first..last] {
+                            let mut data = c.data;
+                            data[0] = (data[0] & 0xf0) | ch;
+                            send(c.at - pos, data);
+                        }
+                    }
+                    continue;
+                }
                 let chain = self
                     .inserts
                     .get_mut(track.slot)
@@ -1015,6 +1088,79 @@ mod tests {
         (core, ctl)
     }
 
+    #[test]
+    fn midi_tracks_schedule_messages_for_external_devices() {
+        use std::collections::HashMap;
+        use studiocraft_project::{CtrlKind, CtrlPoint, Note, Project, TrackKind};
+        let mut p = Project::default();
+        let t = p.add_track(TrackKind::Midi, "Synth");
+        p.tracks[t].midi_port = Some("Gerät".into());
+        p.tracks[t].midi_channel = 3;
+        // 48 frames per quarter would be too coarse; use a short part at tick 0.
+        let id = p.create_event(t, 0, 4 * 960).unwrap();
+        let ev = p.event_mut(id).unwrap();
+        ev.notes = vec![Note {
+            pitch: 60,
+            velocity: 90,
+            start: 0,
+            length: 960,
+        }];
+        ev.controllers = vec![CtrlPoint {
+            kind: CtrlKind::Cc(1),
+            start: 480,
+            value: 70,
+        }];
+        // A track without a port sends nothing.
+        let silent = p.add_track(TrackKind::Midi, "Ohne");
+        let id2 = p.create_event(silent, 0, 960).unwrap();
+        p.event_mut(id2).unwrap().notes = vec![Note {
+            pitch: 40,
+            velocity: 90,
+            start: 0,
+            length: 10,
+        }];
+        let song = Song::build(&p, &HashMap::new(), 48_000);
+        assert_eq!(song.midi_ports, ["Gerät"]);
+        let track = song.tracks.iter().find(|tr| tr.slot == t).unwrap();
+        assert_eq!(track.midi_out, Some((0, 2)));
+        assert!(!song.tracks.iter().any(|tr| tr.slot == silent));
+
+        let (mut core, mut ctl) = engine(48_000, TempoMap::default());
+        let mut rx = ctl.midi_out.take().unwrap();
+        ctl.send(Command::SetSong(Arc::new(song)));
+        ctl.send(Command::Play);
+        // One quarter at 120 BPM = 24 000 frames; play a bit more than that.
+        // Wie der Audio-Ausgang: jeder Block wird eine Blockdauer später hörbar.
+        let mut out = vec![0.0; 2 * 1024];
+        let block_ns = 1024 * 1_000_000_000 / 48_000;
+        for k in 1..=30u64 {
+            core.set_block_played_at(k * block_ns);
+            core.process(&mut out);
+        }
+        let mut got = Vec::new();
+        while let Ok(m) = rx.pop() {
+            got.push(m);
+        }
+        let data: Vec<[u8; 3]> = got.iter().map(|m| m.data).collect();
+        assert_eq!(data, [[0x92, 60, 90], [0xb2, 1, 70], [0x82, 60, 0]]);
+        assert!(
+            got.windows(2).all(|w| w[0].due <= w[1].due),
+            "in time order"
+        );
+        assert!(got.iter().all(|m| m.port == 0));
+        // Stop while a note is held: a note-off goes out.
+        ctl.send(Command::Locate(0));
+        ctl.send(Command::Play);
+        core.process(&mut out);
+        ctl.send(Command::Stop);
+        core.process(&mut out);
+        let mut tail = Vec::new();
+        while let Ok(m) = rx.pop() {
+            tail.push(m.data);
+        }
+        assert_eq!(tail.last(), Some(&[0x82, 60, 0]));
+    }
+
     fn left(out: &[f32]) -> Vec<f32> {
         out.chunks(2).map(|c| c[0]).collect()
     }
@@ -1107,6 +1253,7 @@ mod tests {
             master: 1.0,
             buses: 0,
             tempo: TempoMap::default(),
+            midi_ports: Vec::new(),
             click: Default::default(),
         };
         ctl.send(Command::SetSong(Arc::new(song)));
@@ -1120,6 +1267,7 @@ mod tests {
             master: 1.0,
             buses: 0,
             tempo: TempoMap::default(),
+            midi_ports: Vec::new(),
             click: Default::default(),
         };
         ctl.send(Command::SetSong(Arc::new(song)));

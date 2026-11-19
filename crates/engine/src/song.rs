@@ -72,8 +72,10 @@ pub struct PlayTrack {
     pub slot: usize,
     /// Nach `start` sortiert.
     pub events: Vec<PlayEvent>,
-    /// Instrument-Spuren: Noten in Frames, nach `start` sortiert.
+    /// Instrument- und MIDI-Spuren: Noten in Frames, nach `start` sortiert.
     pub notes: Vec<PlayNote>,
+    /// MIDI-Spuren: Platz des Ausgangsports in [`Song::midi_ports`] und Kanal 0–15.
+    pub midi_out: Option<(u8, u8)>,
     /// Instrument-Spuren: Controller-Werte in Frames, nach `at` sortiert.
     pub ctrls: Vec<PlayCtrl>,
     /// Gruppen und FX-Kanäle: Nummer des Bus-Puffers, aus dem diese Spur liest.
@@ -141,6 +143,8 @@ pub struct Song {
     /// Tempo-Map für das Metronom im Audio-Thread (eine Kopie: sie wird mit dem Song
     /// ausgetauscht und im Hauptthread freigegeben).
     pub tempo: TempoMap,
+    /// MIDI-Ausgänge der MIDI-Spuren: Platz `i` in [`PlayTrack::midi_out`] ist dieser Port.
+    pub midi_ports: Vec<String>,
     /// Metronom- und Vorzähler-Einstellungen des Projekts.
     pub click: studiocraft_project::ClickSettings,
 }
@@ -152,6 +156,7 @@ impl Default for Song {
             master: 1.0,
             buses: 0,
             tempo: TempoMap::default(),
+            midi_ports: Vec::new(),
             click: Default::default(),
         }
     }
@@ -173,6 +178,7 @@ impl Song {
             master: 1.0,
             buses: 0,
             tempo: TempoMap::default(),
+            midi_ports: Vec::new(),
             click: Default::default(),
         }
     }
@@ -181,6 +187,16 @@ impl Song {
     /// Clip, bereits in `rate`. Stumme Spuren und Events fallen weg; Solo wirkt.
     pub fn build(project: &Project, clips: &HashMap<ClipId, Arc<[f32]>>, rate: u32) -> Self {
         let tempo = &project.tempo;
+        // Benutzte MIDI-Ausgänge, je Name ein Platz (höchstens 64).
+        let mut ports: Vec<String> = Vec::new();
+        for t in project.tracks.iter().filter(|t| t.kind == TrackKind::Midi) {
+            if let Some(p) = &t.midi_port
+                && !ports.contains(p)
+                && ports.len() < 64
+            {
+                ports.push(p.clone());
+            }
+        }
         let tracks = project
             .tracks
             .iter()
@@ -188,7 +204,11 @@ impl Song {
             .filter(|(i, t)| {
                 matches!(
                     t.kind,
-                    TrackKind::Audio | TrackKind::Instrument | TrackKind::Group | TrackKind::Fx
+                    TrackKind::Audio
+                        | TrackKind::Instrument
+                        | TrackKind::Midi
+                        | TrackKind::Group
+                        | TrackKind::Fx
                 ) && project.audible(*i)
             })
             .map(|(slot, t)| {
@@ -228,7 +248,7 @@ impl Song {
                 events.sort_by_key(|e| e.start);
                 // Noten aller nicht stummen Parts; nur der sichtbare Teil klingt.
                 let mut notes = Vec::new();
-                if t.kind == TrackKind::Instrument {
+                if matches!(t.kind, TrackKind::Instrument | TrackKind::Midi) {
                     for e in t.events.iter().filter(|e| !e.muted) {
                         let len = e.length as i64;
                         for n in e.notes.iter().filter(|n| n.start >= 0 && n.start < len) {
@@ -246,7 +266,7 @@ impl Song {
                 }
                 // Controller der nicht stummen Parts, nur im sichtbaren Teil.
                 let mut ctrls = Vec::new();
-                if t.kind == TrackKind::Instrument {
+                if matches!(t.kind, TrackKind::Instrument | TrackKind::Midi) {
                     for e in t.events.iter().filter(|e| !e.muted) {
                         let len = e.length as i64;
                         for c in e
@@ -266,7 +286,15 @@ impl Song {
                 let monitor = (t.monitor && t.kind == TrackKind::Audio)
                     .then_some((t.input.first, t.input.stereo));
                 let auto = crate::automation::TrackAuto::build(t, tempo, rate);
-                let keep = monitor.is_some()
+                // MIDI-Spuren mit Ausgang: Port-Platz und Kanal.
+                let midi_out = (t.kind == TrackKind::Midi)
+                    .then_some(t.midi_port.as_ref())
+                    .flatten()
+                    .and_then(|p| ports.iter().position(|q| q == p))
+                    .and_then(|i| u8::try_from(i).ok())
+                    .map(|i| (i, t.midi_channel.clamp(1, 16) - 1));
+                let keep = midi_out.is_some()
+                    || monitor.is_some()
                     || auto.is_some()
                     || !events.is_empty()
                     || !t.inserts.is_empty()
@@ -280,6 +308,7 @@ impl Song {
                         slot,
                         events,
                         notes,
+                        midi_out,
                         ctrls,
                         monitor,
                         auto,
@@ -297,6 +326,7 @@ impl Song {
             master: db_to_gain(project.master_db),
             buses: 0,
             tempo: project.tempo.clone(),
+            midi_ports: ports,
             click: project.click,
         };
         song.route(project);
@@ -553,6 +583,7 @@ mod tests {
             master: 1.0,
             buses: 0,
             tempo: TempoMap::default(),
+            midi_ports: Vec::new(),
             click: Default::default(),
         };
         let mut out = vec![0.0; 16];
@@ -572,6 +603,7 @@ mod tests {
             master: 1.0,
             buses: 0,
             tempo: TempoMap::default(),
+            midi_ports: Vec::new(),
             click: Default::default(),
         };
         let mut out = vec![0.0; 8];
@@ -593,6 +625,7 @@ mod tests {
             master: 1.0,
             buses: 0,
             tempo: TempoMap::default(),
+            midi_ports: Vec::new(),
             click: Default::default(),
         };
         let mut out = vec![0.0; 16];
@@ -616,6 +649,7 @@ mod tests {
             master: 1.0,
             buses: 0,
             tempo: TempoMap::default(),
+            midi_ports: Vec::new(),
             click: Default::default(),
         };
         let mut out = vec![0.0; 16];
@@ -646,6 +680,7 @@ mod tests {
             master: 1.0,
             buses: 0,
             tempo: TempoMap::default(),
+            midi_ports: Vec::new(),
             click: Default::default(),
         };
         let mut out = vec![0.0; 8];
@@ -671,6 +706,7 @@ mod tests {
             master: 1.0,
             buses: 0,
             tempo: TempoMap::default(),
+            midi_ports: Vec::new(),
             click: Default::default(),
         };
         let mut out = vec![0.0; 24];

@@ -27,6 +27,7 @@ pub mod input;
 pub mod inserts;
 pub mod meters;
 pub mod midi;
+pub mod midi_out;
 pub mod monitor;
 pub mod offline;
 pub mod transport;

@@ -95,6 +95,14 @@ pub struct Event {
     pub shared: Option<u32>,
 }
 
+fn default_channel() -> u8 {
+    1
+}
+
+fn is_channel_one(v: &u8) -> bool {
+    *v == 1
+}
+
 fn is_zero(v: &u32) -> bool {
     *v == 0
 }
@@ -220,6 +228,15 @@ pub struct Track {
     /// Ordnerspur, zu der diese Spur gehört (siehe `folders.rs`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub parent: Option<TrackId>,
+    /// MIDI-Spuren: Ausgang zu einem externen Gerät (Name des MIDI-Ports).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub midi_port: Option<String>,
+    /// MIDI-Spuren: Kanal 1–16.
+    #[serde(default = "default_channel", skip_serializing_if = "is_channel_one")]
+    pub midi_channel: u8,
+    /// MIDI-Spuren: Programm 0–127, das beim Wählen und beim Start gesendet wird.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub program: Option<u8>,
     /// Ordnerspuren: zugeklappt, die enthaltenen Spuren sind ausgeblendet.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub folded: bool,
@@ -650,6 +667,9 @@ impl Project {
                 parent: None,
                 folded: false,
                 order: None,
+                midi_port: None,
+                midi_channel: 1,
+                program: None,
                 volume_db: 0.0,
                 pan: 0.0,
                 input: TrackInput::default(),
@@ -1241,6 +1261,9 @@ impl Project {
             parent: None,
             folded: false,
             order: None,
+            midi_port: None,
+            midi_channel: 1,
+            program: None,
             volume_db: 0.0,
             pan: 0.0,
             input: TrackInput::default(),

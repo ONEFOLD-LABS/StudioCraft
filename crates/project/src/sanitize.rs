@@ -42,6 +42,16 @@ impl Project {
         }
 
         fix(self.layout.sanitize());
+        for t in &mut self.tracks {
+            clamp!(t.midi_channel, t.midi_channel.clamp(1, 16));
+            clamp!(t.program, t.program.map(|p| p.min(127)));
+            if let Some(port) = &t.midi_port
+                && port.chars().count() > 256
+            {
+                t.midi_port = Some(port.chars().take(256).collect());
+                fix(true);
+            }
+        }
         if self.layouts.len() > crate::layout::MAX_LAYOUTS {
             self.layouts.truncate(crate::layout::MAX_LAYOUTS);
             fix(true);
