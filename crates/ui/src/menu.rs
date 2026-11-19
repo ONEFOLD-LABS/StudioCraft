@@ -128,6 +128,7 @@ impl ProjectWindow {
             });
             ui.menu_button("Ansicht", |ui| {
                 ui.checkbox(&mut self.show_inspector, "Inspector (Alt+I)");
+                ui.checkbox(&mut self.show_info, "Info-Zeile");
                 if ui
                     .selectable_label(
                         self.show_lower && self.lower == crate::LowerZone::Mixer,

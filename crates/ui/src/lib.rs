@@ -5,6 +5,7 @@
 //! Lineal, Event-Anzeige und Transportleiste.
 
 mod icons;
+mod infoline;
 mod inserts;
 mod keyeditor;
 mod menu;
@@ -49,6 +50,8 @@ pub struct ProjectWindow {
     snap: bool,
     grid: Grid,
     show_inspector: bool,
+    /// Info-Zeile unter der Werkzeugzeile sichtbar.
+    show_info: bool,
     view: timeline::View,
     selected_track: Option<usize>,
     selection: Vec<EventId>,
@@ -140,6 +143,7 @@ impl ProjectWindow {
             snap: true,
             grid: Grid::Beat,
             show_inspector: true,
+            show_info: true,
             view: timeline::View::default(),
             selected_track: Some(0),
             selection: Vec::new(),
@@ -622,6 +626,9 @@ impl ProjectWindow {
 
         egui::Panel::top("menue").show(ui, |ui| self.menu_bar(ui));
         egui::Panel::top("werkzeugzeile").show(ui, |ui| self.toolbar(ui));
+        if self.show_info {
+            egui::Panel::top("info-zeile").show(ui, |ui| infoline::show(self, ui));
+        }
         egui::Panel::bottom("transportleiste").show(ui, |ui| self.transport_bar(ui));
         if self.show_lower {
             egui::Panel::bottom("untere-zone")
@@ -1215,6 +1222,28 @@ mod tests {
         h.get_by_label("Untere Zone").click();
         h.run_steps(2);
         assert!(!h.state().show_lower);
+    }
+
+    #[test]
+    fn info_line_edits_the_selected_event_by_keyboard() {
+        let (mut w, id) = one_event_window();
+        w.selection = vec![id];
+        let mut h = window_harness(w);
+        h.get_by_label("Länge").focus();
+        h.run_steps(1);
+        h.key_press_modifiers(egui::Modifiers::COMMAND, Key::A);
+        h.run_steps(1);
+        h.get_by_label("Länge").type_text("0.2");
+        h.run_steps(1);
+        h.key_press(Key::Enter);
+        h.run_steps(2);
+        let beat = h.state().beat_ticks();
+        assert_eq!(
+            h.state().project.event(id).map(|e| e.length),
+            Some(2 * beat)
+        );
+        // Ziffern im Textfeld wählen kein Werkzeug.
+        assert_eq!(h.state().tool, Tool::Select);
     }
 
     #[test]
