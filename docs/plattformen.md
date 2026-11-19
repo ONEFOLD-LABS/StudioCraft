@@ -67,3 +67,12 @@ SoundCraft und StudioCraft haben jeweils ein eigenes Bedienkonzept. Gemeinsame B
 ## macOS-Pakete
 
 `packaging/macos/package.sh [--arch universal|aarch64|x86_64]` baut ein Universal-Binary (Intel und Apple Silicon, ab macOS 11), legt `StudioCraft.app` an (Info.plist mit Mikrofon-Hinweis, Symbol, gehärtete Laufzeit) und erzeugt ein DMG zum Ziehen in „Programme“ sowie die Kommandozeile als zip. Die Berechtigungen erlauben den Audio-Eingang und das Laden fremd signierter Plugins (`disable-library-validation`). Ohne Zertifikat wird ad hoc signiert; mit den Secrets `APPLE_CERTIFICATE` (Developer ID) und `APPLE_ID`, `APPLE_PASSWORD`, `APPLE_TEAM_ID` signiert und notarisiert das Skript. `.studiocraft`-Dateien sind noch nicht mit der App verknüpft: Der Finder übergibt Dokumente als Ereignis, nicht als Startparameter, und das wertet die App noch nicht aus (Issue #117).
+
+## Linux-Pakete
+
+`packaging/linux/package.sh` baut tar.gz, AppImage, deb und rpm. deb und rpm installieren den Dateityp `application/x-studiocraft-project` (`*.studiocraft`), aktualisieren Desktop-, Dateityp- und Symbol-Datenbanken und empfehlen lilv für LV2-Plugins. Aus dem Tarball entstehen ohne erneutes Kompilieren:
+
+- `flatpak-bundle.sh`: ein Flatpak-Bundle (freedesktop-Laufzeit 25.08). Rechte: Wayland/X11, GPU, PipeWire-Socket und PulseAudio, `--device=all` für MIDI über den ALSA-Sequencer, das Home-Verzeichnis (Projekte werden über Pfade geöffnet), `~/.clap`, `~/.vst3` und `~/.lv2` nur lesend. Plugins aus den Flathub-Erweiterungen `org.freedesktop.LinuxAudio.Plugins.*` werden über `CLAP_PATH`, `VST3_PATH` und `LV2_PATH` gefunden. LV2 fehlt im Flatpak vorerst, weil die Laufzeit kein lilv mitbringt.
+- `arch-package.sh`: ein Arch-Paket (`pkg.tar.zst`, x86_64) über `makepkg`; lilv ist optional.
+
+Der Release-Workflow installiert deb und rpm testweise unter Debian 13, Ubuntu 24.04 und Fedora und startet beide Programme, ebenso das Arch-Paket und das Flatpak.

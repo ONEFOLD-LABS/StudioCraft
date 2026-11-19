@@ -11,4 +11,4 @@ Terminal=false
 Categories=AudioVideo;Audio;Recorder;Mixer;Sequencer;Midi;
 Keywords=DAW;audio;MIDI;recording;mixing;music;
 StartupWMClass=io.github.xxcrusaderxx.studiocraft
-MimeType=audio/x-wav;audio/wav;audio/flac;audio/mpeg;audio/ogg;audio/aiff;
+MimeType=application/x-studiocraft-project;audio/x-wav;audio/wav;audio/flac;audio/mpeg;audio/ogg;audio/aiff;
