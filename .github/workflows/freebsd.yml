@@ -1,0 +1,30 @@
+# Builds and tests the workspace on FreeBSD inside a FreeBSD VM on a Linux runner (GitHub has no
+# FreeBSD runners), through the shared Craft workflow, and checks packaging/freebsd/package.sh.
+# GPU render tests skip themselves when the VM has no adapter.
+name: FreeBSD
+
+# The VM build is slow, so it runs nightly and on demand, not on every pull request. Pull requests
+# that change FreeBSD packaging or this workflow still run it.
+on:
+  pull_request:
+    paths:
+      - .github/workflows/freebsd.yml
+      - packaging/freebsd/**
+      - packaging/env.sh
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: freebsd-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  freebsd:
+    # Tracked at @main like ci.yml's gate.
+    uses: storytold/craft-common-actions/.github/workflows/freebsd.yml@main
+    with:
+      run-package-check: true
