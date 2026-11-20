@@ -47,10 +47,10 @@ pub use layout::{NamedLayout, WindowLayout};
 pub use links::{LinkState, MAX_LINK_GROUPS};
 pub use markers::{FIRST_MARKER_ID, Marker};
 pub use model::{
-    ClipId, EVENT_MAX_DB, Event, EventId, FadeCurve, Frozen, InsertSlot, MAX_DB, MAX_EXTRA_OUTPUTS,
-    MAX_MIXER_VIEWS, MIN_DB, MixerView, Note, OutTarget, PanMode, PoolClip, Project, SendSlot,
-    StretchMode, TRACK_COLORS, TimeBase, Track, TrackId, TrackInput, TrackKind, bpm_in_name,
-    content_frames, content_ticks, db_to_gain, pan_matrix,
+    AudiblePart, COMP_FADE, ClipId, EVENT_MAX_DB, Event, EventId, FadeCurve, Frozen, InsertSlot,
+    MAX_DB, MAX_EXTRA_OUTPUTS, MAX_MIXER_VIEWS, MIN_DB, MixerView, Note, OutTarget, PanMode,
+    PoolClip, Project, SendSlot, StretchMode, TRACK_COLORS, TimeBase, Track, TrackId, TrackInput,
+    TrackKind, bpm_in_name, content_frames, content_ticks, db_to_gain, pan_matrix,
 };
 pub use quantize::{Feel, NoteValue, Quantize, QuantizeValue};
 pub use recording::{CycleRecordMode, MidiRecordMode, RecordSettings, TakeNote};

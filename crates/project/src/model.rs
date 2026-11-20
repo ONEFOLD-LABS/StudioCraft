@@ -546,6 +546,18 @@ impl Track {
     /// deren Teil ohne Fades: Im Fade-In oder Fade-Out des oberen klingt das untere durch
     /// (Crossfade).
     pub fn audible_parts(&self) -> Vec<Vec<(u64, u64)>> {
+        self.audible_spans()
+            .into_iter()
+            .map(|v| v.into_iter().map(|p| (p.from, p.to)).collect())
+            .collect()
+    }
+
+    /// Wie [`Self::audible_parts`], dazu je Abschnitt die Überblendung an verdeckten Kanten:
+    /// Endet ein Abschnitt, weil ein oberes Event einblendet, blendet er im selben Fenster aus
+    /// (`ramp_out` = Fade-In des oberen); beginnt er, weil das obere ausblendet, blendet er
+    /// ein (`ramp_in` = dessen Fade-Out). So entsteht an Comp-Grenzen ein Crossfade statt
+    /// eines harten Schnitts. Kanten am eigenen Anfang oder Ende des Events: 0.
+    pub fn audible_spans(&self) -> Vec<Vec<AudiblePart>> {
         self.events
             .iter()
             .enumerate()
@@ -553,7 +565,12 @@ impl Track {
                 if e.muted {
                     return Vec::new();
                 }
-                let mut parts = vec![(e.start.0, e.end())];
+                let mut parts = vec![AudiblePart {
+                    from: e.start.0,
+                    to: e.end(),
+                    ramp_in: 0,
+                    ramp_out: 0,
+                }];
                 for (j, c) in self.events.iter().enumerate() {
                     if j == i || c.muted || (c.comp, j) < (e.comp, i) {
                         continue;
@@ -565,15 +582,31 @@ impl Track {
                     }
                     parts = parts
                         .into_iter()
-                        .flat_map(|(a, b)| {
+                        .flat_map(|p| {
+                            let (a, b) = (p.from, p.to);
                             if cb <= a || ca >= b {
-                                vec![(a, b)]
-                            } else {
-                                [(a, ca.max(a)), (cb.min(b), b)]
-                                    .into_iter()
-                                    .filter(|(x, y)| y > x)
-                                    .collect()
+                                return vec![p];
                             }
+                            let mut out = Vec::with_capacity(2);
+                            if ca > a {
+                                let len = ca - a;
+                                out.push(AudiblePart {
+                                    from: a,
+                                    to: ca,
+                                    ramp_in: p.ramp_in.min(len),
+                                    ramp_out: c.fade_in.min(len),
+                                });
+                            }
+                            if cb < b {
+                                let len = b - cb;
+                                out.push(AudiblePart {
+                                    from: cb,
+                                    to: b,
+                                    ramp_in: c.fade_out.min(len),
+                                    ramp_out: p.ramp_out.min(len),
+                                });
+                            }
+                            out
                         })
                         .collect();
                 }
@@ -582,6 +615,21 @@ impl Track {
             .collect()
     }
 }
+
+/// Ein hörbarer Abschnitt eines Events (Ticks) mit Überblendung an verdeckten Kanten
+/// ([`Track::audible_spans`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AudiblePart {
+    pub from: u64,
+    pub to: u64,
+    /// Einblenden am Anfang des Abschnitts (Ticks), weil ein oberes Event hier ausblendet.
+    pub ramp_in: u64,
+    /// Ausblenden am Ende des Abschnitts (Ticks), weil ein oberes Event hier einblendet.
+    pub ramp_out: u64,
+}
+
+/// Länge der Überblendung an den Grenzen eines Comp-Abschnitts: eine 64tel.
+pub const COMP_FADE: u64 = TICKS_PER_QUARTER / 16;
 
 /// Kennung einer Spur.
 pub type TrackId = u32;
@@ -1398,10 +1446,14 @@ impl Project {
             return None;
         }
         let mut mid = id;
-        if let Some(right) = self.split(mid, a) {
-            mid = right;
-        }
-        self.split(mid, b);
+        let cut_a = match self.split(mid, a) {
+            Some(right) => {
+                mid = right;
+                true
+            }
+            None => false,
+        };
+        let cut_b = self.split(mid, b).is_some();
         let top = self.tracks[t]
             .events
             .iter()
@@ -1410,6 +1462,15 @@ impl Project {
             .unwrap_or(0);
         let ev = self.event_mut(mid)?;
         ev.comp = top.saturating_add(1);
+        // An den Schnitten kurz überblenden (der verdeckte Take blendet im selben Fenster
+        // aus bzw. ein, siehe `audible_spans`); vorhandene Fades bleiben.
+        let fade = COMP_FADE.min(ev.length / 4);
+        if cut_a && ev.fade_in == 0 {
+            ev.fade_in = fade;
+        }
+        if cut_b && ev.fade_out == 0 {
+            ev.fade_out = fade;
+        }
         Some(mid)
     }
 
@@ -2127,11 +2188,52 @@ mod tests {
         let audible: Vec<(u64, u64)> = track.audible_parts().into_iter().flatten().collect();
         let mut sorted = audible.clone();
         sorted.sort_unstable();
-        assert_eq!(sorted, [(0, 1000), (1000, 2000), (2000, 4000)]);
+        // The comped section crossfades with take 2 at both edges (comp fades).
+        let f = crate::COMP_FADE;
+        assert_eq!(sorted, [(0, 1000 + f), (1000, 2000), (2000 - f, 4000)]);
         // Saved projects keep lanes and ranks; older files load with defaults.
         let json = serde_json::to_string(&p).expect("save");
         let back: Project = serde_json::from_str(&json).expect("load");
         assert_eq!(back.tracks[t].events, p.tracks[t].events);
+    }
+
+    #[test]
+    fn comping_crossfades_at_the_section_edges() {
+        use crate::{AudiblePart, COMP_FADE};
+        let mut p = Project::default();
+        let t = p.add_track(TrackKind::Audio, "Gesang");
+        let take1 = p.create_event(t, 0, 8000).expect("take 1");
+        p.create_event(t, 0, 8000).expect("take 2");
+        let mid = p.comp(take1, 2000, 4000).expect("comped");
+        let ev = p.event(mid).unwrap();
+        assert_eq!((ev.fade_in, ev.fade_out), (COMP_FADE, COMP_FADE));
+        let spans = p.tracks[t].audible_spans();
+        let all: Vec<AudiblePart> = spans.into_iter().flatten().collect();
+        // The comped section sounds whole with its fades; take 2 fades out while it fades
+        // in and fades in while it fades out.
+        assert!(all.contains(&AudiblePart {
+            from: 2000,
+            to: 4000,
+            ramp_in: 0,
+            ramp_out: 0
+        }));
+        assert!(all.contains(&AudiblePart {
+            from: 0,
+            to: 2000 + COMP_FADE,
+            ramp_in: 0,
+            ramp_out: COMP_FADE
+        }));
+        assert!(all.contains(&AudiblePart {
+            from: 4000 - COMP_FADE,
+            to: 8000,
+            ramp_in: COMP_FADE,
+            ramp_out: 0
+        }));
+        // Comping a whole take (no cut) adds no fades.
+        let take3 = p.create_event(t, 10_000, 1000).expect("take 3");
+        let whole = p.comp(take3, 10_000, 11_000).expect("whole");
+        let ev = p.event(whole).unwrap();
+        assert_eq!((ev.fade_in, ev.fade_out), (0, 0));
     }
 
     #[test]
