@@ -61,7 +61,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           key: riscv64
-      - uses: storytold/craft-common-actions/actions/install-riscv64-cross@main
+      - uses: storytold/craft-common-actions/actions/install-riscv64-cross@0bef64f155fcea81edbd9542381777358bfbdcf4 # main 2026-11-20
       - name: More packages (PipeWire for riscv64, clang for bindgen, nfpm)
         run: |
           echo 'deb [trusted=yes] https://repo.goreleaser.com/apt/ /' | sudo tee /etc/apt/sources.list.d/goreleaser.list
