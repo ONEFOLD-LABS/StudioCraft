@@ -6,6 +6,7 @@
 //! dient als Preset zum Exportieren und Importieren, zusammen mit den Makros
 //! (`macro.1.name = …`, `macro.1.steps = edit.duplicate, nav.nudge_right`).
 
+use crate::i18n::tr;
 use std::collections::HashMap;
 
 use egui::{Key, KeyboardShortcut, Modifiers};
@@ -81,6 +82,18 @@ pub(crate) struct CommandInfo {
     pub name: &'static str,
     pub category: &'static str,
     pub defaults: &'static [KeyboardShortcut],
+}
+
+impl CommandInfo {
+    /// Name zum Anzeigen, in der eingestellten Sprache.
+    pub fn label(&self) -> &'static str {
+        tr(self.name)
+    }
+
+    /// Kategorie zum Anzeigen, in der eingestellten Sprache.
+    pub fn group(&self) -> &'static str {
+        tr(self.category)
+    }
 }
 
 const fn k(m: Modifiers, key: Key) -> KeyboardShortcut {
@@ -768,8 +781,10 @@ impl Keymap {
     /// Name für Menüs und Dialog: „Makro 2: Aufräumen“, ohne eigenen Namen „Makro 2“.
     pub fn macro_label(&self, slot: u8) -> String {
         match self.macro_slot(slot).map(|m| m.name.as_str()) {
-            Some(name) if !name.is_empty() => format!("Makro {slot}: {name}"),
-            _ => format!("Makro {slot}"),
+            Some(name) if !name.is_empty() => {
+                crate::i18n::trf("Makro {slot}: {name}", &[("slot", &slot), ("name", &name)])
+            }
+            _ => crate::i18n::trf("Makro {slot}", &[("slot", &slot)]),
         }
     }
 
@@ -812,7 +827,10 @@ impl Keymap {
         let rest = id.strip_prefix("macro.")?;
         let (slot, field) = rest.split_once('.')?;
         let Some(m) = slot.parse::<u8>().ok().and_then(|s| self.macro_slot_mut(s)) else {
-            problems.push(format!("Zeile {line}: unbekanntes Makro {slot}"));
+            problems.push(crate::i18n::trf(
+                "Zeile {line}: unbekanntes Makro {slot}",
+                &[("line", &line), ("slot", &slot)],
+            ));
             return Some(());
         };
         match field {
@@ -822,18 +840,30 @@ impl Keymap {
                 for step in value.split(',').map(str::trim).filter(|s| !s.is_empty()) {
                     match COMMANDS.iter().find(|c| c.id == step) {
                         Some(c) if matches!(c.cmd, Cmd::Macro(_)) => {
-                            problems.push(format!("Zeile {line}: Makro im Makro ({step})"));
+                            problems.push(crate::i18n::trf(
+                                "Zeile {line}: Makro im Makro ({step})",
+                                &[("line", &line), ("step", &step)],
+                            ));
                         }
                         Some(_) if m.steps.len() >= MAX_STEPS => {
-                            problems.push(format!("Zeile {line}: mehr als {MAX_STEPS} Befehle"));
+                            problems.push(crate::i18n::trf(
+                                "Zeile {line}: mehr als {max} Befehle",
+                                &[("line", &line), ("max", &MAX_STEPS)],
+                            ));
                             break;
                         }
                         Some(c) => m.steps.push(c.cmd),
-                        None => problems.push(format!("Zeile {line}: unbekannter Befehl {step}")),
+                        None => problems.push(crate::i18n::trf(
+                            "Zeile {line}: unbekannter Befehl {step}",
+                            &[("line", &line), ("step", &step)],
+                        )),
                     }
                 }
             }
-            _ => problems.push(format!("Zeile {line}: unbekanntes Feld {field}")),
+            _ => problems.push(crate::i18n::trf(
+                "Zeile {line}: unbekanntes Feld {field}",
+                &[("line", &line), ("field", &field)],
+            )),
         }
         Some(())
     }
@@ -848,7 +878,10 @@ impl Keymap {
                 continue;
             }
             let Some((id, keys)) = line.split_once('=') else {
-                problems.push(format!("Zeile {}: kein „=“", n + 1));
+                problems.push(crate::i18n::trf(
+                    "Zeile {line}: kein „=“",
+                    &[("line", &(n + 1))],
+                ));
                 continue;
             };
             if map
@@ -858,14 +891,20 @@ impl Keymap {
                 continue;
             }
             let Some(c) = COMMANDS.iter().find(|c| c.id == id.trim()) else {
-                problems.push(format!("Zeile {}: unbekannter Befehl {}", n + 1, id.trim()));
+                problems.push(crate::i18n::trf(
+                    "Zeile {line}: unbekannter Befehl {step}",
+                    &[("line", &(n + 1)), ("step", &id.trim())],
+                ));
                 continue;
             };
             let mut b = Vec::new();
             for k in keys.split(',').map(str::trim).filter(|k| !k.is_empty()) {
                 match parse_key(k) {
                     Some(k) => b.push(k),
-                    None => problems.push(format!("Zeile {}: unbekannte Taste {k}", n + 1)),
+                    None => problems.push(crate::i18n::trf(
+                        "Zeile {line}: unbekannte Taste {key}",
+                        &[("line", &(n + 1)), ("key", &k)],
+                    )),
                 }
             }
             map.overrides.insert(c.cmd, b);
@@ -895,30 +934,37 @@ pub(crate) fn format_key(k: KeyboardShortcut) -> String {
     s
 }
 
-/// Taste zum Anzeigen, mit deutschen Namen (Entf, Rücktaste, Leertaste, Pos1, Pfeiltasten).
+/// Taste zum Anzeigen, in der eingestellten Sprache (deutsch: Strg, Umschalt, Entf, Rücktaste,
+/// Leertaste, Pos1, Pfeiltasten). Dateien nutzen [`format_key`].
 pub(crate) fn display_key(k: KeyboardShortcut) -> String {
-    let text = format_key(k);
-    let name = k.logical_key.name();
-    let german = match k.logical_key {
-        Key::Delete => "Entf",
-        Key::Backspace => "Rücktaste",
-        Key::Space => "Leertaste",
-        Key::Home => "Pos1",
-        Key::End => "Ende",
+    let m = k.modifiers;
+    let mut parts: Vec<&str> = Vec::new();
+    if m.command || m.ctrl {
+        parts.push(tr("Strg"));
+    }
+    if m.alt {
+        parts.push("Alt");
+    }
+    if m.shift {
+        parts.push(tr("Umschalt"));
+    }
+    parts.push(match k.logical_key {
+        Key::Delete => tr("Entf"),
+        Key::Backspace => tr("Rücktaste"),
+        Key::Space => tr("Leertaste"),
+        Key::Home => tr("Pos1"),
+        Key::End => tr("Ende"),
         Key::Escape => "Esc",
-        Key::Enter => "Eingabe",
-        Key::ArrowLeft => "Pfeil links",
-        Key::ArrowRight => "Pfeil rechts",
-        Key::ArrowUp => "Pfeil hoch",
-        Key::ArrowDown => "Pfeil runter",
+        Key::Enter => tr("Eingabe"),
+        Key::ArrowLeft => tr("Pfeil links"),
+        Key::ArrowRight => tr("Pfeil rechts"),
+        Key::ArrowUp => tr("Pfeil hoch"),
+        Key::ArrowDown => tr("Pfeil runter"),
         Key::Comma => ",",
         Key::Slash => "/",
-        _ => name,
-    };
-    match text.strip_suffix(name) {
-        Some(prefix) => format!("{prefix}{german}"),
-        None => text,
-    }
+        _ => k.logical_key.name(),
+    });
+    parts.join("+")
 }
 
 pub(crate) fn parse_key(text: &str) -> Option<KeyboardShortcut> {
@@ -951,7 +997,7 @@ impl Keymap {
     }
 
     pub fn save(&self) -> Result<(), String> {
-        let f = file().ok_or("kein Ort für Einstellungen")?;
+        let f = file().ok_or(tr("kein Ort für Einstellungen"))?;
         if let Some(d) = f.parent() {
             std::fs::create_dir_all(d).map_err(|e| format!("{}: {e}", d.display()))?;
         }
@@ -1099,7 +1145,7 @@ impl crate::ProjectWindow {
             return;
         }
         let mut open = true;
-        egui::Window::new("Tastaturbefehle")
+        egui::Window::new(tr("Tastaturbefehle"))
             .open(&mut open)
             .default_size([560.0, 520.0])
             .show(ctx, |ui| self.key_commands_ui(ui));
@@ -1149,13 +1195,13 @@ impl crate::ProjectWindow {
             }
         }
         ui.horizontal(|ui| {
-            let l = ui.label("Suche");
+            let l = ui.label(tr("Suche"));
             ui.add(egui::TextEdit::singleline(&mut self.key_dialog.filter).desired_width(200.0))
                 .labelled_by(l.id);
             if ui
                 .add_enabled(
                     !self.keymap.is_default(),
-                    egui::Button::new("Alle auf Standard"),
+                    egui::Button::new(tr("Alle auf Standard")),
                 )
                 .clicked()
             {
@@ -1164,9 +1210,9 @@ impl crate::ProjectWindow {
             }
             #[cfg(not(target_arch = "wasm32"))]
             {
-                if ui.button("Exportieren …").clicked()
+                if ui.button(tr("Exportieren …")).clicked()
                     && let Some(p) = rfd::FileDialog::new()
-                        .add_filter("Tastaturbefehle", &["txt"])
+                        .add_filter(tr("Tastaturbefehle"), &["txt"])
                         .set_file_name("studiocraft-tasten.txt")
                         .save_file()
                 {
@@ -1174,9 +1220,9 @@ impl crate::ProjectWindow {
                         .err()
                         .map(|e| format!("{}: {e}", p.display()));
                 }
-                if ui.button("Importieren …").clicked()
+                if ui.button(tr("Importieren …")).clicked()
                     && let Some(p) = rfd::FileDialog::new()
-                        .add_filter("Tastaturbefehle", &["txt"])
+                        .add_filter(tr("Tastaturbefehle"), &["txt"])
                         .pick_file()
                 {
                     match std::fs::read_to_string(&p) {
@@ -1193,25 +1239,31 @@ impl crate::ProjectWindow {
             }
         });
         if let Some(cmd) = self.key_dialog.capturing {
-            let name = info(cmd).map_or("", |i| i.name);
+            let name = info(cmd).map_or("", CommandInfo::label);
             ui.colored_label(
                 crate::theme::tokens(ui.ctx()).accent,
-                format!("Taste für „{name}“ drücken (Escape: abbrechen)"),
+                crate::i18n::trf(
+                    "Taste für „{name}“ drücken (Escape: abbrechen)",
+                    &[("name", &name)],
+                ),
             );
         }
         if let Some((cmd, k, owner)) = self.key_dialog.conflict {
-            let owner_name = info(owner).map_or("", |i| i.name);
+            let owner_name = info(owner).map_or("", CommandInfo::label);
             ui.horizontal(|ui| {
                 ui.colored_label(
                     ui.visuals().warn_fg_color,
-                    format!("{} gehört schon zu „{owner_name}“.", display_key(k)),
+                    crate::i18n::trf(
+                        "{key} gehört schon zu „{name}“.",
+                        &[("key", &display_key(k)), ("name", &owner_name)],
+                    ),
                 );
-                if ui.button("Ersetzen").clicked() {
+                if ui.button(tr("Ersetzen")).clicked() {
                     self.keymap.assign(cmd, k);
                     self.key_dialog.conflict = None;
                     self.keymap_changed();
                 }
-                if ui.button("Abbrechen").clicked() {
+                if ui.button(tr("Abbrechen")).clicked() {
                     self.key_dialog.conflict = None;
                 }
             });
@@ -1235,20 +1287,20 @@ impl crate::ProjectWindow {
                         let shown: Vec<String> = keys.iter().map(|k| display_key(*k)).collect();
                         let shown = shown.join(", ");
                         if !filter.is_empty()
-                            && !c.name.to_lowercase().contains(&filter)
-                            && !c.category.to_lowercase().contains(&filter)
+                            && !c.label().to_lowercase().contains(&filter)
+                            && !c.group().to_lowercase().contains(&filter)
                             && !shown.to_lowercase().contains(&filter)
                         {
                             continue;
                         }
                         if c.category != category {
                             category = c.category;
-                            ui.strong(category);
+                            ui.strong(c.group());
                             ui.end_row();
                         }
                         match c.cmd {
                             Cmd::Macro(slot) => ui.label(self.keymap.macro_label(slot)),
-                            _ => ui.label(c.name),
+                            _ => ui.label(c.label()),
                         };
                         let text = if shown.is_empty() {
                             "–".to_owned()
@@ -1257,14 +1309,20 @@ impl crate::ProjectWindow {
                         };
                         ui.label(egui::RichText::new(text).monospace());
                         if ui
-                            .small_button("Setzen")
-                            .on_hover_text(format!("Taste für {} setzen", c.name))
+                            .small_button(tr("Setzen"))
+                            .on_hover_text(crate::i18n::trf(
+                                "Taste für {name} setzen",
+                                &[("name", &c.label())],
+                            ))
                             .clicked()
                         {
                             action = Some((c.cmd, 0));
                         }
                         if ui
-                            .add_enabled(!keys.is_empty(), egui::Button::new("Entfernen").small())
+                            .add_enabled(
+                                !keys.is_empty(),
+                                egui::Button::new(tr("Entfernen")).small(),
+                            )
                             .clicked()
                         {
                             action = Some((c.cmd, 1));
@@ -1272,7 +1330,7 @@ impl crate::ProjectWindow {
                         if ui
                             .add_enabled(
                                 keys.as_slice() != c.defaults,
-                                egui::Button::new("Standard").small(),
+                                egui::Button::new(tr("Standard")).small(),
                             )
                             .clicked()
                         {
@@ -1390,5 +1448,52 @@ mod tests {
         assert!(map.is_default());
         let (_, problems) = Keymap::from_text("x.y = J\nedit.snap = Hyper+J\nkaputt\n");
         assert_eq!(problems.len(), 3);
+    }
+    #[test]
+    fn every_command_name_and_group_has_an_english_entry() {
+        let mut missing: Vec<&str> = Vec::new();
+        for c in COMMANDS {
+            for text in [c.name, c.category] {
+                if !crate::i18n::has_english(text) && !missing.contains(&text) {
+                    missing.push(text);
+                }
+            }
+        }
+        for key in [
+            "Strg",
+            "Umschalt",
+            "Entf",
+            "Rücktaste",
+            "Leertaste",
+            "Pos1",
+            "Ende",
+            "Eingabe",
+            "Pfeil links",
+            "Pfeil rechts",
+            "Pfeil hoch",
+            "Pfeil runter",
+        ] {
+            if !crate::i18n::has_english(key) {
+                missing.push(key);
+            }
+        }
+        assert!(
+            missing.is_empty(),
+            "fehlt in i18n/en.tsv:\n{}",
+            missing.join("\n")
+        );
+    }
+    #[test]
+    fn keys_show_in_the_ui_language_but_files_stay_the_same() {
+        let key = k(CS, Key::ArrowLeft);
+        crate::i18n::set_language(crate::i18n::Language::English);
+        assert_eq!(display_key(key), "Ctrl+Shift+Left");
+        assert_eq!(display_key(k(N, Key::Delete)), "Del");
+        assert_eq!(format_key(key), "Strg+Umschalt+Left", "Dateiformat bleibt");
+        assert_eq!(parse_key(&format_key(key)), Some(key));
+        let save = info(Cmd::File(Action::Save)).unwrap();
+        assert_eq!((save.label(), save.name), ("Save", "Speichern"));
+        crate::i18n::set_language(crate::i18n::Language::German);
+        assert_eq!(display_key(key), "Strg+Umschalt+Pfeil links");
     }
 }

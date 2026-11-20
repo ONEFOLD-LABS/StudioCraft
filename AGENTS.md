@@ -112,7 +112,11 @@ A crash loses takes, so this outranks features.
 - Draw only what is visible (virtualised rows and strips); keep a frame well under 2 ms for
   1000 tracks.
 - Every interactive widget has an accessible label; render tests run `check_accessibility`.
-- UI text is German for now; keep wording short and consistent with existing menus.
+- UI text is written in German in the code and doubles as the translation key: wrap every
+  user-visible text in `crate::i18n::tr("…")` (or `trf("… {name} …", &[("name", &v)])` for
+  values) and add a `German<TAB>English` line to `crates/ui/i18n/en.tsv`; a test fails otherwise.
+  Text used as a key or stored in files stays untranslated; translate it only where it is shown.
+  Keep wording short and consistent with existing menus.
 
 ## Platforms
 
