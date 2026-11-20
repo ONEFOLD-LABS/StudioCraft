@@ -157,10 +157,27 @@ impl PluginHandle {
     /// Presets des Plugins (heute nur LV2), nach Name sortiert.
     pub fn presets(&self) -> Vec<Lv2Preset> {
         match self {
-            Self::Clap(_) => Vec::new(),
+            Self::Clap(h) => h.presets(),
             Self::Lv2(h) => h.presets(),
             Self::Vst3(_) => Vec::new(),
             Self::Au(_) => Vec::new(),
+        }
+    }
+
+    /// Ein Preset aus [`Self::presets`] direkt im Plugin laden (Formate, deren Presets mehr als
+    /// Parameterwerte sind; heute CLAP). Danach liefert [`Self::param_values`] die neuen Werte.
+    pub fn load_preset(&self, uri: &str) -> Result<(), String> {
+        match self {
+            Self::Clap(h) => h.load_preset(uri),
+            _ => Err("Presets dieses Formats setzen Parameterwerte".into()),
+        }
+    }
+
+    /// Aktuelle Parameterwerte (Id, Wert) aus dem Plugin, soweit es sie liefert (heute CLAP).
+    pub fn param_values(&self) -> Vec<(u32, f64)> {
+        match self {
+            Self::Clap(h) => h.param_values(),
+            _ => Vec::new(),
         }
     }
 

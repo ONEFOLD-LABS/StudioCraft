@@ -1081,6 +1081,10 @@ impl ProjectWindow {
             self.sync_inserts();
             self.rebuild_song();
         }
+        if self.dirty {
+            // Noch nicht alles gesendet (volle Befehls-Queue): gleich weiter.
+            ui.ctx().request_repaint();
+        }
 
         self.confirm_dialog(ui);
         self.sync_title_bar(ui.ctx());
@@ -6706,6 +6710,86 @@ mod tests {
         assert_eq!(w.midi_target(), Some(1));
         w.project.tracks[2].record = true;
         assert_eq!(w.midi_target(), Some(2), "aufnahmebereit geht vor");
+    }
+
+    #[test]
+    fn a_clap_preset_loads_into_the_plugin_and_undo_restores_the_values() {
+        let (mut core, ctl) = studiocraft_engine::engine(48_000, TempoMap::default());
+        let mut w = ProjectWindow::new(Project::default(), Some(ctl), String::new());
+        let Some(surge) = w
+            .plugin_list()
+            .iter()
+            .find(|p| {
+                p.name == "Surge XT" && p.format == studiocraft_plugin_host::PluginFormat::Clap
+            })
+            .cloned()
+        else {
+            eprintln!("Surge XT (CLAP) nicht installiert – übersprungen");
+            return;
+        };
+        w.add_instrument_track(Some(surge));
+        w.sync_inserts();
+        core.process(&mut [0.0; 512]);
+        let presets = w
+            .handle_mut(0, crate::inserts::INSTRUMENT)
+            .map(|h| h.presets())
+            .unwrap_or_default();
+        assert!(presets.len() > 50, "Surge XT offers its patches");
+        let before = w.project.tracks[0].instrument.clone();
+        let p = &presets[presets.len() / 2];
+        w.choose_preset(0, crate::inserts::INSTRUMENT, &p.uri);
+        let after = w.project.tracks[0].instrument.clone();
+        let (Some(before), Some(after)) = (before, after) else {
+            panic!("instrument slot");
+        };
+        assert_ne!(before.params, after.params, "{} sets parameters", p.name);
+        assert!(after.state.is_some(), "state is captured");
+        w.undo();
+        assert_eq!(
+            w.project.tracks[0].instrument.as_ref().map(|s| &s.params),
+            Some(&before.params),
+            "one undo step"
+        );
+    }
+
+    #[test]
+    fn many_parameter_changes_reach_the_engine_across_frames() {
+        let (mut core, ctl) = studiocraft_engine::engine(48_000, TempoMap::default());
+        let mut w = ProjectWindow::new(Project::default(), Some(ctl), String::new());
+        let Some(fx) = test_effect(&mut w) else {
+            return;
+        };
+        w.add_audio_track();
+        w.project.tracks[0]
+            .inserts
+            .push(studiocraft_project::InsertSlot {
+                plugin_id: fx.id.clone(),
+                name: fx.name.clone(),
+                bypass: false,
+                params: Vec::new(),
+                state: None,
+            });
+        w.sync_inserts();
+        core.process(&mut [0.0; 512]);
+        // Mehr Änderungen als in die Befehls-Queue passen (unbekannte Ids ignoriert das Plugin).
+        for id in 0..600u32 {
+            w.project.tracks[0].inserts[0].set_param(10_000 + id, 0.5);
+        }
+        let mut rounds = 0;
+        loop {
+            w.dirty = false;
+            w.sync_inserts();
+            core.process(&mut [0.0; 512]);
+            rounds += 1;
+            let sent = w.plugins.sent[0].slots[0].params.len();
+            if !w.dirty {
+                assert_eq!(sent, 600, "everything sent in the end");
+                break;
+            }
+            assert!(sent < 600, "pending changes stay pending");
+            assert!(rounds < 20, "progress every frame");
+        }
+        assert!(rounds > 1, "the queue was really full");
     }
 
     #[test]

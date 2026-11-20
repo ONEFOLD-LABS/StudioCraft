@@ -186,6 +186,7 @@ impl ProjectWindow {
         }
         sent.resize_with(n, SentChain::default);
         let mut missing = Vec::new();
+        let mut retry = false;
         for (i, have) in sent.iter_mut().enumerate() {
             // Eingefroren: Plugins entladen (der Zustand steht schon im Projekt).
             let frozen = self.project.tracks[i].frozen.is_some();
@@ -208,33 +209,67 @@ impl ProjectWindow {
                 && want.len() == have.slots.len()
                 && want.iter().zip(&have.slots).all(|(a, b)| a.same_plugin(b));
             if same {
-                // Nur Bypass und Parameter nachziehen.
-                let mut pairs: Vec<(Option<usize>, &InsertSlot, &InsertSlot)> = want
+                // Nur Bypass und Parameter nachziehen. Slot-Schlüssel: Some(k) = Insert k,
+                // None = Instrument.
+                let mut pairs: Vec<(Option<usize>, Option<usize>, &InsertSlot, &InsertSlot)> = want
                     .iter()
                     .zip(&have.slots)
                     .enumerate()
-                    .map(|(k, (w, h))| (have.map[k], w, h))
+                    .map(|(k, (w, h))| (Some(k), have.map[k], w, h))
                     .collect();
                 if let (Some(w), Some(h)) = (&want_instr, &have.instrument) {
-                    pairs.push((have.instrument_ok.then_some(INSTRUMENT), w, h));
+                    pairs.push((None, have.instrument_ok.then_some(INSTRUMENT), w, h));
                 }
-                let mut cmds = Vec::new();
-                for (idx, w, h) in pairs {
+                // (Befehl, Slot, Parameter-Id oder None für Bypass)
+                let mut cmds: Vec<(Command, Option<usize>, Option<u32>)> = Vec::new();
+                for (key, idx, w, h) in pairs {
                     let Some(idx) = idx else { continue };
                     if w.bypass != h.bypass {
-                        cmds.push(Command::SetBypass(i, idx, w.bypass));
+                        cmds.push((Command::SetBypass(i, idx, w.bypass), key, None));
                     }
                     for &(id, v) in &w.params {
                         if !h.params.contains(&(id, v)) {
-                            cmds.push(Command::SetParam(i, idx, id, v));
+                            cmds.push((Command::SetParam(i, idx, id, v), key, Some(id)));
                         }
                     }
                 }
-                for c in cmds {
-                    self.send(c);
+                // Was nicht mehr in die Befehls-Queue passt (viele Parameter auf einmal, etwa
+                // nach Undo eines Presets), bleibt als „noch nicht gesendet“ stehen und geht in
+                // den nächsten Frames hinaus.
+                let mut unsent = Vec::new();
+                let mut cmds = cmds.into_iter();
+                for (c, key, id) in cmds.by_ref() {
+                    let sent = match &mut self.transport {
+                        Some(t) => t.try_send(c).is_ok(),
+                        None => true,
+                    };
+                    if !sent {
+                        unsent.push((key, id));
+                        break;
+                    }
                 }
-                have.slots = want;
-                have.instrument = want_instr;
+                unsent.extend(cmds.map(|(_, key, id)| (key, id)));
+                let old_slots = std::mem::replace(&mut have.slots, want);
+                let old_instr = std::mem::replace(&mut have.instrument, want_instr);
+                for (key, id) in &unsent {
+                    let (now, old) = match key {
+                        Some(k) => (have.slots.get_mut(*k), old_slots.get(*k)),
+                        None => (have.instrument.as_mut(), old_instr.as_ref()),
+                    };
+                    let (Some(now), Some(old)) = (now, old) else {
+                        continue;
+                    };
+                    match id {
+                        None => now.bypass = old.bypass,
+                        Some(id) => match old.params.iter().find(|(p, _)| p == id) {
+                            Some(&(_, v)) => now.set_param(*id, v),
+                            None => now.params.retain(|(p, _)| p != id),
+                        },
+                    }
+                }
+                if !unsent.is_empty() {
+                    retry = true;
+                }
                 continue;
             }
             // Kette neu aufbauen. Vorher die aktuellen Zustände der laufenden Plugins
@@ -331,6 +366,10 @@ impl ProjectWindow {
             };
         }
         self.plugins.sent = sent;
+        if retry {
+            // Rest im nächsten Frame senden (die Queue leert sich mit jedem Audio-Block).
+            self.dirty = true;
+        }
         if !missing.is_empty() {
             self.message = Some(format!("Plugins: {}", missing.join("; ")));
         }
@@ -479,7 +518,7 @@ impl ProjectWindow {
         self.checkpoint(before);
     }
 
-    fn handle_mut(&mut self, track: usize, k: usize) -> Option<&mut PluginHandle> {
+    pub(crate) fn handle_mut(&mut self, track: usize, k: usize) -> Option<&mut PluginHandle> {
         let sent = self.plugins.sent.get_mut(track)?;
         if k == INSTRUMENT {
             sent.instrument_handle.as_mut()
@@ -747,18 +786,51 @@ impl ProjectWindow {
                 .iter()
                 .find(|p| last.as_deref() == Some(p.uri.as_str()))
                 .map_or("wählen …", |p| p.name.as_str());
+            // Viele Presets (Synthesizer bringen tausende mit): Suchfeld, höchstens
+            // MAX_SHOWN Treffer im Menü.
+            const MAX_SHOWN: usize = 300;
+            let filter_id = ui.make_persistent_id(("insert-preset-filter", track, k));
+            let mut filter: String = ui.data(|d| d.get_temp(filter_id)).unwrap_or_default();
             egui::ComboBox::from_id_salt(("insert-preset", track, k))
                 .selected_text(shown)
                 .show_ui(ui, |ui| {
-                    for p in &presets {
+                    let needle = filter.to_lowercase();
+                    let hits = presets
+                        .iter()
+                        .filter(|p| needle.is_empty() || p.name.to_lowercase().contains(&needle));
+                    let mut n = 0;
+                    for p in hits {
+                        if n == MAX_SHOWN {
+                            ui.weak("… weitere: Suche verfeinern");
+                            break;
+                        }
+                        n += 1;
                         let on = last.as_deref() == Some(p.uri.as_str());
                         if ui.selectable_label(on, &p.name).clicked() {
                             chosen = Some(p.uri.clone());
                         }
                     }
+                    if n == 0 {
+                        ui.weak("Kein Preset passt");
+                    }
                 })
                 .response
                 .labelled_by(l.id);
+            if presets.len() > 40 {
+                let r = ui
+                    .add(
+                        egui::TextEdit::singleline(&mut filter)
+                            .hint_text("Suche")
+                            .desired_width(110.0),
+                    )
+                    .on_hover_text(format!("{} Presets", presets.len()));
+                r.widget_info(|| {
+                    egui::WidgetInfo::labeled(egui::Role::TextInput, true, "Preset-Suche")
+                });
+                if r.changed() {
+                    ui.data_mut(|d| d.insert_temp(filter_id, filter.clone()));
+                }
+            }
         });
         if let Some(uri) = &chosen {
             ui.data_mut(|d| d.insert_temp(last_id, uri.clone()));
@@ -766,19 +838,62 @@ impl ProjectWindow {
         let Some(uri) = chosen else {
             return;
         };
+        self.choose_preset(track, k, &uri);
+    }
+
+    /// Preset `uri` auf Slot `k` anwenden, als ein Undo-Schritt. LV2: die Werte des Presets wie
+    /// Regler setzen. CLAP: das Plugin lädt das Preset selbst; danach kommen seine neuen
+    /// Parameterwerte und sein Zustand ins Projekt (ohne sie nochmals an die Engine zu senden).
+    /// Undo gibt dem Plugin die alten Werte über den Parameterabgleich zurück.
+    pub(crate) fn choose_preset(&mut self, track: usize, k: usize, uri: &str) {
         let values = self
             .handle_mut(track, k)
-            .map(|h| h.preset_values(&uri))
+            .map(|h| h.preset_values(uri))
             .unwrap_or_default();
-        if values.is_empty() {
-            self.message = Some("Preset ohne Parameterwerte".into());
+        let before = self.project.clone();
+        if !values.is_empty() {
+            for (pid, v) in values {
+                self.apply_param(track, k, pid, v);
+            }
+            self.checkpoint(before);
             return;
         }
-        let before = self.project.clone();
-        for (pid, v) in values {
-            self.apply_param(track, k, pid, v);
+        let loaded = match self.handle_mut(track, k) {
+            Some(h) => h
+                .load_preset(uri)
+                .map(|()| (h.param_values(), h.save_state())),
+            None => Err("Plugin läuft nicht".into()),
+        };
+        let (values, state) = match loaded {
+            Ok(x) => x,
+            Err(e) => {
+                self.message = Some(format!("Preset: {e}"));
+                return;
+            }
+        };
+        if let Some(slot) = self.slot_mut(track, k) {
+            for &(pid, v) in &values {
+                slot.set_param(pid, v);
+            }
+            if let Some(st) = &state {
+                slot.state = Some(B64.encode(st));
+            }
+        }
+        // Die gesendete Kette kennt die Werte schon (das Plugin hat sie selbst gesetzt).
+        if let Some(sent) = self.plugins.sent.get_mut(track) {
+            let s = if k == INSTRUMENT {
+                sent.instrument.as_mut()
+            } else {
+                sent.slots.get_mut(k)
+            };
+            if let Some(s) = s {
+                for &(pid, v) in &values {
+                    s.set_param(pid, v);
+                }
+            }
         }
         self.checkpoint(before);
+        self.plugins.changed = true;
     }
 
     /// Allgemeine Parameteransicht (Regler je Parameter). Eigene Plugin-Fenster folgen.
