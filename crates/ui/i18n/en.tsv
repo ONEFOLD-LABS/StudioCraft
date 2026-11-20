@@ -540,3 +540,101 @@ Zurückholen	Bring Back
 Übergeordneter Ordner	Parent folder
 Übernehmen	Apply
 Übernommen	Applied
+Alle auf Standard	All to Default
+Audio importieren	Import Audio
+Audio-Mixdown exportieren	Export Audio Mixdown
+Auf Projekt zoomen	Zoom to Project
+Bearbeitung	Editing
+Cycle	Loop
+Der Wiedergabe folgen	Follow Playback
+Editor im eigenen Fenster	Editor in Its Own Window
+Eingabe	Enter
+Entf	Del
+Exportieren …	Export…
+Horizontal auszoomen	Zoom Out Horizontally
+Horizontal einzoomen	Zoom In Horizontally
+Importieren …	Import…
+Inspector	Inspector
+Layout 1	Layout 1
+Layout 2	Layout 2
+Layout 3	Layout 3
+Layout 4	Layout 4
+Layout 5	Layout 5
+Layout 6	Layout 6
+Layout 7	Layout 7
+Layout 8	Layout 8
+Layout 9	Layout 9
+Leertaste	Space
+Linke Zone	Left Panel
+Locatoren auf Auswahl	Locators to Selection
+Länge kürzen	Shorten Length
+Länge verlängern	Extend Length
+Makro 1	Macro 1
+Makro 2	Macro 2
+Makro 3	Macro 3
+Makro 4	Macro 4
+Makro 5	Macro 5
+Makro 6	Macro 6
+Makro 7	Macro 7
+Makro 8	Macro 8
+Makro {slot}	Macro {slot}
+Makro {slot}: {name}	Macro {slot}: {name}
+Mixer-Fenster	Mixer Window
+Navigation	Navigation
+Noten eine Oktave höher	Notes One Octave Up
+Noten eine Oktave tiefer	Notes One Octave Down
+Nudge links	Nudge Left
+Nudge rechts	Nudge Right
+Nächste Spur	Next Track
+Nächstes Event	Next Event
+Pfeil hoch	Up
+Pfeil links	Left
+Pfeil rechts	Right
+Pfeil runter	Down
+Pos1	Home
+Punch-In	Punch In
+Punch-Out	Punch Out
+Rechte Zone	Right Panel
+Rücktaste	Backspace
+Setzen	Set
+Snap an/aus	Snap On/Off
+Solo	Solo
+Speichern unter	Save As
+Strg	Ctrl
+Tastaturbefehle	Keyboard Shortcuts
+Taste für {name} setzen	Set key for {name}
+Taste für „{name}“ drücken (Escape: abbrechen)	Press the key for “{name}” (Escape: cancel)
+Transportleiste	Transport Bar
+Umschalt	Shift
+Vorherige Spur	Previous Track
+Vorheriges Event	Previous Event
+Werkzeug Auswahl	Select Tool
+Werkzeug Bereich	Range Tool
+Werkzeug Comping	Comp Tool
+Werkzeug Kleben	Glue Tool
+Werkzeug Löschen	Erase Tool
+Werkzeug Stumm	Mute Tool
+Werkzeug Trennen	Split Tool
+Werkzeug Wiedergabe	Play Tool
+Werkzeug Zeichnen	Draw Tool
+Werkzeug Zeitkorrektur	Time Warp Tool
+Werkzeug Zoom	Zoom Tool
+Werkzeuge	Tools
+Zeile {line}: kein „=“	Line {line}: no “=”
+Zeile {line}: Makro im Makro ({step})	Line {line}: macro inside a macro ({step})
+Zeile {line}: mehr als {max} Befehle	Line {line}: more than {max} commands
+Zeile {line}: unbekannte Taste {key}	Line {line}: unknown key {key}
+Zeile {line}: unbekannter Befehl {step}	Line {line}: unknown command {step}
+Zeile {line}: unbekanntes Feld {field}	Line {line}: unknown field {field}
+Zeile {line}: unbekanntes Makro {slot}	Line {line}: unknown macro {slot}
+Zu Marker 1	Go to Marker 1
+Zu Marker 2	Go to Marker 2
+Zu Marker 3	Go to Marker 3
+Zu Marker 4	Go to Marker 4
+Zu Marker 5	Go to Marker 5
+Zu Marker 6	Go to Marker 6
+Zu Marker 7	Go to Marker 7
+Zu Marker 8	Go to Marker 8
+Zu Marker 9	Go to Marker 9
+{key} gehört schon zu „{name}“.	{key} already belongs to “{name}”.
+Öffnen	Open

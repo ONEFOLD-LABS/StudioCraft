@@ -7,7 +7,7 @@ use crate::keymap::{COMMANDS, Cmd, MACROS, MAX_NAME, MAX_STEPS, info};
 
 /// Kurzer Name eines Befehls für die Schrittliste.
 fn step_name(cmd: Cmd) -> &'static str {
-    info(cmd).map_or("?", |i| i.name)
+    info(cmd).map_or("?", |i| i.label())
 }
 
 impl crate::ProjectWindow {
@@ -59,9 +59,9 @@ impl crate::ProjectWindow {
                             continue;
                         }
                         category = c.category;
-                        ui.menu_button(category, |ui| {
+                        ui.menu_button(c.group(), |ui| {
                             for c in COMMANDS.iter().filter(|e| e.category == c.category) {
-                                if ui.button(c.name).clicked() {
+                                if ui.button(c.label()).clicked() {
                                     add = Some(c.cmd);
                                     ui.close();
                                 }
