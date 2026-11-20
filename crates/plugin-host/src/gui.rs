@@ -1,7 +1,7 @@
 //! Plugin-Fenster: bevorzugt schwebend (das Plugin öffnet sein eigenes
 //! Fenster, das klappt auf allen Systemen), sonst eingebettet in ein eigenes
-//! Host-Fenster. Eingebettet geht bisher unter X11 (Linux, BSD; unter Wayland
-//! über XWayland). Windows und macOS folgen.
+//! Host-Fenster: X11 (Linux, BSD; unter Wayland über XWayland), Win32 (Windows)
+//! oder Cocoa (macOS).
 
 use std::{
     ffi::{CStr, CString},
@@ -32,8 +32,7 @@ fn window_api() -> Option<&'static CStr> {
 #[derive(Default)]
 pub(crate) struct GuiState {
     created: bool,
-    #[cfg(all(unix, not(target_os = "macos")))]
-    window: Option<x11win::HostWindow>,
+    window: Option<HostWindow>,
 }
 
 impl ClapHandle {
@@ -106,7 +105,6 @@ impl ClapHandle {
         Ok(())
     }
 
-    #[cfg(all(unix, not(target_os = "macos")))]
     fn open_embedded(
         &mut self,
         vt: clap_plugin_gui,
@@ -135,18 +133,28 @@ impl ClapHandle {
                 (w, h) = (a.min(16_384), b.min(16_384));
             }
         }
-        let win = match x11win::HostWindow::new(title, w, h) {
+        let win = match HostWindow::new(title, w, h) {
             Ok(win) => win,
             Err(e) => {
                 self.close_gui();
                 return Err(e);
             }
         };
+        #[cfg(all(unix, not(target_os = "macos")))]
+        let specific = clap_window_handle {
+            x11: win.parent() as usize as u64,
+        };
+        #[cfg(windows)]
+        let specific = clap_window_handle {
+            win32: win.parent(),
+        };
+        #[cfg(target_os = "macos")]
+        let specific = clap_window_handle {
+            cocoa: win.parent(),
+        };
         let parent = clap_window {
             api: api.as_ptr(),
-            specific: clap_window_handle {
-                x11: win.id().into(),
-            },
+            specific,
         };
         // SAFETY: GUI existiert; `parent` benennt unser lebendes Fenster.
         if !unsafe { set_parent(p, &parent) } {
@@ -165,11 +173,6 @@ impl ClapHandle {
         Ok(())
     }
 
-    #[cfg(not(all(unix, not(target_os = "macos"))))]
-    fn open_embedded(&mut self, _: clap_plugin_gui, _: &CStr, _: &str) -> Result<(), String> {
-        Err("Dieses Plugin bietet nur ein eingebettetes Fenster; das folgt auf diesem System später".into())
-    }
-
     /// Schließt und zerstört das Plugin-Fenster. Nur im Hauptthread.
     pub fn close_gui(&mut self) {
         if self.gui.created
@@ -179,7 +182,6 @@ impl ClapHandle {
             unsafe { f(self.plugin) };
         }
         self.gui.created = false;
-        #[cfg(all(unix, not(target_os = "macos")))]
         if let Some(w) = self.gui.window.take() {
             w.close();
         }
@@ -248,7 +250,6 @@ impl ClapHandle {
         if self.shared.gui_closed.swap(false, Ordering::AcqRel) {
             self.close_gui();
         }
-        #[cfg(all(unix, not(target_os = "macos")))]
         {
             let req = self.shared.resize.swap(0, Ordering::AcqRel);
             let mut closed = false;
@@ -265,6 +266,14 @@ impl ClapHandle {
         self.gui.created
     }
 }
+
+#[cfg(target_os = "macos")]
+pub(crate) use cocoawin::HostWindow;
+#[cfg(windows)]
+pub(crate) use win32win::HostWindow;
+/// Host-Fenster für eingebettete Plugin-Editoren auf diesem System.
+#[cfg(all(unix, not(target_os = "macos")))]
+pub(crate) use x11win::HostWindow;
 
 #[cfg(all(unix, not(target_os = "macos")))]
 pub(crate) mod x11win {
@@ -385,6 +394,11 @@ pub(crate) mod x11win {
             self.id
         }
 
+        /// Elternfenster für das Plugin (X11: die Fenster-Id).
+        pub fn parent(&self) -> *mut std::ffi::c_void {
+            self.id as usize as *mut std::ffi::c_void
+        }
+
         pub fn show(&self) {
             if let Some(x) = x() {
                 let _ = x.conn.map_window(self.id);
@@ -424,6 +438,244 @@ pub(crate) mod x11win {
                 let _ = x.conn.destroy_window(self.id);
                 let _ = x.conn.flush();
             }
+        }
+    }
+}
+
+/// Ein schlichtes Win32-Fenster als Elternfenster für eingebettete Plugin-Editoren. Seine
+/// Nachrichten verteilt die Ereignisschleife des Programms (gleicher Thread); Schließen blendet
+/// es aus und meldet es über [`HostWindow::pump_closed`].
+#[cfg(windows)]
+pub(crate) mod win32win {
+    use std::{
+        ffi::c_void,
+        ptr,
+        sync::{
+            OnceLock,
+            atomic::{AtomicBool, Ordering},
+        },
+    };
+
+    use windows_sys::Win32::{
+        Foundation::{HWND, LPARAM, LRESULT, RECT, WPARAM},
+        System::LibraryLoader::GetModuleHandleW,
+        UI::WindowsAndMessaging::{
+            AdjustWindowRectEx, CW_USEDEFAULT, CreateWindowExW, DefWindowProcW, DestroyWindow,
+            GWLP_USERDATA, GetWindowLongPtrW, IDC_ARROW, LoadCursorW, RegisterClassExW, SW_HIDE,
+            SW_SHOW, SWP_NOMOVE, SWP_NOZORDER, SetWindowLongPtrW, SetWindowPos, ShowWindow,
+            WM_CLOSE, WNDCLASSEXW, WS_MAXIMIZEBOX, WS_OVERLAPPEDWINDOW, WS_THICKFRAME,
+        },
+    };
+
+    const STYLE: u32 = WS_OVERLAPPEDWINDOW & !(WS_THICKFRAME | WS_MAXIMIZEBOX);
+
+    fn wide(s: &str) -> Vec<u16> {
+        s.encode_utf16().chain(std::iter::once(0)).collect()
+    }
+
+    unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
+        if msg == WM_CLOSE {
+            // SAFETY: GWLP_USERDATA hält null oder unser `closed`-Flag (lebt mit dem Fenster).
+            unsafe {
+                let flag = GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *const AtomicBool;
+                if !flag.is_null() {
+                    (*flag).store(true, Ordering::Release);
+                }
+                ShowWindow(hwnd, SW_HIDE);
+            }
+            return 0;
+        }
+        // SAFETY: Standardbehandlung für alle anderen Nachrichten.
+        unsafe { DefWindowProcW(hwnd, msg, wp, lp) }
+    }
+
+    /// Fensterklasse einmal anmelden; ihr Name.
+    fn class() -> Option<&'static [u16]> {
+        static CLASS: OnceLock<Option<Vec<u16>>> = OnceLock::new();
+        CLASS
+            .get_or_init(|| {
+                let name = wide("StudioCraftPluginHost");
+                // SAFETY: Struktur vollständig gefüllt; Name und Prozedur leben bis Programmende.
+                let ok = unsafe {
+                    let wc = WNDCLASSEXW {
+                        cbSize: std::mem::size_of::<WNDCLASSEXW>() as u32,
+                        style: 0,
+                        lpfnWndProc: Some(wndproc),
+                        cbClsExtra: 0,
+                        cbWndExtra: 0,
+                        hInstance: GetModuleHandleW(ptr::null()),
+                        hIcon: ptr::null_mut(),
+                        hCursor: LoadCursorW(ptr::null_mut(), IDC_ARROW),
+                        hbrBackground: ptr::null_mut(),
+                        lpszMenuName: ptr::null(),
+                        lpszClassName: name.as_ptr(),
+                        hIconSm: ptr::null_mut(),
+                    };
+                    RegisterClassExW(&wc) != 0
+                };
+                ok.then_some(name)
+            })
+            .as_deref()
+    }
+
+    /// Fenstergröße für eine gewünschte Innengröße.
+    fn outer(w: u32, h: u32) -> (i32, i32) {
+        let mut r = RECT {
+            left: 0,
+            top: 0,
+            right: w.clamp(1, 16_384) as i32,
+            bottom: h.clamp(1, 16_384) as i32,
+        };
+        // SAFETY: gültiges Rechteck.
+        unsafe { AdjustWindowRectEx(&mut r, STYLE, 0, 0) };
+        (r.right - r.left, r.bottom - r.top)
+    }
+
+    pub(crate) struct HostWindow {
+        hwnd: HWND,
+        closed: Box<AtomicBool>,
+    }
+
+    impl HostWindow {
+        pub fn new(title: &str, w: u32, h: u32) -> Result<Self, String> {
+            let class = class().ok_or("Fensterklasse für Plugins ließ sich nicht anmelden")?;
+            let title = wide(title);
+            let (ow, oh) = outer(w, h);
+            // SAFETY: Klasse angemeldet; Zeichenketten nullterminiert und während des Aufrufs gültig.
+            let hwnd = unsafe {
+                CreateWindowExW(
+                    0,
+                    class.as_ptr(),
+                    title.as_ptr(),
+                    STYLE,
+                    CW_USEDEFAULT,
+                    CW_USEDEFAULT,
+                    ow,
+                    oh,
+                    ptr::null_mut(),
+                    ptr::null_mut(),
+                    GetModuleHandleW(ptr::null()),
+                    ptr::null(),
+                )
+            };
+            if hwnd.is_null() {
+                return Err("Fenster für das Plugin ließ sich nicht anlegen".into());
+            }
+            let closed = Box::new(AtomicBool::new(false));
+            // SAFETY: Fenster gehört uns; das Flag lebt so lange wie das Fenster (close setzt
+            // den Zeiger vor dem Zerstören zurück).
+            unsafe {
+                SetWindowLongPtrW(hwnd, GWLP_USERDATA, &*closed as *const AtomicBool as isize)
+            };
+            Ok(Self { hwnd, closed })
+        }
+
+        /// Elternfenster für das Plugin (HWND).
+        pub fn parent(&self) -> *mut c_void {
+            self.hwnd
+        }
+
+        pub fn show(&self) {
+            // SAFETY: Fenster lebt.
+            unsafe { ShowWindow(self.hwnd, SW_SHOW) };
+        }
+
+        pub fn resize(&self, w: u32, h: u32) {
+            let (ow, oh) = outer(w, h);
+            // SAFETY: Fenster lebt.
+            unsafe {
+                SetWindowPos(
+                    self.hwnd,
+                    ptr::null_mut(),
+                    0,
+                    0,
+                    ow,
+                    oh,
+                    SWP_NOMOVE | SWP_NOZORDER,
+                )
+            };
+        }
+
+        /// `true`, wenn das Fenster geschlossen wurde.
+        pub fn pump_closed(&self) -> bool {
+            self.closed.load(Ordering::Acquire)
+        }
+
+        pub fn close(self) {
+            // SAFETY: Fenster lebt; Flag-Zeiger zuerst lösen, dann zerstören.
+            unsafe {
+                SetWindowLongPtrW(self.hwnd, GWLP_USERDATA, 0);
+                DestroyWindow(self.hwnd);
+            }
+        }
+    }
+}
+
+/// Ein schlichtes Cocoa-Fenster als Elternfenster für eingebettete Plugin-Editoren (NSView).
+/// Nur im Hauptthread. Schließen blendet es aus (es wird nicht freigegeben), das meldet
+/// [`HostWindow::pump_closed`].
+#[cfg(target_os = "macos")]
+pub(crate) mod cocoawin {
+    use std::ffi::c_void;
+
+    use objc2::{MainThreadMarker, rc::Retained};
+    use objc2_app_kit::{NSBackingStoreType, NSWindow, NSWindowStyleMask};
+    use objc2_foundation::{NSPoint, NSRect, NSSize, NSString};
+
+    pub(crate) struct HostWindow {
+        win: Retained<NSWindow>,
+    }
+
+    impl HostWindow {
+        pub fn new(title: &str, w: u32, h: u32) -> Result<Self, String> {
+            let mtm = MainThreadMarker::new().ok_or("Plugin-Fenster nur im Hauptthread")?;
+            let size = NSSize::new(f64::from(w.clamp(1, 16_384)), f64::from(h.clamp(1, 16_384)));
+            let rect = NSRect::new(NSPoint::new(200.0, 200.0), size);
+            let style = NSWindowStyleMask::Titled
+                | NSWindowStyleMask::Closable
+                | NSWindowStyleMask::Miniaturizable;
+            // SAFETY: Hauptthread (Marker); gültige Größe und Stil.
+            let win = unsafe {
+                NSWindow::initWithContentRect_styleMask_backing_defer(
+                    mtm.alloc(),
+                    rect,
+                    style,
+                    NSBackingStoreType::Buffered,
+                    false,
+                )
+            };
+            // SAFETY: Wir halten das Fenster selbst; Schließen darf es nicht freigeben.
+            unsafe { win.setReleasedWhenClosed(false) };
+            win.setTitle(&NSString::from_str(title));
+            Ok(Self { win })
+        }
+
+        /// Elternfenster für das Plugin (die Inhaltsansicht, NSView).
+        pub fn parent(&self) -> *mut c_void {
+            // Das Fenster hält seine Inhaltsansicht; der Zeiger bleibt gültig.
+            self.win.contentView().map_or(std::ptr::null_mut(), |v| {
+                Retained::as_ptr(&v) as *mut c_void
+            })
+        }
+
+        pub fn show(&self) {
+            self.win.makeKeyAndOrderFront(None);
+        }
+
+        pub fn resize(&self, w: u32, h: u32) {
+            self.win.setContentSize(NSSize::new(
+                f64::from(w.clamp(1, 16_384)),
+                f64::from(h.clamp(1, 16_384)),
+            ));
+        }
+
+        /// `true`, wenn das Fenster geschlossen wurde (nicht mehr sichtbar und nicht im Dock).
+        pub fn pump_closed(&self) -> bool {
+            !self.win.isVisible() && !self.win.isMiniaturized()
+        }
+
+        pub fn close(self) {
+            self.win.close();
         }
     }
 }

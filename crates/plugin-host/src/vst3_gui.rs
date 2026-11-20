@@ -1,31 +1,11 @@
-//! VST3-Plugin-Fenster (Issue #32): die Ansicht des Controllers, eingebettet in ein eigenes
-//! X11-Host-Fenster. Unter Linux erwarten Plugins vom Host eine Ereignisschleife (Dateideskriptoren
-//! und Timer), die der Host im UI-Takt bedient; der Plugin-Rahmen nimmt Größenwünsche an.
-//! Alles im Hauptthread. Windows und macOS folgen (#36).
+//! VST3-Plugin-Fenster (Issues #32, #36): die Ansicht des Controllers, eingebettet in ein eigenes
+//! Host-Fenster (X11, Win32 oder Cocoa, siehe `gui.rs`). Unter Linux erwarten Plugins vom Host
+//! zusätzlich eine Ereignisschleife (Dateideskriptoren und Timer), die der Host im UI-Takt
+//! bedient; der Plugin-Rahmen nimmt auf allen Systemen Größenwünsche an. Alles im Hauptthread.
 
-#[cfg(all(unix, not(target_os = "macos")))]
-pub(crate) use x11::Vst3Gui;
+pub(crate) use embed::Vst3Gui;
 
-/// Ohne X11: keine eingebetteten VST3-Fenster.
-#[cfg(not(all(unix, not(target_os = "macos"))))]
-pub(crate) struct Vst3Gui;
-
-#[cfg(not(all(unix, not(target_os = "macos"))))]
-impl Vst3Gui {
-    pub(crate) fn supported(_: super::vst3::Obj) -> bool {
-        false
-    }
-    pub(crate) fn open(_: super::vst3::Obj, _: &str) -> Result<Self, String> {
-        Err("VST3-Fenster gibt es bisher nur unter X11".into())
-    }
-    pub(crate) fn idle(&mut self) -> bool {
-        false
-    }
-    pub(crate) fn close(self) {}
-}
-
-#[cfg(all(unix, not(target_os = "macos")))]
-mod x11 {
+mod embed {
     use std::{
         ffi::{CStr, c_char, c_void},
         ptr,
@@ -33,7 +13,7 @@ mod x11 {
     };
 
     use crate::{
-        gui::x11win::HostWindow,
+        gui::HostWindow,
         vst3::{
             EditControllerVt, Obj, RESULT_OK, Tresult, Tuid, UnknownVt, host_add_ref, host_query,
             host_release, query, release, uid, vt,
@@ -45,7 +25,13 @@ mod x11 {
     const IID_RUN_LOOP: Tuid = uid(0x18C3_5366, 0x9776_4F1A, 0x9C5B_8385, 0x7A87_1389);
     const IID_EVENT_HANDLER: Tuid = uid(0x561E_65C9, 0x13A0_496F, 0x813A_2C35, 0x654D_7983);
     const IID_TIMER_HANDLER: Tuid = uid(0x10BD_D94F, 0x4142_4774, 0x821F_AD8F, 0xECA7_2CA9);
-    const X11_EMBED: &CStr = c"X11EmbedWindowID";
+    /// Plattform-Typ der Ansicht auf diesem System.
+    #[cfg(all(unix, not(target_os = "macos")))]
+    const PLATFORM: &CStr = c"X11EmbedWindowID";
+    #[cfg(windows)]
+    const PLATFORM: &CStr = c"HWND";
+    #[cfg(target_os = "macos")]
+    const PLATFORM: &CStr = c"NSView";
     const EDITOR: &CStr = c"editor";
 
     #[repr(C)]
@@ -74,6 +60,8 @@ mod x11 {
         check_size_constraint: unsafe extern "system" fn(Obj, *mut ViewRect) -> Tresult,
     }
 
+    /// Nur unter Unix gebraucht (Dateideskriptoren werden nur dort bedient).
+    #[cfg(unix)]
     #[repr(C)]
     struct EventHandlerVt {
         unknown: UnknownVt,
@@ -277,7 +265,7 @@ mod x11 {
                     return false;
                 }
                 let ok =
-                    (vt::<PlugViewVt>(view).is_platform_type_supported)(view, X11_EMBED.as_ptr())
+                    (vt::<PlugViewVt>(view).is_platform_type_supported)(view, PLATFORM.as_ptr())
                         == RESULT_OK;
                 release(view);
                 ok
@@ -304,9 +292,9 @@ mod x11 {
                     None => view,
                 };
                 let pv = vt::<PlugViewVt>(view);
-                if (pv.is_platform_type_supported)(view, X11_EMBED.as_ptr()) != RESULT_OK {
+                if (pv.is_platform_type_supported)(view, PLATFORM.as_ptr()) != RESULT_OK {
                     release(view);
-                    return Err("Plugin-Fenster lässt sich unter X11 nicht einbetten".into());
+                    return Err("Plugin-Fenster lässt sich hier nicht einbetten".into());
                 }
                 let mut state = Box::<LoopState>::default();
                 let sp: *mut LoopState = &mut *state;
@@ -335,8 +323,8 @@ mod x11 {
                         return Err(e);
                     }
                 };
-                let parent = window.id() as usize as *mut c_void;
-                if (pv.attached)(view, parent, X11_EMBED.as_ptr()) != RESULT_OK {
+                let parent = window.parent();
+                if (pv.attached)(view, parent, PLATFORM.as_ptr()) != RESULT_OK {
                     (pv.set_frame)(view, ptr::null_mut());
                     release(view);
                     window.close();
@@ -357,7 +345,36 @@ mod x11 {
         /// Im UI-Takt: Dateideskriptoren und Timer des Plugins bedienen, Größenwünsche umsetzen.
         /// `false`, wenn das Fenster geschlossen wurde (dann [`Self::close`] aufrufen).
         pub(crate) fn idle(&mut self) -> bool {
-            // Dateideskriptoren: ohne Warten prüfen, ob etwas zu lesen ist.
+            // Dateideskriptoren (nur Linux/BSD): ohne Warten prüfen, ob etwas zu lesen ist.
+            #[cfg(unix)]
+            self.poll_fds();
+            let now = Instant::now();
+            let due: Vec<Obj> = self
+                .state
+                .timers
+                .iter_mut()
+                .filter(|(_, _, every, last)| now.duration_since(*last) >= *every)
+                .map(|(_, h, _, last)| {
+                    *last = now;
+                    *h
+                })
+                .collect();
+            for h in due {
+                // SAFETY: wie oben.
+                unsafe { (vt::<TimerHandlerVt>(h).on_timer)(h) };
+            }
+            if let Some(mut r) = self.state.resize.take() {
+                let (w, h) = (r.right - r.left, r.bottom - r.top);
+                self.window
+                    .resize(w.clamp(16, 16_384) as u32, h.clamp(16, 16_384) as u32);
+                // SAFETY: Ansicht lebt; Hauptthread.
+                unsafe { (vt::<PlugViewVt>(self.view).on_size)(self.view, &mut r) };
+            }
+            !self.window.pump_closed()
+        }
+
+        #[cfg(unix)]
+        fn poll_fds(&mut self) {
             let mut fds: Vec<libc::pollfd> = self
                 .state
                 .fds
@@ -386,29 +403,6 @@ mod x11 {
                     }
                 }
             }
-            let now = Instant::now();
-            let due: Vec<Obj> = self
-                .state
-                .timers
-                .iter_mut()
-                .filter(|(_, _, every, last)| now.duration_since(*last) >= *every)
-                .map(|(_, h, _, last)| {
-                    *last = now;
-                    *h
-                })
-                .collect();
-            for h in due {
-                // SAFETY: wie oben.
-                unsafe { (vt::<TimerHandlerVt>(h).on_timer)(h) };
-            }
-            if let Some(mut r) = self.state.resize.take() {
-                let (w, h) = (r.right - r.left, r.bottom - r.top);
-                self.window
-                    .resize(w.clamp(16, 16_384) as u32, h.clamp(16, 16_384) as u32);
-                // SAFETY: Ansicht lebt; Hauptthread.
-                unsafe { (vt::<PlugViewVt>(self.view).on_size)(self.view, &mut r) };
-            }
-            !self.window.pump_closed()
         }
 
         pub(crate) fn close(mut self) {
