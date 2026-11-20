@@ -138,6 +138,9 @@ pub struct ProjectWindow {
     layout_name: String,
     /// Modus der Objektauswahl beim Ziehen am Rand (Rechtsklick auf das Werkzeug).
     resize_mode: tools::ResizeMode,
+    /// Form des Zeichnen-Werkzeugs in Automations- und Controller-Lanes (Rechtsklick auf das
+    /// Werkzeug).
+    draw_shape: studiocraft_project::DrawShape,
     /// Wiedergabe-Werkzeug bei gedrückter Maustaste (Spec „Werkzeuge“, Taste 9).
     audition: Option<timeline::Audition>,
     /// Werkzeugpalette am Mauszeiger (Rechtsklick in die Event-Anzeige) und ihr Alter in
@@ -339,6 +342,7 @@ impl ProjectWindow {
             zone_sizes: [None; 3],
             layout_name: String::new(),
             resize_mode: tools::ResizeMode::default(),
+            draw_shape: studiocraft_project::DrawShape::default(),
             audition: None,
             tool_palette: None,
             tool_palette_age: 0,
@@ -1197,9 +1201,29 @@ impl ProjectWindow {
                 if !tool.implemented() {
                     hint.push_str(" – im Prototyp noch ohne Funktion");
                 }
+                if tool == Tool::Draw && self.draw_shape != studiocraft_project::DrawShape::Free {
+                    hint.push_str(" – ");
+                    hint.push_str(tr(self.draw_shape.label()));
+                }
                 let r = icon_button(ui, tool.icon(), self.tool == tool, None, &hint);
                 if r.clicked() {
                     self.tool = tool;
+                }
+                // Zeichnen: Form für Automations- und Controller-Lanes (Spec).
+                if tool == Tool::Draw {
+                    r.context_menu(|ui| {
+                        ui.label(tr("Form"));
+                        for shape in studiocraft_project::DrawShape::ALL {
+                            if ui
+                                .radio(self.draw_shape == shape, tr(shape.label()))
+                                .clicked()
+                            {
+                                self.draw_shape = shape;
+                                self.tool = Tool::Draw;
+                                ui.close();
+                            }
+                        }
+                    });
                 }
                 // Untermenü am Werkzeugknopf: Modus für das Ziehen am Rand (Spec).
                 if tool == Tool::Select {
@@ -4724,6 +4748,81 @@ mod tests {
         let (a, b) = (at(&h, 0.0, 0.0), at(&h, 4.0 * TPQ, 0.0));
         drag_with(&mut h, a, b, egui::Modifiers::NONE, egui::Modifiers::NONE);
         assert!(ctrls(&h).is_empty());
+    }
+
+    #[test]
+    fn draw_shapes_fill_controller_and_automation_lanes() {
+        use studiocraft_project::{AutoParam, CtrlKind, DrawShape};
+        // Pick the sine through the draw tool's context menu.
+        let (mut w, part) = key_editor_window();
+        w.key_editor.selection.clear();
+        w.add_ctrl_lane(CtrlKind::Cc(1));
+        w.snap = true;
+        let mut h = window_harness(w);
+        h.run_steps(2);
+        h.get_by_label("Zeichnen (8)").click_secondary();
+        h.run_steps(2);
+        h.get_by_label("Sinus").click();
+        h.run_steps(2);
+        assert_eq!(h.state().draw_shape, DrawShape::Sine);
+        assert_eq!(h.state().tool, Tool::Draw);
+        let at = |h: &Harness<'_, ProjectWindow>, tick: f64, frac: f32| {
+            let s = h.state();
+            let g = s.key_editor.grid_rect;
+            let v = s.key_editor.view;
+            let top = s.key_editor.vel_rect.bottom() + 2.0;
+            let x = g.left() + ((tick - v.scroll_ticks) / TPQ) as f32 * v.px_per_quarter;
+            egui::pos2(x, top + 62.0 * (1.0 - frac))
+        };
+        // A sine over one bar between 20 % and 80 %: it goes up and down again.
+        let (a, b) = (at(&h, 0.0, 0.2), at(&h, 4.0 * TPQ, 0.8));
+        drag_with(&mut h, a, b, egui::Modifiers::NONE, egui::Modifiers::NONE);
+        let mut c = h.state().project.event(part).unwrap().controllers.clone();
+        c.sort_by_key(|p| p.start);
+        assert!(c.len() > 16, "{}", c.len());
+        let rises = c.windows(2).filter(|w| w[1].value > w[0].value).count();
+        let falls = c.windows(2).filter(|w| w[1].value < w[0].value).count();
+        assert!(rises > 2 && falls > 2, "swings: {rises} up, {falls} down");
+        h.state_mut().undo();
+        assert!(
+            h.state()
+                .project
+                .event(part)
+                .unwrap()
+                .controllers
+                .is_empty(),
+            "one stroke, one undo step"
+        );
+
+        // A square in a volume automation lane: alternating high and low points.
+        let (mut w, _) = one_event_window();
+        w.project.tracks[0]
+            .automation_lane_mut(AutoParam::Volume)
+            .visible = true;
+        w.tool = Tool::Draw;
+        w.draw_shape = DrawShape::Square;
+        w.snap = true;
+        let mut h = window_harness(w);
+        h.run_steps(2);
+        let (left, top, row_h, ppq) = {
+            let s = h.state();
+            (
+                s.lanes_rect.left(),
+                s.lanes_rect.top(),
+                s.view.row_h,
+                s.view.px_per_quarter,
+            )
+        };
+        let a = egui::pos2(left + 2.0 * ppq, top + row_h + 8.0);
+        let b = egui::pos2(left + 6.0 * ppq, top + 2.0 * row_h - 8.0);
+        drag_with(&mut h, a, b, egui::Modifiers::NONE, egui::Modifiers::NONE);
+        let pts = h.state().project.tracks[0].automation[0].points.clone();
+        assert!(pts.len() >= 6, "{pts:?}");
+        let hi = pts[0].value;
+        let lo = pts.iter().map(|p| p.value).find(|&v| v != hi).unwrap();
+        assert!(hi > lo + 20.0, "between high and low: {hi} {lo}");
+        assert!(pts.iter().all(|p| p.value == hi || p.value == lo));
+        assert!(pts.windows(2).all(|w| w[0].tick < w[1].tick));
     }
 
     #[test]

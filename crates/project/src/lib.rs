@@ -31,6 +31,7 @@ pub mod model;
 pub mod quantize;
 pub mod recording;
 pub mod sanitize;
+pub mod shapes;
 pub mod time;
 
 pub use automation::{AutoParam, AutoPoint, AutomationLane};
@@ -48,6 +49,7 @@ pub use model::{
 };
 pub use quantize::{Feel, NoteValue, Quantize, QuantizeValue};
 pub use recording::{CycleRecordMode, MidiRecordMode, RecordSettings, TakeNote};
+pub use shapes::DrawShape;
 pub use time::{
     BPM_RANGE, Position, SignatureEvent, TICKS_PER_QUARTER, TempoEvent, TempoMap, TimeSignature,
 };

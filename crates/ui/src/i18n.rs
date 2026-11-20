@@ -204,6 +204,15 @@ mod tests {
         );
     }
 
+    /// Namen, die aus dem Projektmodell kommen und über `tr(x.label())` laufen (der Scan oben
+    /// sieht sie nicht).
+    #[test]
+    fn model_labels_have_english_entries() {
+        let labels = studiocraft_project::DrawShape::ALL.map(|s| s.label());
+        let missing: Vec<&str> = labels.into_iter().filter(|k| !EN.contains_key(k)).collect();
+        assert!(missing.is_empty(), "fehlt in i18n/en.tsv: {missing:?}");
+    }
+
     #[test]
     fn the_catalog_has_no_duplicate_keys_and_keeps_placeholders() {
         let mut seen = std::collections::HashSet::new();

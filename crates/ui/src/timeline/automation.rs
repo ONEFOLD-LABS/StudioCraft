@@ -3,10 +3,11 @@
 //!
 //! Sichtbare Automationsspuren liegen unter ihrer Spur (unter den Lanes), je eine Zeile hoch.
 //! Der Pfeil im Spurkopf klappt sie auf und zu. Objektauswahl: Klick setzt einen Punkt, Ziehen
-//! bewegt ihn (Alt: ohne Snap). Radiergummi löscht einen Punkt, Zeichnen zeichnet frei.
+//! bewegt ihn (Alt: ohne Snap). Radiergummi löscht einen Punkt, Zeichnen zeichnet frei oder
+//! mit der gewählten Form (Rechtsklick auf das Werkzeug; `project/shapes.rs`).
 
 use egui::{Align2, Color32, FontId, Painter, Pos2, Rect, Stroke, StrokeKind, pos2, vec2};
-use studiocraft_project::{AutoParam, Track};
+use studiocraft_project::{AutoParam, DrawShape, Track, shapes};
 
 use super::{Drag, Geo, track_color};
 use crate::{ProjectWindow, Tool};
@@ -137,6 +138,22 @@ pub(super) fn start_drag(
                 to: b,
             })
         }
+        Tool::Draw if w.draw_shape != DrawShape::Free => {
+            let tick = tick_at(w, g, p.x, alt);
+            let rect = lane_rect(w, g, row, lane, g.lanes.x_range())?;
+            let track = w.project.tracks.get(row)?;
+            let value = y_value(
+                rect,
+                range(w, track, track.automation.get(lane)?.param),
+                p.y,
+            );
+            Some(Drag::AutoShape {
+                row,
+                lane,
+                tick,
+                value,
+            })
+        }
         Tool::Draw => {
             let tick = tick_at(w, g, p.x, alt);
             add_point(w, g, row, lane, p, alt);
@@ -205,6 +222,38 @@ pub(super) fn live_drag(w: &mut ProjectWindow, g: &Geo, d: Drag, p: Pos2, alt: b
                 lane,
                 last: tick,
             }
+        }
+        Drag::AutoShape {
+            row,
+            lane,
+            tick: t0,
+            value: v0,
+        } => {
+            let t1 = tick_at(w, g, p.x, alt);
+            let original = w
+                .drag_before
+                .as_ref()
+                .and_then(|b| b.tracks.get(row))
+                .and_then(|t| t.automation.get(lane))
+                .cloned();
+            if let (Some(orig), Some(rect), Some(track)) = (
+                original,
+                lane_rect(w, g, row, lane, g.lanes.x_range()),
+                w.project.tracks.get(row),
+            ) {
+                let v1 = y_value(rect, range(w, track, orig.param), p.y);
+                let period = w.grid_ticks();
+                let shape = w.draw_shape;
+                if let Some(l) = w.project.tracks[row].automation.get_mut(lane) {
+                    *l = orig;
+                    let (a, b) = (t0.min(t1), t0.max(t1));
+                    l.points.retain(|pt| pt.tick < a || pt.tick > b);
+                    for (t, v) in shapes::vertices(shape, (t0, v0), (t1, v1), period) {
+                        l.set_point(t, v);
+                    }
+                }
+            }
+            d
         }
         Drag::AutoScale {
             row,
