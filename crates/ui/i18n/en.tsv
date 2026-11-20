@@ -714,3 +714,16 @@ Schätzt das Tempo der Auswahl bzw. des Events	Estimates the tempo of the select
 ≈ {bpm} BPM	≈ {bpm} BPM
 Als Projekttempo	Use as project tempo
 kein Tempo gefunden	no tempo found
+Stille	Silence
+Phase drehen	Invert phase
+DC-Offset entfernen	Remove DC offset
+zu viele Bearbeitungen	too many processes
+Bearbeitungen	Processes
+Keine – das Original klingt	None – the original plays
+Gain {db} dB	Gain {db} dB
+Normalisieren auf {db} dB	Normalize to {db} dB
+{a}–{b} s	{a}–{b} s
+Bearbeitung {nr} nach oben	Move process {nr} up
+Bearbeitung {nr} entfernen	Remove process {nr}
+Bearbeitungen: {e}	Processes: {e}
+hoch	up

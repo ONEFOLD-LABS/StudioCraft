@@ -29,6 +29,7 @@ pub mod layout;
 pub mod links;
 pub mod markers;
 pub mod model;
+pub mod processing;
 pub mod quantize;
 pub mod recording;
 pub mod sanitize;
@@ -52,6 +53,7 @@ pub use model::{
     PoolClip, Project, SendSlot, StretchMode, TRACK_COLORS, TimeBase, Track, TrackId, TrackInput,
     TrackKind, bpm_in_name, content_frames, content_ticks, db_to_gain, pan_matrix,
 };
+pub use processing::{ClipProcess, Derived, ProcessKind};
 pub use quantize::{Feel, NoteValue, Quantize, QuantizeValue};
 pub use recording::{CycleRecordMode, MidiRecordMode, RecordSettings, TakeNote};
 pub use shapes::DrawShape;

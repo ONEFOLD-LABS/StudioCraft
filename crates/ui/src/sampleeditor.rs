@@ -14,11 +14,13 @@
 
 use crate::i18n::tr;
 use egui::{Rect, Sense, Stroke, StrokeKind, Ui, vec2};
-use studiocraft_engine::{Command, offline};
-use studiocraft_project::{EventId, PoolClip};
+use studiocraft_engine::Command;
+use studiocraft_project::{EventId, ProcessKind};
 
-use crate::waveform::Peaks;
-use crate::{LoadedClip, LowerZone, ProjectWindow};
+use crate::{LowerZone, ProjectWindow};
+
+/// Breite der Liste der Bearbeitungen rechts.
+const PROCESS_LIST_W: f32 = 240.0;
 
 /// Zustand des Sample-Editors.
 #[derive(Debug, Clone)]
@@ -57,28 +59,6 @@ impl Default for SampleEditor {
             sensitivity: 0.5,
             tempo: None,
             warp_drag: None,
-        }
-    }
-}
-
-/// Eine Offline-Bearbeitung.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub(crate) enum Process {
-    Normalize,
-    Gain(f32),
-    Reverse,
-    FadeIn,
-    FadeOut,
-}
-
-impl Process {
-    fn label(self) -> &'static str {
-        match self {
-            Process::Normalize => tr("normalisiert"),
-            Process::Gain(_) => tr("Gain"),
-            Process::Reverse => tr("umgekehrt"),
-            Process::FadeIn => tr("Fade-In"),
-            Process::FadeOut => tr("Fade-Out"),
         }
     }
 }
@@ -123,49 +103,11 @@ impl ProjectWindow {
             .or_else(|| self.event_frames(id))
     }
 
-    /// Wendet `p` auf den Clip des Events an: neuer Clip im Pool, das Event zeigt darauf.
-    pub(crate) fn process_clip(&mut self, id: EventId, p: Process) -> Result<(), String> {
-        let ev = self.project.event(id).ok_or(tr("Event fehlt"))?;
-        let clip_id = ev.clip.ok_or(tr("kein Audio-Event"))?;
-        let (a, b) = self.target_range(id).ok_or(tr("kein Bereich"))?;
-        let pool = self
-            .project
-            .pool
-            .get(clip_id as usize)
-            .cloned()
-            .ok_or(tr("Clip fehlt im Pool"))?;
-        let loaded = self.clip(clip_id).ok_or(tr("Clip ist nicht geladen"))?;
-        let mut samples = loaded.samples.to_vec();
-        match p {
-            Process::Normalize => {
-                offline::normalize(&mut samples, a..b, 0.0);
-            }
-            Process::Gain(db) => offline::gain(&mut samples, a..b, db),
-            Process::Reverse => offline::reverse(&mut samples, a..b),
-            Process::FadeIn => offline::fade_in(&mut samples, a..b),
-            Process::FadeOut => offline::fade_out(&mut samples, a..b),
-        }
-        let before = self.project.clone();
-        let name = format!("{} ({})", pool.name, p.label());
-        let new_id = self.project.add_clip(PoolClip {
-            name,
-            path: None,
-            sample_rate: pool.sample_rate,
-            frames: (samples.len() / 2) as u64,
-        });
-        let samples: std::sync::Arc<[f32]> = samples.into();
-        self.clips.insert(
-            new_id,
-            LoadedClip {
-                peaks: Peaks::new(&samples),
-                samples,
-            },
-        );
-        if let Some(e) = self.project.event_mut(id) {
-            e.clip = Some(new_id);
-        }
-        self.checkpoint(before);
-        Ok(())
+    /// Hängt `kind` für die Auswahl (ohne Auswahl den Teil des Events) an die Bearbeitungen
+    /// des Clips an: neuer Clip im Pool, das Event zeigt darauf (`processes_ui.rs`).
+    pub(crate) fn process_clip(&mut self, id: EventId, kind: ProcessKind) -> Result<(), String> {
+        let range = self.target_range(id).ok_or(tr("kein Bereich"))?;
+        self.add_process(id, kind, range)
     }
 
     /// Macht die Auswahl zum Event: Anfang und Ende folgen ihr, das Audio bleibt an seinem Platz.
@@ -332,7 +274,7 @@ pub(crate) fn show(w: &mut ProjectWindow, ui: &mut Ui) {
         .get(clip_id as usize)
         .map_or(48_000, |c| c.sample_rate.max(1));
     let total = w.clip(clip_id).map_or(0, |c| c.samples.len() / 2) as f64;
-    let mut action: Option<Process> = None;
+    let mut action: Option<ProcessKind> = None;
     let mut to_event = false;
     let mut detect = false;
     let mut slice = false;
@@ -366,13 +308,16 @@ pub(crate) fn show(w: &mut ProjectWindow, ui: &mut Ui) {
             to_event = true;
         }
         ui.separator();
-        for (label, p) in [
-            (tr("Normalisieren"), Process::Normalize),
-            (tr("Umkehren"), Process::Reverse),
-            (tr("Fade-In"), Process::FadeIn),
-            (tr("Fade-Out"), Process::FadeOut),
+        for p in [
+            ProcessKind::Normalize { target_db: 0.0 },
+            ProcessKind::Reverse,
+            ProcessKind::FadeIn,
+            ProcessKind::FadeOut,
+            ProcessKind::Silence,
+            ProcessKind::InvertPhase,
+            ProcessKind::RemoveDc,
         ] {
-            if ui.button(label).clicked() {
+            if ui.button(tr(p.label())).clicked() {
                 action = Some(p);
             }
         }
@@ -384,8 +329,11 @@ pub(crate) fn show(w: &mut ProjectWindow, ui: &mut Ui) {
         )
         .labelled_by(l.id);
         if ui.button(tr("Gain")).clicked() {
-            action = Some(Process::Gain(w.sample_editor.gain_db));
+            action = Some(ProcessKind::Gain {
+                db: w.sample_editor.gain_db,
+            });
         }
+
         ui.separator();
         if ui.button(tr("Einpassen")).clicked() {
             w.sample_editor.per_px = 0.0;
@@ -474,10 +422,24 @@ pub(crate) fn show(w: &mut ProjectWindow, ui: &mut Ui) {
                 ));
         }
     });
+    // Rechts die Liste der Bearbeitungen, links die Wellenform.
+    let full = ui.available_rect_before_wrap();
+    let list_rect = Rect::from_min_max(
+        egui::pos2(full.right() - PROCESS_LIST_W, full.top()),
+        full.max,
+    );
     let (rect, resp) = ui.allocate_exact_size(
-        vec2(ui.available_width(), ui.available_height().max(80.0)),
+        vec2(
+            (ui.available_width() - PROCESS_LIST_W - 8.0).max(80.0),
+            ui.available_height().max(80.0),
+        ),
         Sense::click_and_drag(),
     );
+    ui.scope_builder(egui::UiBuilder::new().max_rect(list_rect), |ui| {
+        egui::ScrollArea::vertical()
+            .id_salt("bearbeitungen")
+            .show(ui, |ui| w.processes_panel(ui, id));
+    });
     // Markerleiste oben, nur für Audio, das dem Tempo folgt.
     let warps: Vec<u64> = w
         .project
