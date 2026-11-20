@@ -313,6 +313,11 @@ pub struct Track {
     /// Ausgangsbus der Audio-Anschlüsse.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub out_bus: Option<u32>,
+    /// Weitere Ausgänge zusätzlich zu `output`/`out_bus` (Spec „Routing und Busse“: direkt
+    /// auf mehrere Ziele). Dasselbe Signal nach dem Fader, ohne eigenen Pegel; höchstens
+    /// [`MAX_EXTRA_OUTPUTS`].
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub extra_outputs: Vec<OutTarget>,
     /// Sends an FX-Kanäle oder Gruppen (Spec: Sends 1–8).
     #[serde(default)]
     pub sends: Vec<SendSlot>,
@@ -321,6 +326,36 @@ pub struct Track {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub frozen: Option<Frozen>,
     pub events: Vec<Event>,
+}
+
+/// Höchstzahl weiterer Ausgänge einer Spur (mit dem Hauptausgang acht Ziele).
+pub const MAX_EXTRA_OUTPUTS: usize = 7;
+
+/// Ein weiteres Ausgangsziel einer Spur.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OutTarget {
+    /// Eine Gruppen-Spur.
+    Group(TrackId),
+    /// Ein Ausgangsbus der Audio-Anschlüsse (auch der Hauptmix, [`crate::MAIN_OUT`]).
+    Bus(u32),
+}
+
+impl Track {
+    /// Ob das Signal dieser Spur über einen Ausgang (Haupt- oder weiteren) in `id` geht.
+    pub fn routes_to(&self, id: TrackId) -> bool {
+        self.output == Some(id) || self.extra_outputs.contains(&OutTarget::Group(id))
+    }
+
+    /// Ob ein weiteres Ziel schon der Hauptausgang ist (dann wäre es doppelt).
+    pub fn is_main_output(&self, target: OutTarget) -> bool {
+        match target {
+            OutTarget::Group(id) => self.output == Some(id),
+            OutTarget::Bus(id) => {
+                self.output.is_none() && self.out_bus.unwrap_or(crate::MAIN_OUT) == id
+            }
+        }
+    }
 }
 
 /// Gerendertes Signal einer eingefrorenen Spur.
@@ -815,6 +850,10 @@ impl Project {
             }
             if let Some(t) = self.track_index(id).map(|i| &self.tracks[i]) {
                 stack.extend(t.output);
+                stack.extend(t.extra_outputs.iter().filter_map(|o| match *o {
+                    OutTarget::Group(g) => Some(g),
+                    OutTarget::Bus(_) => None,
+                }));
                 stack.extend(t.sends.iter().filter(|s| s.on).map(|s| s.target));
             }
         }
@@ -873,6 +912,7 @@ impl Project {
                 input: TrackInput::default(),
                 input_bus: None,
                 out_bus: None,
+                extra_outputs: Vec::new(),
                 inserts: Vec::new(),
                 instrument: None,
                 output: None,
@@ -1479,6 +1519,7 @@ impl Project {
             input: TrackInput::default(),
             input_bus: None,
             out_bus: None,
+            extra_outputs: Vec::new(),
             inserts: Vec::new(),
             instrument: None,
             output: None,
@@ -1778,6 +1819,47 @@ impl Project {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn extra_outputs_block_loops_and_are_cleaned_on_load() {
+        use crate::{MAIN_OUT, MAX_EXTRA_OUTPUTS, OutTarget, Project, TrackKind};
+        let mut p = Project::default();
+        let src = p.add_track(TrackKind::Audio, "Quelle");
+        let a = p.add_track(TrackKind::Group, "A");
+        let b = p.add_track(TrackKind::Group, "B");
+        let (ia, ib) = (p.tracks[a].id, p.tracks[b].id);
+        // A feeds B through an extra output: B may not route back into A.
+        p.tracks[a].extra_outputs.push(OutTarget::Group(ib));
+        assert!(p.tracks[a].routes_to(ib));
+        assert!(!p.can_route(ib, ia));
+        assert!(p.can_route(p.tracks[src].id, ia));
+        // Loading: unknown busses and groups, doubles, the main output and too many go.
+        let me = p.tracks[src].id;
+        let t = &mut p.tracks[src];
+        t.extra_outputs = vec![
+            OutTarget::Bus(MAIN_OUT),
+            OutTarget::Bus(999),
+            OutTarget::Group(ia),
+            OutTarget::Group(ia),
+            OutTarget::Group(me),
+            OutTarget::Group(4242),
+        ];
+        assert!(p.sanitize() > 0);
+        assert_eq!(p.tracks[src].extra_outputs, vec![OutTarget::Group(ia)]);
+        let mut many = Vec::new();
+        for k in 0..10 {
+            let g = p.add_track(TrackKind::Group, format!("G{k}"));
+            many.push(OutTarget::Group(p.tracks[g].id));
+        }
+        p.tracks[src].extra_outputs = many;
+        p.sanitize();
+        assert_eq!(p.tracks[src].extra_outputs.len(), MAX_EXTRA_OUTPUTS);
+        // Removing an output bus removes it from the extra destinations as well.
+        let bus = p.io.add(true, true).unwrap();
+        p.tracks[src].extra_outputs = vec![OutTarget::Bus(bus)];
+        assert!(p.remove_io_bus(true, bus));
+        assert!(p.tracks[src].extra_outputs.is_empty());
+    }
 
     #[test]
     fn crossfade_fades_both_events_over_the_overlap_and_both_sound() {

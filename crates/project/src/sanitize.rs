@@ -151,6 +151,34 @@ impl Project {
                 t.out_bus = None;
             }
         }
+        // Weitere Ausgänge: nur vorhandene Busse und Gruppen, ohne Doppel und ohne den
+        // Hauptausgang, höchstens MAX_EXTRA_OUTPUTS. Schleifen verhindert die Engine.
+        let groups: Vec<crate::TrackId> = self
+            .tracks
+            .iter()
+            .filter(|t| t.kind == crate::TrackKind::Group)
+            .map(|t| t.id)
+            .collect();
+        for i in 0..self.tracks.len() {
+            let me = self.tracks[i].id;
+            let before = self.tracks[i].extra_outputs.clone();
+            let mut kept: Vec<crate::OutTarget> = Vec::new();
+            for o in &before {
+                let exists = match *o {
+                    crate::OutTarget::Group(g) => g != me && groups.contains(&g),
+                    crate::OutTarget::Bus(b) => self.io.output(b).is_some(),
+                };
+                if exists
+                    && !kept.contains(o)
+                    && !self.tracks[i].is_main_output(*o)
+                    && kept.len() < crate::MAX_EXTRA_OUTPUTS
+                {
+                    kept.push(*o);
+                }
+            }
+            fix(kept != before);
+            self.tracks[i].extra_outputs = kept;
+        }
         let click = self.click.sanitized();
 
         fix(click != self.click);

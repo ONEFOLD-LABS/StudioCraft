@@ -3,7 +3,7 @@
 
 use std::{collections::HashMap, sync::Arc};
 
-use studiocraft_project::{ClipId, FadeCurve, Project, TempoMap, TrackKind, db_to_gain};
+use studiocraft_project::{ClipId, FadeCurve, OutTarget, Project, TempoMap, TrackKind, db_to_gain};
 
 /// Ein Event, wie der Audio-Thread es braucht.
 #[derive(Debug, Clone)]
@@ -95,6 +95,9 @@ pub struct PlayTrack {
     pub bus: Option<usize>,
     /// Wohin das Signal nach dem Fader geht.
     pub output: Output,
+    /// Weitere Ziele desselben Signals (Spec „Routing und Busse“: mehrere Ziele); ohne
+    /// `output`, ohne Doppel und ohne verworfene Ziele.
+    pub extra: Vec<Output>,
     pub sends: Vec<PlaySend>,
     /// Audio-Spuren mit Monitor: Eingangskanal und ob Stereo (`first`, `first + 1`).
     pub monitor: Option<(u16, bool)>,
@@ -477,6 +480,24 @@ impl Song {
                     _ => None,
                 })
                 .collect();
+            let mut extra: Vec<Output> = Vec::new();
+            for o in &pt.extra_outputs {
+                let out = match *o {
+                    OutTarget::Group(id) => target(id),
+                    OutTarget::Bus(id) => {
+                        match project.io.outputs.iter().position(|b| b.id == id) {
+                            Some(0) => Output::Master,
+                            Some(k) => Output::Hw(k),
+                            None => continue,
+                        }
+                    }
+                };
+                let own = matches!(out, Output::Bus(b) if Some(b) == t.bus);
+                if !own && out != Output::Nowhere && out != t.output && !extra.contains(&out) {
+                    extra.push(out);
+                }
+            }
+            t.extra = extra;
         }
         // Reihenfolge: Quellen zuerst, dann Busse so, dass ein Bus nach allen
         // Bussen läuft, die in ihn speisen. Schleifen (sollte die Oberfläche
@@ -490,6 +511,10 @@ impl Song {
             if let Output::Bus(b) = t.output {
                 v.push(b);
             }
+            v.extend(t.extra.iter().filter_map(|o| match *o {
+                Output::Bus(b) => Some(b),
+                _ => None,
+            }));
             v
         };
         while !buses.is_empty() {
@@ -513,6 +538,8 @@ impl Song {
                         {
                             b.output = Output::Master;
                         }
+                        b.extra
+                            .retain(|o| !matches!(o, Output::Bus(x) if rest.contains(&Some(*x))));
                     }
                 }
             }

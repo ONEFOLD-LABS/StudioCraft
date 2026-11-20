@@ -1096,6 +1096,33 @@ impl EngineCore {
                         *o += t;
                     }
                 }
+                // Weitere Ausgänge: dasselbe Signal, je mit eigenem Latenzausgleich.
+                let g = track.out_gain.unwrap_or(1.0);
+                for (ei, out) in track.extra.iter().enumerate() {
+                    let st = &mut self.send_tmp[..n];
+                    st.copy_from_slice(tmp);
+                    if let Some(d) = lines
+                        .as_deref_mut()
+                        .and_then(|l| l.extras.get_mut(ei))
+                        .and_then(Option::as_mut)
+                    {
+                        d.process(st);
+                    }
+                    let target: Option<&mut [f32]> = match *out {
+                        Output::Hw(k) => self
+                            .hw_out
+                            .get_mut(k.wrapping_sub(1))
+                            .and_then(|b| b.get_mut(offset..offset + n)),
+                        Output::Master => Some(&mut dst[..]),
+                        Output::Bus(b) => self.bus_bufs.get_mut(b).map(|v| &mut v[..n]),
+                        Output::Nowhere => None,
+                    };
+                    if let Some(target) = target {
+                        for (o, t) in target.iter_mut().zip(st.iter()) {
+                            *o += t * g;
+                        }
+                    }
+                }
                 // Latenzausgleich: zusätzlich für den Ausgang.
                 if let Some(d) = lines.and_then(|l| l.direct.as_mut()) {
                     d.process(tmp);
@@ -2083,6 +2110,73 @@ mod tests {
         let mut out = [0.0f32; 64];
         core.process(&mut out);
         out[10]
+    }
+
+    #[test]
+    fn extra_outputs_send_the_same_signal_to_several_destinations() {
+        use studiocraft_project::{OutTarget, TrackKind};
+        // Main mix and a group at −6 dB: 1 + 0.5.
+        let v = routed(|p| {
+            let g = p.add_track(TrackKind::Group, "Gruppe");
+            p.tracks[g].volume_db = -6.0206;
+            let id = p.tracks[g].id;
+            p.tracks[0].extra_outputs.push(OutTarget::Group(id));
+        });
+        assert!((v - 1.5).abs() < 1e-3, "{v}");
+        // Output to the group plus the main mix as an extra destination: the same.
+        let v = routed(|p| {
+            let g = p.add_track(TrackKind::Group, "Gruppe");
+            p.tracks[g].volume_db = -6.0206;
+            p.tracks[0].output = Some(p.tracks[g].id);
+            p.tracks[0]
+                .extra_outputs
+                .push(OutTarget::Bus(studiocraft_project::MAIN_OUT));
+        });
+        assert!((v - 1.5).abs() < 1e-3, "{v}");
+        // The fader applies to every destination; a doubled destination counts once.
+        let v = routed(|p| {
+            let g = p.add_track(TrackKind::Group, "Gruppe");
+            let id = p.tracks[g].id;
+            p.tracks[0].volume_db = -6.0206;
+            p.tracks[0].extra_outputs.push(OutTarget::Group(id));
+            p.tracks[0].extra_outputs.push(OutTarget::Group(id));
+        });
+        assert!((v - 1.0).abs() < 1e-3, "{v}");
+        // A muted group as extra destination: only the main mix sounds.
+        let v = routed(|p| {
+            let g = p.add_track(TrackKind::Group, "Gruppe");
+            p.tracks[g].mute = true;
+            let id = p.tracks[g].id;
+            p.tracks[0].extra_outputs.push(OutTarget::Group(id));
+        });
+        assert_eq!(v, 1.0);
+    }
+
+    #[test]
+    fn extra_outputs_reach_further_output_buses() {
+        use std::collections::HashMap;
+        use studiocraft_project::{OutTarget, PoolClip, Project, TrackKind};
+        let mut p = Project::default();
+        let bus = p.io.add(true, true).unwrap();
+        p.add_track(TrackKind::Audio, "Quelle");
+        let c = p.add_clip(PoolClip {
+            name: "c".into(),
+            path: None,
+            sample_rate: 48_000,
+            frames: 48_000,
+        });
+        p.add_audio_event(0, 0, c).unwrap();
+        p.tracks[0].extra_outputs.push(OutTarget::Bus(bus));
+        let clips = HashMap::from([(c, vec![1.0f32; 96_000].into())]);
+        let song = Song::build(&p, &clips, 48_000);
+        assert_eq!(song.tracks[0].extra, vec![Output::Hw(1)]);
+        let (mut core, mut ctl) = engine(48_000, TempoMap::default());
+        ctl.send(Command::SetSong(Arc::new(song)));
+        ctl.send(Command::Play);
+        let mut out = [0.0f32; 64];
+        core.process(&mut out);
+        assert_eq!(out[10], 1.0, "main mix");
+        assert_eq!(core.hw_block(1)[10], 1.0, "further output bus");
     }
 
     #[test]
