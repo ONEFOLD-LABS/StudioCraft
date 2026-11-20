@@ -17,6 +17,8 @@
 )]
 
 mod keypad;
+#[cfg(target_os = "macos")]
+mod macos_open;
 
 use std::{path::Path, process::ExitCode, time::Duration};
 
@@ -63,6 +65,8 @@ struct App {
 
 impl eframe::App for App {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        #[cfg(target_os = "macos")]
+        self.open_from_finder(ui.ctx());
         self.window.ui(ui);
         if let Some(choice) = self.window.take_device_request() {
             self.switch_audio(&choice);
@@ -91,6 +95,23 @@ fn status_line(info: &OutputInfo) -> String {
 }
 
 impl App {
+    /// macOS: Dateien, die der Finder geschickt hat (Doppelklick, „Öffnen mit“, auf das
+    /// Dock-Symbol gezogen), wie Startparameter öffnen: Projekte öffnen, Audio importieren.
+    #[cfg(target_os = "macos")]
+    fn open_from_finder(&mut self, ctx: &egui::Context) {
+        macos_open::set_context(ctx);
+        for path in macos_open::take() {
+            let result = if path.extension().is_some_and(|e| e == file::EXTENSION) {
+                self.window.open(&path)
+            } else {
+                self.window.import_audio(&path, None).map(|_| ())
+            };
+            if let Err(e) = result {
+                self.window.notify(format!("{}: {e}", path.display()));
+            }
+        }
+    }
+
     /// Wechselt das Audiogerät ohne Neustart: der laufende Kern (Song, Plugins, Transport)
     /// zieht auf das neue Gerät um. Das geht nur mit derselben Abtastrate.
     fn switch_audio(&mut self, choice: &DeviceChoice) {
@@ -293,6 +314,9 @@ fn main() -> ExitCode {
                 return ExitCode::FAILURE;
             }
         };
+    // macOS: Dokumente aus dem Finder empfangen (winits Delegate gibt es jetzt).
+    #[cfg(target_os = "macos")]
+    macos_open::install();
     let eframe_app = eframe::create_native(
         "StudioCraft",
         options,

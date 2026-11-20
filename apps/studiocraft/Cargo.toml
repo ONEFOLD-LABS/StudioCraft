@@ -15,6 +15,12 @@ eframe = { version = "0.37", default-features = false, features = ["default_font
 # (numeric keypad, Issue #3).
 winit = { version = "0.30", default-features = false }
 
+# macOS: Dateien aus dem Finder öffnen (src/macos_open.rs); schon über eframe im Lockfile.
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSArray", "NSString", "NSURL"] }
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSApplication", "NSResponder"] }
+
 [build-dependencies]
 # Symbol und VERSIONINFO für studiocraft.exe; build.rs nutzt es nur für Windows-Ziele.
 winresource = "0.1"
