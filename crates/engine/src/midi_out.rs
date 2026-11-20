@@ -44,7 +44,7 @@ pub struct MidiOutThread {
 
 /// Namen der vorhandenen MIDI-Ausgänge (ohne Durchschleif-Ports).
 pub fn output_ports() -> Vec<String> {
-    let Ok(out) = midir::MidiOutput::new("StudioCraft") else {
+    let Ok(out) = crate::midi_backend::MidiOutput::new("StudioCraft") else {
         return Vec::new();
     };
     out.ports()
@@ -94,7 +94,7 @@ impl Drop for MidiOutThread {
 /// Offene Verbindungen, nach Port-Name; eine fehlgeschlagene wird erst nach einer Sekunde
 /// erneut versucht.
 struct Connections {
-    open: HashMap<String, midir::MidiOutputConnection>,
+    open: HashMap<String, crate::midi_backend::MidiOutputConnection>,
     failed: HashMap<String, u64>,
 }
 
@@ -127,8 +127,8 @@ impl Connections {
     }
 }
 
-fn connect(name: &str) -> Option<midir::MidiOutputConnection> {
-    let out = midir::MidiOutput::new("StudioCraft").ok()?;
+fn connect(name: &str) -> Option<crate::midi_backend::MidiOutputConnection> {
+    let out = crate::midi_backend::MidiOutput::new("StudioCraft").ok()?;
     let port = out
         .ports()
         .into_iter()

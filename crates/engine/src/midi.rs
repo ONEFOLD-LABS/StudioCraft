@@ -68,14 +68,15 @@ pub type MidiSender = Arc<Mutex<rtrb::Producer<MidiMsg>>>;
 
 /// Offene MIDI-Eingänge. Beim Drop werden die Verbindungen geschlossen.
 pub struct MidiInputs {
-    _connections: Vec<midir::MidiInputConnection<()>>,
+    _connections: Vec<crate::midi_backend::MidiInputConnection<()>>,
     pub ports: Vec<String>,
 }
 
 impl MidiInputs {
     /// Öffnet alle vorhandenen Eingänge und leitet Nachrichten an `sender`.
     pub fn open_all(sender: &MidiSender) -> Result<Self, String> {
-        let probe = midir::MidiInput::new("StudioCraft").map_err(|e| format!("MIDI: {e}"))?;
+        let probe =
+            crate::midi_backend::MidiInput::new("StudioCraft").map_err(|e| format!("MIDI: {e}"))?;
         let ports = probe.ports();
         let mut connections = Vec::new();
         let mut names = Vec::new();
@@ -85,7 +86,7 @@ impl MidiInputs {
             if name.to_lowercase().contains("through") {
                 continue;
             }
-            let Ok(input) = midir::MidiInput::new("StudioCraft") else {
+            let Ok(input) = crate::midi_backend::MidiInput::new("StudioCraft") else {
                 continue;
             };
             let tx = sender.clone();
