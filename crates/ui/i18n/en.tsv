@@ -29,6 +29,11 @@ Position	Position
 Folgt dem Tempo	Follows Tempo
 Audio wird gedehnt, sodass es zum Projekttempo passt (Tonhöhe bleibt)	Audio is stretched to fit the project tempo (pitch stays)
 Datei-Tempo	File Tempo
+Stretch	Stretch
+Rhythmisch	Rhythmic
+Flächig	Pad
+Rhythmisch: knackige Anschläge · Flächig: weiche Klänge, mehr Rechenzeit	Rhythmic: crisp attacks · Pad: smooth sounds, more CPU time
+Audio wird gedehnt … ({n})	Stretching audio… ({n})
 MIDI-Datei importieren …	Import MIDI File…
 MIDI-Datei exportieren …	Export MIDI File…
 MIDI-Datei importieren	Import MIDI File

@@ -6,7 +6,7 @@
 //! gelb. Zeitwerte wirken relativ auf alle (Anfang einen Takt später: alle einen Takt später),
 //! Name und Stumm gelten für alle gleich. Jede Änderung ist ein Rückgängig-Schritt.
 
-use crate::i18n::tr;
+use crate::i18n::{tr, tr_dyn};
 use egui::{Key, RichText, TextEdit, Ui};
 use studiocraft_project::{EventId, Position};
 
@@ -26,6 +26,8 @@ enum Edit {
     Musical(bool),
     /// Tempo der Datei in BPM (Audio, das dem Tempo folgt).
     FileTempo(f64),
+    /// Art des Time-Stretch.
+    Stretch(studiocraft_project::StretchMode),
 }
 
 /// Die gewählten Events, die es gibt, und das früheste davon (Anzeige und Bezug).
@@ -116,6 +118,25 @@ pub(crate) fn show(w: &mut ProjectWindow, ui: &mut Ui) {
             {
                 edits.push(Edit::FileTempo(v));
             }
+            if ev.musical.is_some() {
+                let mut mode = ev.stretch_mode;
+                let label = ui.weak(tr("Stretch"));
+                egui::ComboBox::from_id_salt("stretch-art")
+                    .selected_text(tr_dyn(mode.label()))
+                    .show_ui(ui, |ui| {
+                        for m in studiocraft_project::StretchMode::ALL {
+                            ui.selectable_value(&mut mode, m, tr_dyn(m.label()));
+                        }
+                    })
+                    .response
+                    .labelled_by(label.id)
+                    .on_hover_text(tr(
+                        "Rhythmisch: knackige Anschläge · Flächig: weiche Klänge, mehr Rechenzeit",
+                    ));
+                if mode != ev.stretch_mode {
+                    edits.push(Edit::Stretch(mode));
+                }
+            }
         }
         for edit in edits {
             apply(w, &ids, id, edit);
@@ -172,7 +193,11 @@ fn apply(w: &mut ProjectWindow, ids: &[EventId], reference: EventId, edit: Edit)
             continue;
         };
         let own = match &edit {
-            Edit::Name(_) | Edit::Mute(_) | Edit::Musical(_) | Edit::FileTempo(_) => edit.clone(),
+            Edit::Name(_)
+            | Edit::Mute(_)
+            | Edit::Musical(_)
+            | Edit::FileTempo(_)
+            | Edit::Stretch(_) => edit.clone(),
             Edit::Start(t) => Edit::Start(shift(ev.start.0, delta(*t, r.start.0))),
             Edit::End(t) => Edit::End(shift(ev.end(), delta(*t, r.end()))),
             Edit::Length(l) => Edit::Length(shift(ev.length, delta(*l, r.length)).max(1)),
@@ -242,6 +267,11 @@ fn apply_one(p: &mut studiocraft_project::Project, id: EventId, edit: Edit) {
                 p.set_musical(id, Some(bpm));
             }
         }
+        Edit::Stretch(mode) => {
+            if let Some(ev) = p.event_mut(id).filter(|e| e.musical.is_some()) {
+                ev.stretch_mode = mode;
+            }
+        }
     }
 }
 
@@ -266,11 +296,23 @@ mod tests {
         assert_eq!((ev.musical, ev.length), (Some(90.0), 1440));
         apply(&mut w, &[id], id, Edit::FileTempo(120.0));
         assert_eq!(w.project.event(id).unwrap().length, 1920);
+        apply(
+            &mut w,
+            &[id],
+            id,
+            Edit::Stretch(studiocraft_project::StretchMode::Pad),
+        );
+        assert_eq!(
+            w.project.event(id).unwrap().stretch_mode,
+            studiocraft_project::StretchMode::Pad
+        );
         apply(&mut w, &[id], id, Edit::Musical(false));
         assert_eq!(w.project.event(id).unwrap().musical, None);
         // Jede Änderung ist ein Schritt.
         w.undo();
         assert_eq!(w.project.event(id).unwrap().musical, Some(120.0));
+        w.undo();
+        assert!(w.project.event(id).unwrap().stretch_mode.is_standard());
     }
 
     fn window() -> (ProjectWindow, EventId) {

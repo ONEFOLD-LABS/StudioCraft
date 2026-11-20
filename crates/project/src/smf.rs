@@ -465,6 +465,7 @@ impl Project {
                 color: None,
                 shared: None,
                 musical: None,
+                stretch_mode: crate::StretchMode::Standard,
             });
             added.push(i);
         }
