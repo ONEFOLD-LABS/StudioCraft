@@ -75,7 +75,7 @@ $Stage = Join-Path $TargetDir "windows-package\$Arch"
 Remove-Item -Recurse -Force $Stage -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force -Path $Stage | Out-Null
 Copy-Item (Join-Path $Bin 'studiocraft.exe'), (Join-Path $Bin 'studiocraft-cli.exe') $Stage
-foreach ($f in 'NOTICE', 'LICENSE-MIT', 'LICENSE-APACHE') { Copy-Item (Join-Path $Root $f) $Stage }
+foreach ($f in 'NOTICE', 'LICENSE-MIT', 'LICENSE-APACHE', 'THIRD-PARTY-LICENSES.txt') { Copy-Item (Join-Path $Root $f) $Stage }
 
 # Smoke tests where this machine can run the build. The app is a GUI program: its stdout must
 # still reach a pipe, because the plugin scan runs it as a child process and reads the result

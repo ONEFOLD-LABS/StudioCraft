@@ -46,7 +46,7 @@ warn() {
 # Lizenz- und Hinweisdateien in ein Paketverzeichnis kopieren.
 copy_docs() {
   local dest="$1" f
-  for f in README.md LICENSE-MIT LICENSE-APACHE NOTICE; do
+  for f in README.md LICENSE-MIT LICENSE-APACHE NOTICE THIRD-PARTY-LICENSES.txt; do
     if [[ -f "$ROOT/$f" ]]; then cp "$ROOT/$f" "$dest/"; fi
   done
 }
