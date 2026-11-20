@@ -252,6 +252,15 @@ impl Project {
                         .filter(|b| b.is_finite() && e.clip.is_some())
                         .map(|b| b.clamp(BPM.0, BPM.1))
                 );
+                // Warp-Marker: sortiert, streng steigend, begrenzt.
+                let mut warp = e.warp.clone();
+                crate::warp::clean(&mut warp);
+                for p in &mut warp {
+                    p.frame = p.frame.min(MAX_FRAMES);
+                    p.tick = p.tick.min(MAX_TICKS);
+                }
+                crate::warp::clean(&mut warp);
+                clamp!(e.warp, warp);
                 clamp!(e.comp, e.comp.min(MAX_LANE));
                 for n in &mut e.notes {
                     let max = MAX_TICKS as i64;

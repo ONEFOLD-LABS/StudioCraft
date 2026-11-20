@@ -5451,6 +5451,52 @@ mod tests {
     }
 
     #[test]
+    fn sample_editor_puts_warp_markers_on_hitpoints() {
+        // Ein Anschlag je Viertel bei 120 BPM; die Datei folgt dem Tempo.
+        let (mut w, id) = one_event_window();
+        assert!(w.project.set_musical(id, Some(120.0)));
+        w.open_sample_editor(id);
+        w.clear_history();
+        let mut h = window_harness(w);
+        h.run_steps(2);
+        assert!(h.query_by_label("Warp an Hitpoints").is_some());
+        h.get_by_label("Hitpoints erkennen").click();
+        h.run_steps(2);
+        h.get_by_label("Warp an Hitpoints").click();
+        h.run_steps(2);
+        let warp = h.state().project.event(id).unwrap().warp.clone();
+        assert!(warp.len() >= 10, "{warp:?}");
+        // Jeder Marker liegt auf einer Sechzehntel, Frames und Ticks steigen.
+        assert!(warp.iter().all(|p| p.tick % 240 == 0));
+        assert!(
+            warp.windows(2)
+                .all(|w| w[1].frame > w[0].frame && w[1].tick > w[0].tick)
+        );
+        h.state_mut().undo();
+        assert!(h.state().project.event(id).unwrap().warp.is_empty());
+        h.state_mut().redo();
+        h.run_steps(2);
+        h.get_by_label("Warp löschen").click();
+        h.run_steps(2);
+        assert!(h.state().project.event(id).unwrap().warp.is_empty());
+    }
+
+    #[test]
+    fn renders_sample_editor_with_warp_markers() {
+        shot("sample-editor-warp", |w| {
+            w.project = Project::default();
+            let id = w
+                .import_clip("Beat", None, tone_clip(4.0, 220.0), Some((usize::MAX, 0)))
+                .unwrap();
+            assert!(w.project.set_musical(id, Some(100.0)));
+            w.open_sample_editor(id);
+            for f in [24_000, 50_000, 76_000] {
+                w.project.add_warp(id, f);
+            }
+        });
+    }
+
+    #[test]
     fn renders_sample_editor() {
         shot("sample-editor", |w| {
             w.project = Project::default();

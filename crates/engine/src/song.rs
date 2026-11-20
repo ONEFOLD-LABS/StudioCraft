@@ -643,9 +643,12 @@ fn musical_render(
     let Some(bpm) = e.musical.filter(|b| b.is_finite() && *b > 0.0) else {
         return Ok(None);
     };
-    if !tempo.varies() && (tempo.bpm - bpm).abs() < 1e-9 {
+    if !tempo.varies() && (tempo.bpm - bpm).abs() < 1e-9 && e.warp.is_empty() {
         return Ok(None);
     }
+    let Some(map) = e.content_map(rate) else {
+        return Ok(None);
+    };
     let start = tempo.frames(e.start.0, rate);
     let frames = tempo
         .frames(e.end(), rate)
@@ -662,16 +665,17 @@ fn musical_render(
             rate,
             grain,
             tempo_key(tempo),
+            &e.warp,
         ),
     );
-    let (offset, ev_tick) = (e.offset as f64, e.start.0 as f64);
+    // Projekt-Tick → Ticks ab Clip-Anfang (über die Warp-Marker) → Frame im Clip.
+    let origin = map.tick_at(e.offset as f64) - e.start.0 as f64;
     let r = f64::from(rate);
-    let per_tick = 60.0 / bpm / studiocraft_project::TICKS_PER_QUARTER as f64 * r;
     let (src, tempo) = (samples.clone(), tempo.clone());
     let make = move || {
         crate::stretch::render(&src, rate, grain, frames as usize, |j| {
             let tick = tempo.ticks_at_seconds((start as f64 + j) / r);
-            offset + (tick - ev_tick) * per_tick
+            map.frame_at(origin + tick)
         })
     };
     match live {
@@ -855,6 +859,46 @@ mod tests {
         // Gleiches Projekt: dasselbe Ergebnis aus dem Zwischenspeicher.
         let again = Song::build(&p, &clips, 48_000);
         assert!(Arc::ptr_eq(&again.tracks[0].events[0].samples, &ev.samples));
+    }
+
+    #[test]
+    fn warp_markers_move_a_late_hit_onto_the_beat() {
+        let mut p = Project::default();
+        p.add_track(TrackKind::Audio, "A");
+        let c = p.add_clip(PoolClip {
+            name: "hit".into(),
+            path: None,
+            sample_rate: 48_000,
+            frames: 48_000,
+        });
+        let id = p.add_audio_event(0, 0, c).unwrap();
+        assert!(p.set_musical(id, Some(120.0)));
+        // Ein kurzer Schlag bei Frame 30 000 (eine Viertel bei 120 BPM wäre 24 000).
+        let mut samples = vec![0.0f32; 96_000];
+        for i in 30_000..30_200 {
+            let v = ((i - 30_000) as f32 * 0.3).sin();
+            samples[i * 2] = v;
+            samples[i * 2 + 1] = v;
+        }
+        let clips = HashMap::from([(c, Arc::<[f32]>::from(samples))]);
+        let loudest = |song: &Song| {
+            let s = &song.tracks[0].events[0].samples;
+            (0..s.len() / 2)
+                .max_by(|&a, &b| s[a * 2].abs().total_cmp(&s[b * 2].abs()))
+                .unwrap_or(0)
+        };
+        let plain = Song::build(&p, &clips, 48_000);
+        assert!((30_000..30_200).contains(&loudest(&plain)));
+        p.event_mut(id).unwrap().warp = vec![
+            studiocraft_project::WarpPoint { frame: 0, tick: 0 },
+            studiocraft_project::WarpPoint {
+                frame: 30_000,
+                tick: 960,
+            },
+        ];
+        let warped = Song::build(&p, &clips, 48_000);
+        let at = loudest(&warped);
+        assert!((23_700..24_500).contains(&at), "Schlag bei {at}");
     }
 
     #[test]
