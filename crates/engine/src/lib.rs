@@ -31,6 +31,7 @@ mod midi_backend;
 pub mod midi_out;
 pub mod monitor;
 pub mod offline;
+pub mod onsets;
 pub mod transport;
 
 pub mod output;
