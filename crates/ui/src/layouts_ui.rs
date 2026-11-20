@@ -2,6 +2,7 @@
 //! groß sie sind, unter einem Namen gespeichert und per Strg+Alt+1 bis 9 abrufbar. Die
 //! Layouts liegen im Projekt und gehören nicht zum Undo-Verlauf.
 
+use crate::i18n::tr;
 use egui::Ui;
 use studiocraft_project::NamedLayout;
 use studiocraft_project::layout::{MAX_LAYOUTS, clip_name};
@@ -14,7 +15,7 @@ impl ProjectWindow {
     pub(crate) fn save_layout(&mut self, name: &str) {
         let name = clip_name(name.trim());
         if name.is_empty() {
-            self.message = Some("Bitte einen Namen für das Layout eingeben".into());
+            self.message = Some(tr("Bitte einen Namen für das Layout eingeben").into());
             return;
         }
         let layout = self.project.layout.clone();
@@ -23,8 +24,9 @@ impl ProjectWindow {
         } else if self.project.layouts.len() < MAX_LAYOUTS {
             self.project.layouts.push(NamedLayout { name, layout });
         } else {
-            self.message = Some(format!(
-                "Höchstens {MAX_LAYOUTS} Layouts; erst eins entfernen"
+            self.message = Some(crate::i18n::trf(
+                "Höchstens {max} Layouts; erst eins entfernen",
+                &[("max", &MAX_LAYOUTS)],
             ));
         }
     }
@@ -37,23 +39,28 @@ impl ProjectWindow {
             .map(|l| l.layout.clone());
         match layout {
             Some(l) => self.apply_layout(l),
-            None => self.message = Some(format!("Layout {slot} ist nicht belegt")),
+            None => {
+                self.message = Some(crate::i18n::trf(
+                    "Layout {slot} ist nicht belegt",
+                    &[("slot", &slot)],
+                ))
+            }
         }
     }
 
     /// Untermenü „Layouts“ im Menü Ansicht: speichern, abrufen, entfernen.
     pub(crate) fn layouts_menu(&mut self, ui: &mut Ui) {
         ui.horizontal(|ui| {
-            let l = ui.label("Name");
+            let l = ui.label(tr("Name"));
             ui.add(egui::TextEdit::singleline(&mut self.layout_name).desired_width(140.0))
                 .labelled_by(l.id);
-            if ui.button("Aktuelles speichern").clicked() {
+            if ui.button(tr("Aktuelles speichern")).clicked() {
                 let name = std::mem::take(&mut self.layout_name);
                 self.save_layout(&name);
             }
         });
         if self.project.layouts.is_empty() {
-            ui.weak("Noch keine Layouts gespeichert");
+            ui.weak(tr("Noch keine Layouts gespeichert"));
             return;
         }
         ui.separator();
@@ -70,8 +77,11 @@ impl ProjectWindow {
                     recall = Some(slot);
                 }
                 if ui
-                    .small_button("x")
-                    .on_hover_text(format!("Layout {slot} entfernen"))
+                    .small_button(tr("x"))
+                    .on_hover_text(crate::i18n::trf(
+                        "Layout {slot} entfernen",
+                        &[("slot", &slot)],
+                    ))
                     .clicked()
                 {
                     remove = Some(i);

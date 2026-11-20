@@ -82,8 +82,12 @@ impl ProjectWindow {
         let result = match action {
             Action::Open => {
                 let exts = vec![EXTENSION.to_owned(), "zip".to_owned()];
-                self.browser
-                    .pick(ctx, Kind::Open, "StudioCraft-Projekt", exts);
+                self.browser.pick(
+                    ctx,
+                    Kind::Open,
+                    crate::i18n::tr("StudioCraft-Projekt"),
+                    exts,
+                );
                 Ok(())
             }
             Action::Save | Action::SaveAs | Action::SaveVersion => self
@@ -94,14 +98,15 @@ impl ProjectWindow {
                     .iter()
                     .map(|e| (*e).to_owned())
                     .collect();
-                self.browser.pick(ctx, Kind::Import, "Audiodateien", exts);
+                self.browser
+                    .pick(ctx, Kind::Import, crate::i18n::tr("Audiodateien"), exts);
                 Ok(())
             }
             Action::ExportMixdown => self.mixdown_bytes("wav").and_then(|(name, bytes, peak)| {
                 if peak > 1.0 {
-                    self.message = Some(format!(
-                        "Export übersteuert (Spitze {:+.1} dBFS) – Ausgang leiser stellen",
-                        20.0 * peak.log10()
+                    self.message = Some(crate::i18n::trf(
+                        "Export übersteuert (Spitze {db} dBFS) – Ausgang leiser stellen",
+                        &[("db", &format!("{:+.1}", 20.0 * peak.log10()))],
                     ));
                 }
                 download(&name, &bytes, "audio/wav")

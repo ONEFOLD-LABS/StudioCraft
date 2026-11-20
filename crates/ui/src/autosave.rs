@@ -11,6 +11,7 @@
 //! entfernt sie beim Beenden. Liegt sie beim Start noch da, bietet ein Dialog die neueste
 //! Sicherung an (ihr Pfad steht in `autosave/last.txt`).
 
+use crate::i18n::tr;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -111,7 +112,10 @@ impl ProjectWindow {
                 let stem = p.file_stem()?.to_string_lossy().into_owned();
                 Some((dir, stem))
             }
-            None => Some((self.autosave.dir.clone()?, "Unbenannt".into())),
+            None => Some((
+                self.autosave.dir.clone()?,
+                crate::i18n::tr("Unbenannt").into(),
+            )),
         }
     }
 
@@ -138,8 +142,13 @@ impl ProjectWindow {
         {
             match h.join() {
                 Ok(Ok(path)) => self.note_last_backup(&path),
-                Ok(Err(e)) => self.message = Some(format!("Sicherung fehlgeschlagen: {e}")),
-                Err(_) => self.message = Some("Sicherung fehlgeschlagen".into()),
+                Ok(Err(e)) => {
+                    self.message = Some(crate::i18n::trf(
+                        "Sicherung fehlgeschlagen: {e}",
+                        &[("e", &e)],
+                    ))
+                }
+                Err(_) => self.message = Some(tr("Sicherung fehlgeschlagen").into()),
             }
         }
         if self.autosave.minutes == 0 {
@@ -181,7 +190,12 @@ impl ProjectWindow {
         if let Some(h) = self.autosave.writer.take() {
             match h.join() {
                 Ok(Ok(path)) => self.note_last_backup(&path),
-                Ok(Err(e)) => self.message = Some(format!("Sicherung fehlgeschlagen: {e}")),
+                Ok(Err(e)) => {
+                    self.message = Some(crate::i18n::trf(
+                        "Sicherung fehlgeschlagen: {e}",
+                        &[("e", &e)],
+                    ))
+                }
                 Err(_) => {}
             }
         }
@@ -247,28 +261,31 @@ impl ProjectWindow {
         self.open(backup)?;
         self.project_path = original;
         self.saved = None;
-        self.message = Some(format!("Sicherung geöffnet: {}", backup.display()));
+        self.message = Some(crate::i18n::trf(
+            "Sicherung geöffnet: {path}",
+            &[("path", &backup.display())],
+        ));
         Ok(())
     }
 
     /// Untermenü Datei → „Automatisch sichern“: Abstand und Anzahl.
     pub(crate) fn autosave_menu(&mut self, ui: &mut egui::Ui) {
-        ui.menu_button("Automatisch sichern", |ui| {
+        ui.menu_button(tr("Automatisch sichern"), |ui| {
             let mut changed = false;
             for (m, label) in [
-                (0, "Aus"),
-                (1, "Jede Minute"),
-                (2, "Alle 2 Minuten"),
-                (5, "Alle 5 Minuten"),
-                (10, "Alle 10 Minuten"),
-                (15, "Alle 15 Minuten"),
+                (0, tr("Aus")),
+                (1, tr("Jede Minute")),
+                (2, tr("Alle 2 Minuten")),
+                (5, tr("Alle 5 Minuten")),
+                (10, tr("Alle 10 Minuten")),
+                (15, tr("Alle 15 Minuten")),
             ] {
                 changed |= ui
                     .radio_value(&mut self.autosave.minutes, m, label)
                     .changed();
             }
             ui.separator();
-            ui.menu_button("Anzahl Sicherungen", |ui| {
+            ui.menu_button(tr("Anzahl Sicherungen"), |ui| {
                 for n in [3u32, 5, 10, 20, 50] {
                     changed |= ui
                         .radio_value(&mut self.autosave.keep, n, n.to_string())
@@ -288,18 +305,21 @@ impl ProjectWindow {
             return;
         };
         let mut choice = None;
-        egui::Window::new("Wiederherstellen")
+        egui::Window::new(tr("Wiederherstellen"))
             .collapsible(false)
             .resizable(false)
             .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
             .show(ctx, |ui| {
-                ui.label("StudioCraft wurde nicht sauber beendet.");
-                ui.label(format!("Neueste Sicherung: {}", backup.display()));
+                ui.label(tr("StudioCraft wurde nicht sauber beendet."));
+                ui.label(crate::i18n::trf(
+                    "Neueste Sicherung: {path}",
+                    &[("path", &backup.display())],
+                ));
                 ui.horizontal(|ui| {
-                    if ui.button("Sicherung öffnen").clicked() {
+                    if ui.button(tr("Sicherung öffnen")).clicked() {
                         choice = Some(true);
                     }
-                    if ui.button("Verwerfen").clicked() {
+                    if ui.button(tr("Verwerfen")).clicked() {
                         choice = Some(false);
                     }
                 });

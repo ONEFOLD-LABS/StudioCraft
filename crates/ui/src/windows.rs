@@ -6,6 +6,7 @@
 //! Solange ein Inhalt im eigenen Fenster liegt, zeigt die untere Zone an seiner Stelle nur
 //! einen Hinweis, damit nichts doppelt gezeichnet wird.
 
+use crate::i18n::tr;
 use egui::{Context, Ui, ViewportBuilder, ViewportClass, ViewportId};
 
 use crate::settings::{WindowRect, WindowRects};
@@ -73,7 +74,7 @@ impl ProjectWindow {
         let lower = (self.show_lower, self.lower);
         let id = self.selection.first().copied().or(self.key_editor.part);
         let Some(ev) = id.and_then(|i| self.project.event(i)) else {
-            self.message = Some("Erst ein Event oder einen Part auswählen".into());
+            self.message = Some(tr("Erst ein Event oder einen Part auswählen").into());
             return;
         };
         let (id, audio) = (ev.id, ev.clip.is_some());
@@ -102,8 +103,8 @@ impl ProjectWindow {
     /// Hinweis in der unteren Zone, solange ihr Inhalt im eigenen Fenster liegt.
     pub(crate) fn own_window_placeholder(&mut self, ui: &mut Ui, zone: LowerZone) {
         ui.add_space(12.0);
-        ui.weak("Läuft im eigenen Fenster.");
-        if ui.button("Zurückholen").clicked() {
+        ui.weak(tr("Läuft im eigenen Fenster."));
+        if ui.button(tr("Zurückholen")).clicked() {
             match zone {
                 LowerZone::Mixer => self.windows.mixer = false,
                 _ => self.windows.editor = None,
@@ -115,7 +116,11 @@ impl ProjectWindow {
     pub(crate) fn show_windows(&mut self, ctx: &Context) {
         self.window_pointer_down = false;
         if self.windows.mixer {
-            let b = builder("Mixer", self.windows.open_mixer, MIXER_SIZE);
+            let b = builder(
+                crate::i18n::tr("Mixer"),
+                self.windows.open_mixer,
+                MIXER_SIZE,
+            );
             let (open, rect) = ctx.show_viewport_immediate(
                 ViewportId::from_hash_of("mixer-fenster"),
                 b,
@@ -128,8 +133,8 @@ impl ProjectWindow {
         }
         if let Some(kind) = self.windows.editor {
             let (title, zone) = match kind {
-                EditorWindow::Key => ("Key-Editor", LowerZone::Editor),
-                EditorWindow::Sample => ("Sample-Editor", LowerZone::SampleEditor),
+                EditorWindow::Key => (tr("Key-Editor"), LowerZone::Editor),
+                EditorWindow::Sample => (tr("Sample-Editor"), LowerZone::SampleEditor),
             };
             let b = builder(title, self.windows.open_editor, EDITOR_SIZE);
             let (open, rect) = ctx.show_viewport_immediate(
@@ -162,7 +167,7 @@ impl ProjectWindow {
         let mut open = true;
         let body = |w: &mut Self, ui: &mut Ui, open: &mut bool| {
             ui.horizontal(|ui| {
-                if ui.button("In die untere Zone").clicked() {
+                if ui.button(tr("In die untere Zone")).clicked() {
                     *open = false;
                     w.show_lower = true;
                     w.lower = zone;

@@ -34,7 +34,9 @@ impl ProjectWindow {
         self.project_path
             .as_ref()
             .and_then(|p| p.file_stem())
-            .map_or("Unbenannt".into(), |s| s.to_string_lossy().into_owned())
+            .map_or(crate::i18n::tr("Unbenannt").into(), |s| {
+                s.to_string_lossy().into_owned()
+            })
     }
 
     /// Das Projekt samt Audio als zip-Bündel: (Dateiname, Bytes).
@@ -129,7 +131,10 @@ impl ProjectWindow {
         );
         self.saved = Some(saved);
         if !missing.is_empty() {
-            self.message = Some(format!("Fehlende Audiodateien: {}", missing.join(", ")));
+            self.message = Some(crate::i18n::trf(
+                "Fehlende Audiodateien: {liste}",
+                &[("liste", &missing.join(", "))],
+            ));
         }
         Ok(())
     }
@@ -185,7 +190,7 @@ fn read_zip(bytes: &[u8]) -> Result<(Project, HashMap<String, Vec<u8>>), String>
         let path = path.to_string_lossy().replace('\\', "/");
         total = total.saturating_add(entry.size());
         if total > MAX_UNPACKED {
-            return Err("zip: zu groß".into());
+            return Err(crate::i18n::tr("zip: zu groß").into());
         }
         let mut data = Vec::new();
         (&mut entry)
@@ -197,7 +202,7 @@ fn read_zip(bytes: &[u8]) -> Result<(Project, HashMap<String, Vec<u8>>), String>
     let (project_path, project_bytes) = entries
         .iter()
         .find(|(p, _)| p.ends_with(&format!(".{EXTENSION}")))
-        .ok_or_else(|| format!("zip: keine .{EXTENSION}-Datei"))?;
+        .ok_or_else(|| crate::i18n::trf("zip: keine .{ext}-Datei", &[("ext", &EXTENSION)]))?;
     let base = project_path
         .rsplit_once('/')
         .map_or(String::new(), |(d, _)| format!("{d}/"));
