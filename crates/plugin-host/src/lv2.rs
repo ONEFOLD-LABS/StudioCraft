@@ -6,6 +6,7 @@
 //! bekommen die Summe und speisen beide Kanäle), Control-Ports als Parameter, MIDI über einen
 //! Atom-Port, Latenz über den Latenz-Port. Zustand, Presets und Fenster folgen.
 
+pub use crate::info::Preset as Lv2Preset;
 use std::{
     collections::HashMap,
     ffi::{CStr, CString, c_char, c_void},
@@ -1050,13 +1051,6 @@ pub struct Lv2Handle {
     /// Eingebettete Oberfläche laut Beschreibung (einmal nachgeschlagen).
     ui: OnceLock<Option<crate::lv2_gui::UiInfo>>,
     gui: Option<Box<crate::lv2_gui::Lv2Gui>>,
-}
-
-/// Ein Preset eines Plugins: URI und Anzeigename.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Lv2Preset {
-    pub uri: String,
-    pub name: String,
 }
 
 /// Auf dem Stack angelegte URID-Map/-Unmap für lilv-Aufrufe.

@@ -7,6 +7,7 @@
 //! Ergebnisse je Datei (Pfad, Änderungszeit, Größe) bleiben in einer Cache-Datei, damit nur
 //! neue oder geänderte Dateien erneut geprüft werden.
 
+pub use crate::info::{SCAN_FLAG, ScanOptions, ScanReport};
 use std::{
     collections::HashMap,
     io::Read,
@@ -17,54 +18,11 @@ use std::{
 
 use crate::scan::{PluginInfo, find_all, scan_bundle, sort_plugins};
 
-/// Befehlszeilen-Schalter des Kindprozesses: `<programm> --studiocraft-plugin-scan <datei>`.
-pub const SCAN_FLAG: &str = "--studiocraft-plugin-scan";
-
 /// Letzte Zeile eines vollständigen Scans; fehlt sie, gilt der Kindprozess als abgestürzt.
 const DONE: &str = "DONE";
 
 /// Höchstens so viel Ausgabe je Kindprozess (Schutz gegen endlose Ausgabe).
 const MAX_OUTPUT: u64 = 4 << 20;
-
-/// Einstellungen für [`scan_isolated`].
-#[derive(Debug, Clone)]
-pub struct ScanOptions {
-    /// Programm, das [`run_scan_child`] bei [`SCAN_FLAG`] aufruft (meist das eigene).
-    pub exe: PathBuf,
-    /// Cache-Datei; `None`: kein Cache, alles wird geprüft.
-    pub cache: Option<PathBuf>,
-    /// So lange darf ein Kindprozess je Datei brauchen.
-    pub timeout: Duration,
-    /// Höchstzahl gleichzeitiger Kindprozesse.
-    pub parallel: usize,
-    /// Auch LV2-Plugins aufnehmen (lilv findet sie über seine eigenen Pfade).
-    pub lv2: bool,
-}
-
-impl ScanOptions {
-    pub fn new(exe: PathBuf, cache: Option<PathBuf>) -> Self {
-        Self {
-            exe,
-            cache,
-            timeout: Duration::from_secs(20),
-            parallel: std::thread::available_parallelism()
-                .map_or(2, |n| n.get())
-                .clamp(1, 8),
-            lv2: true,
-        }
-    }
-}
-
-/// Ergebnis von [`scan_isolated`].
-#[derive(Debug, Clone, Default, PartialEq)]
-pub struct ScanReport {
-    /// Gefundene Plugins, nach Name sortiert.
-    pub plugins: Vec<PluginInfo>,
-    /// Dateien, die sich nicht laden ließen (ohne Absturz), mit Meldung.
-    pub errors: Vec<String>,
-    /// Gesperrte Dateien (Absturz oder Zeitüberschreitung beim Scan) mit Grund.
-    pub blocked: Vec<(PathBuf, String)>,
-}
 
 /// Kindprozess: Ist `args[1]` [`SCAN_FLAG`], wird die Datei `args[2]` geprüft, das Ergebnis
 /// nach stdout geschrieben und der Exit-Code zurückgegeben. Sonst `None` (normaler Start).

@@ -18,6 +18,10 @@
     )
 )]
 
+mod info;
+#[cfg(target_arch = "wasm32")]
+mod web;
+
 #[cfg(not(target_arch = "wasm32"))]
 mod au;
 #[cfg(not(target_arch = "wasm32"))]
@@ -41,15 +45,20 @@ mod vst3;
 #[cfg(not(target_arch = "wasm32"))]
 mod vst3_gui;
 
-#[cfg(not(target_arch = "wasm32"))]
-pub use clap::{MAX_LATENCY, ParamInfo};
+pub use info::{
+    MAX_LATENCY, ParamInfo, PluginFormat, PluginInfo, Preset as PluginPreset, SCAN_FLAG,
+    ScanOptions, ScanReport,
+};
 #[cfg(not(target_arch = "wasm32"))]
 pub use instance::{PluginHandle, PluginInstance};
 #[cfg(not(target_arch = "wasm32"))]
-pub use isolated::{
-    SCAN_FLAG, ScanOptions, ScanReport, clear_scan_cache, run_scan_child, scan_isolated,
+pub use isolated::{clear_scan_cache, run_scan_child, scan_isolated};
+#[cfg(not(target_arch = "wasm32"))]
+pub use lv2::available as lv2_available;
+#[cfg(not(target_arch = "wasm32"))]
+pub use scan::{default_paths, find_all, scan, scan_bundle};
+#[cfg(target_arch = "wasm32")]
+pub use web::{
+    PluginHandle, PluginInstance, clear_scan_cache, default_paths, find_all, lv2_available,
+    run_scan_child, scan, scan_bundle, scan_isolated,
 };
-#[cfg(not(target_arch = "wasm32"))]
-pub use lv2::{Lv2Preset as PluginPreset, available as lv2_available};
-#[cfg(not(target_arch = "wasm32"))]
-pub use scan::{PluginFormat, PluginInfo, default_paths, find_all, scan, scan_bundle};

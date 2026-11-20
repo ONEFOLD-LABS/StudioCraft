@@ -6,48 +6,7 @@ use std::{
 };
 
 use crate::clap::Library;
-
-/// Plugin-Format.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum PluginFormat {
-    #[default]
-    Clap,
-    Lv2,
-    Vst3,
-    /// Audio Unit (nur macOS).
-    Au,
-}
-
-/// Beschreibung eines gefundenen Plugins.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub struct PluginInfo {
-    pub format: PluginFormat,
-    pub id: String,
-    pub name: String,
-    pub vendor: String,
-    pub version: String,
-    /// CLAP-Features, z. B. `audio-effect`, `instrument`, `equalizer`.
-    pub features: Vec<String>,
-    /// Pfad der `.clap`-Datei bzw. des Bundles.
-    pub path: PathBuf,
-}
-
-impl PluginInfo {
-    /// Name für Listen; LV2-Plugins mit Formatkennung (gleiche Plugins gibt es oft in
-    /// mehreren Formaten).
-    pub fn display_name(&self) -> String {
-        match self.format {
-            PluginFormat::Clap => self.name.clone(),
-            PluginFormat::Lv2 => format!("{} (LV2)", self.name),
-            PluginFormat::Vst3 => format!("{} (VST3)", self.name),
-            PluginFormat::Au => format!("{} (AU)", self.name),
-        }
-    }
-
-    pub fn is_instrument(&self) -> bool {
-        self.features.iter().any(|f| f == "instrument")
-    }
-}
+pub use crate::info::{PluginFormat, PluginInfo};
 
 /// Liste aus einer Pfad-Variablen (`:`, unter Windows `;`), leere Einträge übersprungen.
 fn split_paths(value: &str) -> Vec<PathBuf> {
