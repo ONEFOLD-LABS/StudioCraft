@@ -329,6 +329,55 @@ impl TempoMap {
         }
     }
 
+    /// Zeitkorrektur (Werkzeug 0, Issue #42): eine Tempo-Map, in der Position `tick` genau bei
+    /// `seconds` liegt. Geändert wird nur der Abschnitt seit dem letzten Tempowechsel vor `tick`
+    /// (bzw. seit dem Anfang): er bekommt ein festes Tempo; bei `tick` setzt ein Tempowechsel
+    /// das bisherige Tempo fort, sodass alles danach im alten Tempo weiterläuft. `None`, wenn
+    /// das nicht geht (Anfang, Zeit nicht nach dem Abschnittsanfang); das Tempo wird auf
+    /// [`BPM_RANGE`] begrenzt.
+    pub fn warped(&self, tick: u64, seconds: f64) -> Option<TempoMap> {
+        if tick == 0 || !seconds.is_finite() {
+            return None;
+        }
+        let last = if self.use_track {
+            self.events.iter().rev().find(|e| e.tick < tick).copied()
+        } else {
+            None
+        };
+        // Eine Rampe am Abschnittsanfang beschreibt das Tempo davor: dann beginnt das neue
+        // Tempo einen Tick später, damit davor nichts wandert.
+        let anchor = match last {
+            Some(e) if e.ramp => e.tick + 1,
+            Some(e) => e.tick,
+            None => 0,
+        };
+        if anchor >= tick {
+            return None;
+        }
+        let dt = seconds - self.seconds(Position(anchor));
+        if dt <= 1e-6 {
+            return None;
+        }
+        let bpm = ((tick - anchor) as f64 / TICKS_PER_QUARTER as f64 * 60.0 / dt)
+            .clamp(BPM_RANGE.0, BPM_RANGE.1);
+        let after = self.bpm_at(tick);
+        let mut out = self.clone();
+        if !out.use_track {
+            out.events.clear();
+            out.use_track = true;
+        }
+        out.events.retain(|e| e.tick <= anchor || e.tick >= tick);
+        if !out.events.iter().any(|e| e.tick == tick) {
+            out.set_event(tick, after, false);
+        }
+        if anchor == 0 {
+            out.bpm = bpm;
+        } else {
+            out.set_event(anchor, bpm, false);
+        }
+        Some(out)
+    }
+
     /// Entfernt den Tempowechsel bei `tick`.
     pub fn remove_event(&mut self, tick: u64) -> bool {
         let before = self.events.len();
@@ -534,6 +583,38 @@ fn parse_parts(text: &str, defaults: [u64; 4]) -> Option<[u64; 4]> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn warping_puts_a_position_at_a_time_and_keeps_the_rest() {
+        // 120 BPM: Takt 3 (7680 Ticks) liegt bei 4 s. Er soll bei 4,4 s liegen.
+        let tm = TempoMap::fixed(120.0);
+        let w = tm.warped(7680, 4.4).unwrap();
+        assert!((w.seconds(Position(7680)) - 4.4).abs() < 1e-9);
+        assert!(w.use_track);
+        // Danach wieder 120 BPM: ein Takt später 2 s später.
+        assert!((w.seconds(Position(11_520)) - 6.4).abs() < 1e-9);
+        // Ein zweiter Punkt danach ändert nur den Abschnitt ab Takt 3.
+        let w2 = w.warped(11_520, 6.0).unwrap();
+        assert!((w2.seconds(Position(7680)) - 4.4).abs() < 1e-9);
+        assert!((w2.seconds(Position(11_520)) - 6.0).abs() < 1e-9);
+        // Eine Rampe am Abschnittsanfang bleibt (sie beschreibt das Tempo davor); frühere
+        // Positionen bleiben, wo sie waren.
+        let mut ramp = w.clone();
+        ramp.set_event(9600, 90.0, true);
+        let before = ramp.seconds(Position(9600));
+        let w3 = ramp.warped(11_520, before + 1.0).unwrap();
+        let e = w3.events.iter().find(|e| e.tick == 9600).unwrap();
+        assert!(e.ramp);
+        assert!((w3.seconds(Position(9600)) - before).abs() < 1e-9);
+        assert!((w3.seconds(Position(11_520)) - (before + 1.0)).abs() < 1e-9);
+        // Unmöglich: Anfang, Zeit vor dem Abschnitt, NaN.
+        assert!(tm.warped(0, 1.0).is_none());
+        assert!(w.warped(11_520, 4.0).is_none());
+        assert!(tm.warped(3840, f64::NAN).is_none());
+        // Extreme Ziele werden auf den Tempobereich begrenzt.
+        let fast = tm.warped(3840, 0.001).unwrap();
+        assert_eq!(fast.bpm, BPM_RANGE.1);
+    }
 
     #[test]
     fn one_bar_at_120_bpm_is_two_seconds() {

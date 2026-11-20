@@ -922,6 +922,9 @@ fn interact(w: &mut ProjectWindow, ui: &Ui, resp: &egui::Response, g: &Geo) {
     if audition(w, ui, resp, g) {
         return;
     }
+    if time_warp(w, ui, resp, g) {
+        return;
+    }
     // Doppelklick auf einen Fade-Griff öffnet den Kurveneditor.
     let fade_hit = resp
         .double_clicked()
@@ -1062,6 +1065,95 @@ fn audition(w: &mut ProjectWindow, ui: &Ui, resp: &egui::Response, g: &Geo) -> b
             }
             true
         }
+    }
+}
+
+/// Laufende Zeitkorrektur: Projekt vor dem Ziehen und die Stelle (in Sekunden), die gepackt
+/// wurde.
+#[derive(Debug, Clone)]
+pub(crate) struct TimeWarp {
+    before: studiocraft_project::Project,
+    seconds: f64,
+    /// Zählzeit, auf der die gepackte Stelle gerade liegt.
+    pub target: Option<u64>,
+}
+
+/// Nächste Zählzeit zu `ticks` (Taktart beachtet).
+fn nearest_beat(tempo: &studiocraft_project::TempoMap, ticks: u64) -> u64 {
+    let (_, start, sig) = tempo.bar_at(ticks);
+    let beat = sig.beat_ticks().max(1);
+    let k = ((ticks - start) as f64 / beat as f64).round() as u64;
+    start + k * beat
+}
+
+/// Zeitkorrektur (Spec „Werkzeuge“, Taste 0; Issue #42): Drücken packt die Stelle unter der
+/// Maus – z. B. einen Schlag in einer Audioaufnahme –, Ziehen legt sie auf die Zählzeit unter
+/// der Maus (mit Snap, Alt: frei). Die Tempo-Map ändert sich dabei nur seit dem letzten
+/// Tempowechsel davor; Audio auf linearen Spuren behält seine Zeit, das Raster passt sich an.
+/// Loslassen ist ein Rückgängig-Schritt. Gibt `true` zurück, solange das Werkzeug die Maus hat.
+fn time_warp(w: &mut ProjectWindow, ui: &Ui, resp: &egui::Response, g: &Geo) -> bool {
+    if w.tool != Tool::TimeWarp && w.time_warp.is_none() {
+        return false;
+    }
+    let (pressed, down, pos, alt) = ui.input(|i| {
+        (
+            i.pointer.primary_pressed(),
+            i.pointer.primary_down(),
+            i.pointer.interact_pos(),
+            i.modifiers.alt,
+        )
+    });
+    match w.time_warp.take() {
+        None => {
+            let Some(p) = pos.filter(|p| pressed && resp.hovered() && g.lanes.contains(*p)) else {
+                return false;
+            };
+            let at = g.ticks(p.x).max(0.0) as u64;
+            let seconds = w.project.tempo.seconds(studiocraft_project::Position(at));
+            w.time_warp = Some(TimeWarp {
+                before: w.project.clone(),
+                seconds,
+                target: None,
+            });
+            true
+        }
+        Some(mut tw) if down => {
+            if let Some(p) = pos {
+                // Ziel in der Tick-Anzeige; sie bleibt beim Ziehen stehen, nur das Audio wandert.
+                let at = g.ticks(p.x).max(0.0) as u64;
+                let target = if w.snap && !alt {
+                    nearest_beat(&tw.before.tempo, at)
+                } else {
+                    at
+                };
+                if tw.target != Some(target) {
+                    tw.target = Some(target);
+                    let mut project = tw.before.clone();
+                    if let Some(map) = tw.before.tempo.warped(target, tw.seconds) {
+                        project.set_tempo_map(map);
+                    }
+                    w.project = project;
+                }
+            }
+            w.time_warp = Some(tw);
+            true
+        }
+        Some(tw) => {
+            w.checkpoint(tw.before);
+            true
+        }
+    }
+}
+
+/// Ziel der laufenden Zeitkorrektur als senkrechte Linie.
+fn paint_time_warp(w: &ProjectWindow, painter: &Painter, g: &Geo) {
+    let Some(target) = w.time_warp.as_ref().and_then(|t| t.target) else {
+        return;
+    };
+    let x = g.x(target as f64);
+    if g.lanes.x_range().contains(x) {
+        let t = crate::theme::tokens(painter.ctx());
+        painter.vline(x, g.lanes.y_range(), Stroke::new(2.0, t.accent));
     }
 }
 
@@ -1997,6 +2089,7 @@ fn paint_lanes(w: &ProjectWindow, painter: &Painter, g: &Geo) {
     }
     automation::paint(w, painter, g);
     paint_recording(w, painter, g);
+    paint_time_warp(w, painter, g);
     if let Some((r0, r1, a, b)) = w.range {
         let rect = Rect::from_min_max(
             pos2(g.x(a as f64), g.row_top(r0)),
