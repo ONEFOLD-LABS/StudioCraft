@@ -241,6 +241,16 @@ impl ProjectWindow {
                     self.show_lower = true;
                     self.lower = crate::LowerZone::Editor;
                 }
+                if ui
+                    .selectable_label(
+                        self.show_lower && self.lower == crate::LowerZone::List,
+                        tr("List-Editor"),
+                    )
+                    .clicked()
+                {
+                    self.show_lower = true;
+                    self.lower = crate::LowerZone::List;
+                }
                 ui.checkbox(&mut self.show_lower, tr("Untere Zone"));
                 ui.separator();
                 ui.menu_button(tr("Erscheinungsbild"), |ui| {

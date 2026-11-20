@@ -97,6 +97,7 @@ impl ProjectWindow {
             LowerZone::Mixer => self.windows.mixer,
             LowerZone::Editor => self.windows.editor == Some(EditorWindow::Key),
             LowerZone::SampleEditor => self.windows.editor == Some(EditorWindow::Sample),
+            LowerZone::List => false,
         }
     }
 
@@ -178,6 +179,7 @@ impl ProjectWindow {
                 LowerZone::Mixer => crate::mixer::show(w, ui),
                 LowerZone::Editor => crate::keyeditor::show(w, ui),
                 LowerZone::SampleEditor => crate::sampleeditor::show(w, ui),
+                LowerZone::List => crate::listeditor::show(w, ui),
             }
         };
         if class == ViewportClass::EmbeddedWindow {
