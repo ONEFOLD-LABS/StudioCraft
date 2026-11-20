@@ -27,6 +27,8 @@ mod au;
 #[cfg(not(target_arch = "wasm32"))]
 mod clap;
 #[cfg(not(target_arch = "wasm32"))]
+mod clap_presets;
+#[cfg(not(target_arch = "wasm32"))]
 mod gui;
 #[cfg(not(target_arch = "wasm32"))]
 mod host;

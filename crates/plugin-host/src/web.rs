@@ -64,6 +64,12 @@ impl PluginHandle {
     pub fn preset_values(&self, _: &str) -> Vec<(u32, f64)> {
         match self.0 {}
     }
+    pub fn load_preset(&self, _: &str) -> Result<(), String> {
+        match self.0 {}
+    }
+    pub fn param_values(&self) -> Vec<(u32, f64)> {
+        match self.0 {}
+    }
     pub fn latency(&self) -> u32 {
         match self.0 {}
     }

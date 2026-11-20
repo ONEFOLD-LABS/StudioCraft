@@ -176,6 +176,18 @@ impl Library {
         }
     }
 
+    /// Preset-Fabrik der Bibliothek (aktuelle oder Entwurfs-Kennung), falls vorhanden.
+    pub(crate) fn preset_factory(&self) -> Option<*const crate::clap_presets::Factory> {
+        // SAFETY: `get_factory` liefert null oder eine Fabrik, die so lange lebt wie die Bibliothek.
+        unsafe {
+            let get = (*self.entry).get_factory?;
+            crate::clap_presets::FACTORY_IDS
+                .iter()
+                .map(|id| get(id.as_ptr()) as *const crate::clap_presets::Factory)
+                .find(|f| !f.is_null())
+        }
+    }
+
     pub(crate) fn descriptors(&self) -> Vec<PluginInfo> {
         // Hauptthread-Aufruf: Manche Plugins bauen ihre Beschreibungen erst hier und nicht
         // thread-sicher, während andere Threads Instanzen erzeugen.
@@ -313,6 +325,8 @@ unsafe extern "C" fn out_push(_: *const clap_output_events, _: *const clap_event
 pub struct ClapHandle {
     pub(crate) plugin: *const clap_plugin,
     _lib: Arc<Library>,
+    /// Id des Plugins (für die Zuordnung von Presets).
+    plugin_id: String,
     pub(crate) shared: Arc<HostShared>,
     pub(crate) gui: crate::gui::GuiState,
 }
@@ -354,6 +368,70 @@ unsafe extern "C" fn istream_read(stream: *const clap_istream, buf: *mut c_void,
 }
 
 impl ClapHandle {
+    /// Presets des Plugins aus der Preset-Fabrik seiner Datei (leer ohne Fabrik). Hauptthread.
+    pub fn presets(&self) -> Vec<crate::info::Preset> {
+        let _main = main_thread_lock();
+        crate::clap_presets::discover(&self._lib, &self.plugin_id)
+            .iter()
+            .map(|f| f.preset(f.name.clone()))
+            .collect()
+    }
+
+    /// Ein Preset aus [`Self::presets`] laden (Erweiterung `preset-load`). Hauptthread; laut
+    /// CLAP parallel zur Verarbeitung erlaubt.
+    pub fn load_preset(&self, uri: &str) -> Result<(), String> {
+        use clap_sys::ext::preset_load::{
+            CLAP_EXT_PRESET_LOAD, CLAP_EXT_PRESET_LOAD_COMPAT, clap_plugin_preset_load,
+        };
+        let (kind, location, key) =
+            crate::clap_presets::parse_uri(uri).ok_or("kein CLAP-Preset")?;
+        let _main = main_thread_lock();
+        let mut ext: *const clap_plugin_preset_load = self.extension(CLAP_EXT_PRESET_LOAD);
+        if ext.is_null() {
+            ext = self.extension(CLAP_EXT_PRESET_LOAD_COMPAT);
+        }
+        // SAFETY: Erweiterung null oder gültig; Zeichenketten leben während des Aufrufs.
+        let ok = unsafe {
+            ext.as_ref().and_then(|e| e.from_location).is_some_and(|f| {
+                f(
+                    self.plugin,
+                    kind,
+                    location.as_ref().map_or(ptr::null(), |c| c.as_ptr()),
+                    key.as_ref().map_or(ptr::null(), |c| c.as_ptr()),
+                )
+            })
+        };
+        if ok {
+            Ok(())
+        } else {
+            Err("Plugin konnte das Preset nicht laden".into())
+        }
+    }
+
+    /// Aktuelle Werte aller Parameter (Id, Wert), etwa nach dem Laden eines Presets. Hauptthread.
+    pub fn param_values(&self) -> Vec<(u32, f64)> {
+        let ext: *const clap_plugin_params = self.extension(CLAP_EXT_PARAMS);
+        let mut out = Vec::new();
+        // SAFETY: Erweiterung null oder gültig; Hauptthread; Strukturen in voller Größe.
+        unsafe {
+            let Some(e) = ext.as_ref() else { return out };
+            let (Some(count), Some(info), Some(value)) = (e.count, e.get_info, e.get_value) else {
+                return out;
+            };
+            for i in 0..count(self.plugin).min(100_000) {
+                let mut pi: clap_param_info = std::mem::zeroed();
+                if !info(self.plugin, i, &mut pi) {
+                    continue;
+                }
+                let mut v = 0.0;
+                if value(self.plugin, pi.id, &mut v) && v.is_finite() {
+                    out.push((pi.id, v));
+                }
+            }
+        }
+        out
+    }
+
     /// Erweiterung des Plugins oder null.
     pub(crate) fn extension<T>(&self, id: &CStr) -> *const T {
         // SAFETY: `plugin` lebt (Vertrag oben).
@@ -556,6 +634,7 @@ impl ClapInstance {
         ClapHandle {
             plugin: self.plugin,
             _lib: self._lib.clone(),
+            plugin_id: self.info.id.clone(),
             shared: self.shared.clone(),
             gui: Default::default(),
         }
@@ -895,6 +974,33 @@ mod tests {
             .into_iter()
             .filter(|p| p.format == crate::scan::PluginFormat::Clap)
             .collect()
+    }
+
+    #[test]
+    fn surge_presets_are_found_and_change_the_sound() {
+        let Some(info) = installed().into_iter().find(|p| p.name == "Surge XT") else {
+            eprintln!("Surge XT (CLAP) nicht installiert – übersprungen");
+            return;
+        };
+        let inst = ClapInstance::new(&info, 48_000, 256);
+        assert!(inst.is_ok());
+        let Ok(inst) = inst else { return };
+        let h = inst.handle();
+        let presets = h.presets();
+        eprintln!(
+            "Surge XT: {} Presets, z. B. {:?}",
+            presets.len(),
+            presets.get(10).map(|p| &p.name)
+        );
+        assert!(presets.len() > 50, "Surge ships many factory patches");
+        let before = h.param_values();
+        assert!(!before.is_empty());
+        // Ein Preset aus der Mitte (nicht das Init-Patch) laden.
+        let p = &presets[presets.len() / 2];
+        assert!(h.load_preset(&p.uri).is_ok(), "{}", p.name);
+        let after = h.param_values();
+        assert_ne!(before, after, "loading {} changes parameters", p.name);
+        assert!(h.load_preset("urn:kein-clap").is_err());
     }
 
     #[test]
