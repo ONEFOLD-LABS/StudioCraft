@@ -21,6 +21,8 @@ use std::{
     time::Duration,
 };
 
+mod mcp;
+
 use studiocraft_engine::{
     AudioClip, Command, EngineControl, PreparedOutput, Song, TransportState, engine, output,
 };
@@ -30,12 +32,14 @@ const USAGE: &str = "\
 Aufruf: studiocraft <datei.wav> [--bpm <tempo>] [--loop <von_takt> <bis_takt>] [--seconds <s>]
                    [--audio-host <name>]
        studiocraft --list-hosts
+       studiocraft mcp --automation-read-root <ordner> --automation-write-root <ordner>
 
   --bpm      Projekttempo für die Takt-Anzeige (Standard 120)
   --loop     Locatoren auf Takt A bis B setzen und Cycle einschalten
   --seconds  sofort starten, nach s Sekunden beenden (ohne Eingabe)
   --audio-host  Audio-Host wählen, z. B. PipeWire, ALSA, JACK, WASAPI, ASIO, CoreAudio
   --list-hosts  einkompilierte Audio-Hosts anzeigen
+  mcp        MCP-Server für KI-Agenten (siehe docs/mcp.md)
 
 Befehle im laufenden Programm (jeweils mit Enter):
   <Enter>    Start/Stopp
@@ -122,6 +126,9 @@ fn status_line(ctl: &EngineControl) -> String {
 }
 
 fn main() -> ExitCode {
+    if std::env::args().nth(1).as_deref() == Some("mcp") {
+        return mcp::run(std::env::args().skip(2));
+    }
     let args = match parse_args() {
         Ok(a) => a,
         Err(e) => {

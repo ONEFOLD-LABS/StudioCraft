@@ -888,6 +888,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "craft-mcp-server"
+version = "0.1.0"
+source = "git+https://github.com/storytold/craft-libs?rev=56c3c833bb869a140271e2aceec2112322cacc58#56c3c833bb869a140271e2aceec2112322cacc58"
+dependencies = [
+ "serde_json",
+]
+
+[[package]]
 name = "craft-media"
 version = "0.1.0"
 source = "git+https://github.com/storytold/craft-libs?rev=45a8e16669e70dadb780dfbc759c882dd5b7ea1c#45a8e16669e70dadb780dfbc759c882dd5b7ea1c"
@@ -3547,9 +3555,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "studiocraft-automation"
+version = "0.7.0"
+dependencies = [
+ "craft-mcp-server",
+ "serde_json",
+ "studiocraft-project",
+ "studiocraft-ui",
+]
+
+[[package]]
 name = "studiocraft-cli"
 version = "0.7.0"
 dependencies = [
+ "studiocraft-automation",
  "studiocraft-engine",
  "studiocraft-project",
 ]

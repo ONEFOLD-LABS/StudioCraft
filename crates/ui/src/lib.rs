@@ -586,6 +586,11 @@ impl ProjectWindow {
         Ok(ev)
     }
 
+    /// Text der Meldungszeile (etwa fehlende Audiodateien nach dem Öffnen).
+    pub fn message(&self) -> Option<&str> {
+        self.message.as_deref()
+    }
+
     /// Zeigt `text` in der Meldungszeile (etwa einen Fehler beim Öffnen über die Kommandozeile).
     pub fn notify(&mut self, text: String) {
         self.message = Some(text);
@@ -605,6 +610,32 @@ impl ProjectWindow {
         }
         self.redo.clear();
         self.dirty = true;
+    }
+
+    /// Führt `f` als ein Undo-Schritt aus (für Aufrufer außerhalb der Oberfläche, etwa die
+    /// Automation): ändert `f` das Projekt, landet der Stand davor im Verlauf.
+    pub fn edit<R>(&mut self, f: impl FnOnce(&mut Self) -> R) -> R {
+        let before = self.project.clone();
+        let r = f(self);
+        self.checkpoint(before);
+        r
+    }
+
+    /// Wie viele Schritte Undo und Redo zurück- bzw. vorgehen können.
+    pub fn history_depth(&self) -> (usize, usize) {
+        (self.undo.len(), self.redo.len())
+    }
+
+    /// Linker und rechter Locator in Ticks.
+    pub fn locators(&self) -> (u64, u64) {
+        (self.left_locator, self.right_locator)
+    }
+
+    /// Setzt die Locatoren (Ticks); vertauscht sie, wenn `left` hinter `right` liegt.
+    pub fn set_locators(&mut self, left: u64, right: u64) {
+        self.left_locator = left.min(right);
+        self.right_locator = left.max(right);
+        self.send_locators();
     }
 
     pub fn undo(&mut self) {
