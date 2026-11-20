@@ -90,6 +90,19 @@ mod other {
         pub fn load_state(&self, _: &[u8]) -> bool {
             false
         }
+        pub fn has_gui(&self) -> bool {
+            false
+        }
+        pub fn gui_open(&self) -> bool {
+            false
+        }
+        pub fn open_gui(&mut self, _: &str) -> Result<(), String> {
+            Err("Audio Units gibt es nur unter macOS".into())
+        }
+        pub fn close_gui(&mut self) {}
+        pub fn idle(&mut self) -> bool {
+            false
+        }
     }
 }
 
@@ -698,6 +711,7 @@ mod mac {
             AuHandle {
                 unit: self.unit,
                 shared: self.shared.clone(),
+                gui: None,
             }
         }
 
@@ -831,12 +845,57 @@ mod mac {
     pub struct AuHandle {
         unit: Unit,
         shared: Arc<Shared>,
+        gui: Option<Box<window::AuGui>>,
+    }
+
+    impl Drop for AuHandle {
+        fn drop(&mut self) {
+            // Fenster vor der Instanz schließen (Vertrag: Griff stirbt zuerst).
+            self.close_gui();
+        }
     }
 
     // SAFETY: Zustand lesen ist parallel zum Rendern erlaubt; der Griff lebt kürzer als die Instanz.
     unsafe impl Send for AuHandle {}
 
     impl AuHandle {
+        /// Jede Audio Unit hat ein Fenster: ihre eigene Oberfläche oder Apples allgemeine
+        /// Parameteransicht.
+        pub fn has_gui(&self) -> bool {
+            window::available()
+        }
+
+        pub fn gui_open(&self) -> bool {
+            self.gui.is_some()
+        }
+
+        /// Öffnet das Fenster der Audio Unit. Nur im Hauptthread.
+        pub fn open_gui(&mut self, title: &str) -> Result<(), String> {
+            if self.gui.is_some() {
+                return Ok(());
+            }
+            let _main = main_thread_lock();
+            let gui = window::AuGui::open(self.unit, title)?;
+            self.gui = Some(Box::new(gui));
+            Ok(())
+        }
+
+        pub fn close_gui(&mut self) {
+            if let Some(g) = self.gui.take() {
+                let _main = main_thread_lock();
+                g.close();
+            }
+        }
+
+        /// Im UI-Takt; `true`, solange das Fenster offen ist.
+        pub fn idle(&mut self) -> bool {
+            let open = self.gui.as_ref().is_some_and(|g| g.is_open());
+            if !open {
+                self.close_gui();
+            }
+            open
+        }
+
         pub fn latency(&self) -> u32 {
             self.shared.latency.load(Ordering::Acquire)
         }
@@ -914,6 +973,191 @@ mod mac {
                 );
                 CFRelease(plist);
                 r == 0
+            }
+        }
+    }
+
+    /// Fenster einer Audio Unit: ihre eigene Cocoa-Oberfläche (falls sie eine mitbringt), sonst
+    /// Apples allgemeine Parameteransicht, eingebettet in das Cocoa-Host-Fenster.
+    mod window {
+        use std::ffi::c_void;
+
+        use objc2::{
+            rc::Retained,
+            runtime::{AnyClass, AnyObject, Sel},
+            sel,
+        };
+        use objc2_app_kit::NSView;
+        use objc2_foundation::{NSBundle, NSSize, NSString, NSURL};
+
+        use super::{
+            AudioUnitGetProperty, AudioUnitGetPropertyInfo, CFRelease, CfRef, SCOPE_GLOBAL, Unit,
+        };
+        use crate::gui::HostWindow;
+
+        // Die allgemeine Ansicht liegt in CoreAudioKit.
+        #[link(name = "CoreAudioKit", kind = "framework")]
+        unsafe extern "C" {}
+
+        /// Eigenschaft „Cocoa-Oberfläche“: Bundle-URL und Klassennamen der Ansichtsfabrik.
+        const PROP_COCOA_UI: u32 = 31;
+
+        type Id = *mut AnyObject;
+
+        /// `objc_msgSend` ohne Argumente.
+        ///
+        /// # Safety
+        /// `obj` muss ein Objekt oder eine Klasse sein, die `sel` versteht und ein Objekt liefert.
+        unsafe fn send0(obj: *const c_void, sel: Sel) -> Id {
+            // SAFETY: objc_msgSend mit der Signatur der aufgerufenen Methode (keine Argumente).
+            unsafe {
+                let f: unsafe extern "C-unwind" fn(*const c_void, Sel) -> Id =
+                    std::mem::transmute(objc2::ffi::objc_msgSend as unsafe extern "C-unwind" fn());
+                f(obj, sel)
+            }
+        }
+
+        /// `objc_msgSend` mit einem Zeiger-Argument.
+        ///
+        /// # Safety
+        /// Wie [`send0`], die Methode nimmt einen Zeiger.
+        unsafe fn send_ptr(obj: *const c_void, sel: Sel, p: *mut c_void) -> Id {
+            // SAFETY: wie oben, Signatur (Zeiger) -> Objekt.
+            unsafe {
+                let f: unsafe extern "C-unwind" fn(*const c_void, Sel, *mut c_void) -> Id =
+                    std::mem::transmute(objc2::ffi::objc_msgSend as unsafe extern "C-unwind" fn());
+                f(obj, sel, p)
+            }
+        }
+
+        /// `objc_msgSend` mit Zeiger und Größe (`uiViewForAudioUnit:withSize:`).
+        ///
+        /// # Safety
+        /// Wie [`send0`], die Methode nimmt einen Zeiger und eine NSSize.
+        unsafe fn send_ptr_size(obj: *const c_void, sel: Sel, p: *mut c_void, size: NSSize) -> Id {
+            // SAFETY: wie oben, Signatur (Zeiger, NSSize) -> Objekt.
+            unsafe {
+                let f: unsafe extern "C-unwind" fn(*const c_void, Sel, *mut c_void, NSSize) -> Id =
+                    std::mem::transmute(objc2::ffi::objc_msgSend as unsafe extern "C-unwind" fn());
+                f(obj, sel, p, size)
+            }
+        }
+
+        /// Gibt es die allgemeine Ansicht (CoreAudioKit geladen)?
+        pub(super) fn available() -> bool {
+            AnyClass::get(c"AUGenericView").is_some()
+        }
+
+        /// Eigene Oberfläche der Audio Unit, falls sie eine mitbringt.
+        fn cocoa_view(unit: Unit) -> Option<Retained<NSView>> {
+            let mut size = 0u32;
+            // SAFETY: Instanz lebt; Puffer passend zur gemeldeten Größe; alle gelieferten
+            // CF-Objekte werden freigegeben.
+            unsafe {
+                if AudioUnitGetPropertyInfo(
+                    unit,
+                    PROP_COCOA_UI,
+                    SCOPE_GLOBAL,
+                    0,
+                    &mut size,
+                    std::ptr::null_mut(),
+                ) != 0
+                {
+                    return None;
+                }
+                let n = size as usize / std::mem::size_of::<CfRef>();
+                if n < 2 {
+                    return None;
+                }
+                let mut buf: Vec<CfRef> = vec![std::ptr::null(); n];
+                let mut size = (n * std::mem::size_of::<CfRef>()) as u32;
+                if AudioUnitGetProperty(
+                    unit,
+                    PROP_COCOA_UI,
+                    SCOPE_GLOBAL,
+                    0,
+                    buf.as_mut_ptr().cast(),
+                    &mut size,
+                ) != 0
+                {
+                    return None;
+                }
+                let view = (|| {
+                    let url = (buf[0] as *const NSURL).as_ref()?;
+                    let name = (buf[1] as *const NSString).as_ref()?;
+                    let bundle = NSBundle::bundleWithURL(url)?;
+                    let class = bundle.classNamed(name)?;
+                    let factory = send0((class as *const AnyClass).cast(), sel!(new));
+                    if factory.is_null() {
+                        return None;
+                    }
+                    let view = send_ptr_size(
+                        factory.cast(),
+                        sel!(uiViewForAudioUnit:withSize:),
+                        unit,
+                        NSSize::new(400.0, 300.0),
+                    );
+                    objc2::ffi::objc_release(factory);
+                    // Die Fabrik liefert die Ansicht ohne eigene Referenz: festhalten.
+                    Retained::retain(view.cast::<NSView>())
+                })();
+                for &cf in buf.iter().take(n) {
+                    if !cf.is_null() {
+                        CFRelease(cf);
+                    }
+                }
+                view
+            }
+        }
+
+        /// Apples allgemeine Parameteransicht für jede Audio Unit.
+        fn generic_view(unit: Unit) -> Option<Retained<NSView>> {
+            let class = AnyClass::get(c"AUGenericView")?;
+            // SAFETY: alloc/initWithAudioUnit: liefern ein Objekt mit einer Referenz (oder null).
+            unsafe {
+                let obj = send0((class as *const AnyClass).cast(), sel!(alloc));
+                if obj.is_null() {
+                    return None;
+                }
+                let view = send_ptr(obj.cast(), sel!(initWithAudioUnit:), unit);
+                Retained::from_raw(view.cast::<NSView>())
+            }
+        }
+
+        pub(super) struct AuGui {
+            window: HostWindow,
+            view: Retained<NSView>,
+        }
+
+        impl AuGui {
+            pub(super) fn open(unit: Unit, title: &str) -> Result<Self, String> {
+                let view = cocoa_view(unit)
+                    .or_else(|| generic_view(unit))
+                    .ok_or("Audio Unit hat kein Fenster")?;
+                let frame = view.frame();
+                let (w, h) = (
+                    frame.size.width.clamp(200.0, 4000.0) as u32,
+                    frame.size.height.clamp(100.0, 4000.0) as u32,
+                );
+                let window = HostWindow::new(title, w, h)?;
+                let content = window.parent().cast::<NSView>();
+                // SAFETY: Inhaltsansicht des lebenden Fensters (das Fenster hält sie).
+                let Some(content) = (unsafe { content.as_ref() }) else {
+                    window.close();
+                    return Err("Fenster ohne Inhaltsansicht".into());
+                };
+                content.addSubview(&view);
+                window.show();
+                Ok(Self { window, view })
+            }
+
+            pub(super) fn is_open(&self) -> bool {
+                !self.window.pump_closed()
+            }
+
+            pub(super) fn close(self) {
+                self.view.removeFromSuperview();
+                self.window.close();
             }
         }
     }
