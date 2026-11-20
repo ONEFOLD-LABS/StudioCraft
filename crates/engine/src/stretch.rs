@@ -402,10 +402,12 @@ mod tests {
             .is_none()
         );
         assert!(request(old, g, || vec![2.0; 4]).is_none());
-        // Die nächste Abspielliste braucht nur noch `slow`.
-        let g2 = new_generation();
-        let _ = request(slow, g2, || unreachable!("ist schon in Arbeit"));
-        for _ in 0..100 {
+        // Jede neue Abspielliste braucht nur noch `slow` und fordert es wieder an (wie die
+        // App bei jedem Neubau). Die Generation ist für alle Tests gemeinsam: Ein paralleler
+        // Test kann `slow` überholen; dann rechnet die nächste Anforderung es neu.
+        for _ in 0..200 {
+            let g = new_generation();
+            let _ = request(slow, g, || vec![1.0; 4]);
             if lookup(slow).is_some() && busy_without(old) {
                 break;
             }
