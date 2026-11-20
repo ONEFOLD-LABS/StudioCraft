@@ -1001,6 +1001,7 @@ fn kind_name(kind: TrackKind) -> &'static str {
         TrackKind::Folder => "folder",
         TrackKind::Marker => "marker",
         TrackKind::Tempo => "tempo",
+        TrackKind::Ruler => "ruler",
     }
 }
 
