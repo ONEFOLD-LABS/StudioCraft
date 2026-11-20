@@ -9,7 +9,7 @@
 
 use crate::i18n::tr;
 use egui::{Align2, Color32, FontId, Painter, Pos2, Rect, Stroke, Ui, pos2, vec2};
-use studiocraft_project::{CtrlKind, CtrlPoint, EventId};
+use studiocraft_project::{CtrlKind, CtrlPoint, DrawShape, EventId, shapes};
 
 use super::KGeo;
 use crate::{ProjectWindow, Tool};
@@ -26,6 +26,13 @@ const HIT: f32 = 5.0;
 pub(crate) enum CtrlDrag {
     /// Zeichnen; `last` = zuletzt gesetzte Position in Ticks (relativ zum Part).
     Draw { kind: CtrlKind, last: Option<i64> },
+    /// Zeichnen mit einer Form vom Anfangspunkt (Ticks relativ zum Part, Wert) bis zum Zeiger;
+    /// die Punkte davor stehen in `drag_before`.
+    Shape {
+        kind: CtrlKind,
+        start: i64,
+        value: u16,
+    },
     /// Punkte unter dem Zeiger löschen; `last_x` = Zeigerposition im letzten Bild, damit
     /// schnelle Bewegungen nichts überspringen.
     Erase { kind: CtrlKind, last_x: Option<f32> },
@@ -237,6 +244,11 @@ pub(super) fn interact(
             .unwrap_or_default();
         w.drag_before = Some(w.project.clone());
         w.key_editor.ctrl_drag = match w.tool {
+            Tool::Draw if w.draw_shape != DrawShape::Free => Some(CtrlDrag::Shape {
+                kind: lane.kind,
+                start: snapped_tick(w, g, p, mods.alt),
+                value: value_at(lane.rect, lane.kind, p.y),
+            }),
             Tool::Draw => Some(CtrlDrag::Draw {
                 kind: lane.kind,
                 last: None,
@@ -296,6 +308,7 @@ fn apply(
 ) {
     let kind = match &drag {
         CtrlDrag::Draw { kind, .. }
+        | CtrlDrag::Shape { kind, .. }
         | CtrlDrag::Erase { kind, .. }
         | CtrlDrag::Move { kind, .. } => *kind,
     };
@@ -303,19 +316,55 @@ fn apply(
         return;
     };
     let step = w.grid_ticks().max(1) as f64;
-    let rel = g.tick(p.x) - g.part_start as f64;
-    let snapped = if free {
-        rel.round()
-    } else {
-        (rel / step).round() * step
-    };
-    let at = (snapped.max(0.0)) as i64;
+    let at = snapped_tick(w, g, p, free);
     let value = value_at(lane.rect, kind, p.y);
     let sel_before = w.key_editor.ctrl_sel.clone();
+    let (shape, grid) = (w.draw_shape, w.grid_ticks().max(1));
+    let original = match &drag {
+        CtrlDrag::Shape { .. } => w
+            .drag_before
+            .as_ref()
+            .and_then(|b| b.event(part))
+            .map(|e| e.controllers.clone()),
+        _ => None,
+    };
     let Some(ev) = w.project.event_mut(part) else {
         return;
     };
     match drag {
+        CtrlDrag::Shape {
+            start, value: v0, ..
+        } => {
+            if let Some(orig) = original {
+                ev.controllers = orig;
+            }
+            let (a, b) = (start.min(at), start.max(at));
+            ev.controllers
+                .retain(|c| c.kind != kind || c.start < a || c.start > b);
+            let max = f64::from(kind.max());
+            let (t0, t1) = (start.max(0) as u64, at.max(0) as u64);
+            // Dichte: ein Viertel des Rasters; Sinus und Rechteck 16 Werte je Periode.
+            let density = match shape {
+                DrawShape::Sine | DrawShape::Square => (grid / 16).max(1),
+                _ => (grid / 4).max(1),
+            };
+            let points = shapes::samples(
+                shape,
+                (t0, f64::from(v0)),
+                (t1, f64::from(value)),
+                grid,
+                density,
+            );
+            for (t, v) in points {
+                ev.controllers.push(CtrlPoint {
+                    kind,
+                    start: i64::try_from(t).unwrap_or(i64::MAX),
+                    value: v.clamp(0.0, max).round() as u16,
+                });
+            }
+            ev.controllers.sort_by_key(|c| c.start);
+            w.key_editor.ctrl_sel.clear();
+        }
         CtrlDrag::Draw { last, .. } => {
             // Was zwischen dem letzten und diesem Punkt lag, ersetzen.
             let (a, b) = match last {
@@ -388,6 +437,18 @@ fn apply(
             });
         }
     }
+}
+
+/// Zeigerposition in Ticks relativ zum Part, auf das Raster gerundet (Alt: frei).
+fn snapped_tick(w: &ProjectWindow, g: &KGeo, p: Pos2, free: bool) -> i64 {
+    let step = w.grid_ticks().max(1) as f64;
+    let rel = g.tick(p.x) - g.part_start as f64;
+    let snapped = if free {
+        rel.round()
+    } else {
+        (rel / step).round() * step
+    };
+    snapped.max(0.0) as i64
 }
 
 /// Zeichnet die Controller-Spuren des aktiven Parts.

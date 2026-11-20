@@ -111,6 +111,14 @@ pub(crate) enum Drag {
         lane: usize,
         last: u64,
     },
+    /// Zeichnen mit einer Form (Linie, Parabel, Sinus, Rechteck) vom Anfangspunkt bis zum
+    /// Zeiger; die Kurve davor steht in `drag_before`.
+    AutoShape {
+        row: usize,
+        lane: usize,
+        tick: u64,
+        value: f64,
+    },
     /// Auswahl verschieben; `grab` = Abstand Mauszeiger zu Event-Start in Ticks. Strg beim
     /// Anfassen kopiert, Strg+Umschalt macht geteilte Kopien; Strg erst während des Ziehens
     /// sperrt die Richtung.
@@ -1197,7 +1205,10 @@ fn live_drag(w: &mut ProjectWindow, g: &Geo, d: Drag, p: Pos2, mods: egui::Modif
             }
             return;
         }
-        Drag::AutoPoint { .. } | Drag::AutoDraw { .. } | Drag::AutoScale { .. } => {
+        Drag::AutoPoint { .. }
+        | Drag::AutoDraw { .. }
+        | Drag::AutoShape { .. }
+        | Drag::AutoScale { .. } => {
             w.drag = Some(automation::live_drag(w, g, d, p, mods.alt));
             return;
         }
@@ -1531,6 +1542,7 @@ fn finish_drag(w: &mut ProjectWindow, g: &Geo, d: Drag, p: Pos2, mods: egui::Mod
         | Drag::EventGain { .. }
         | Drag::AutoPoint { .. }
         | Drag::AutoDraw { .. }
+        | Drag::AutoShape { .. }
         | Drag::AutoScale { .. }
         | Drag::Marker { .. }
         | Drag::TempoPoint { .. } => {}
