@@ -62,6 +62,22 @@ thread_local! {
     static MAIN_DEPTH: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
 }
 
+/// Nur in den Tests dieses Crates: `process` läuft ebenfalls unter [`main_thread_lock`].
+/// Die Tests laufen parallel, und manche Plugins teilen Zustand zwischen Instanzen (ein
+/// Faltungshall lud bei abweichender Abtastrate im Hintergrund nach und stürzte ab, während eine
+/// andere Instanz rechnete). Im Programm rechnet je Engine genau ein Audio-Thread, dort darf
+/// nichts sperren; außerhalb der Tests ist das hier ohne Wirkung.
+#[cfg(test)]
+pub(crate) fn test_process_guard() -> Option<MainThreadGuard> {
+    Some(main_thread_lock())
+}
+
+#[cfg(not(test))]
+#[inline(always)]
+pub(crate) fn test_process_guard() -> Option<MainThreadGuard> {
+    None
+}
+
 pub(crate) fn main_thread_lock() -> MainThreadGuard {
     static LOCK: Mutex<()> = Mutex::new(());
     let depth = MAIN_DEPTH.with(|d| {
@@ -840,6 +856,7 @@ impl ClapInstance {
 
     /// Bearbeitet Stereo an Ort und Stelle. Nur im Audio-Thread, echtzeitsicher.
     pub fn process(&mut self, left: &mut [f32], right: &mut [f32]) {
+        let _tests = crate::clap::test_process_guard();
         let n = left.len().min(right.len());
         for (l, r) in left[..n]
             .chunks_mut(self.max_frames)
