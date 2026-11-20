@@ -1,5 +1,6 @@
 //! Menüleiste, Datei-Befehle mit Dialogen und Rückfrage bei ungesicherten Änderungen.
 
+use crate::file_dialog::FileDialog;
 use std::path::PathBuf;
 
 use egui::{Key, Ui, ViewportCommand};
@@ -399,14 +400,14 @@ impl ProjectWindow {
     }
 }
 
-fn dialog() -> rfd::FileDialog {
+fn dialog() -> FileDialog {
     let start = std::env::var_os("HOME")
         .map(PathBuf::from)
         .map(|h| h.join("Musik"))
         .filter(|p| p.is_dir());
     match start {
-        Some(dir) => rfd::FileDialog::new().set_directory(dir),
-        None => rfd::FileDialog::new(),
+        Some(dir) => FileDialog::new().set_directory(dir),
+        None => FileDialog::new(),
     }
 }
 

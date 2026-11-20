@@ -196,19 +196,23 @@ impl ProjectWindow {
         ctl.send(Command::Play);
         // Rechnen im eigenen Thread (für die Plugins der Audio-Thread).
         let frames = usize::try_from(end - start).map_err(|e| e.to_string())?;
-        let worker = std::thread::Builder::new()
+        let work = move || {
+            let mut out = vec![0.0f32; frames * 2];
+            for block in out.chunks_mut(BLOCK * 2) {
+                core.process(block);
+            }
+            (core, out)
+        };
+        #[cfg(not(target_arch = "wasm32"))]
+        let (mut core, out) = std::thread::Builder::new()
             .name("studiocraft-render".into())
-            .spawn(move || {
-                let mut out = vec![0.0f32; frames * 2];
-                for block in out.chunks_mut(BLOCK * 2) {
-                    core.process(block);
-                }
-                (core, out)
-            })
-            .map_err(|e| format!("Render-Thread: {e}"))?;
-        let (mut core, out) = worker
+            .spawn(work)
+            .map_err(|e| format!("Render-Thread: {e}"))?
             .join()
             .map_err(|_| "Rendern abgebrochen".to_owned())?;
+        // Im Browser gibt es keine Threads (und keine Plugins): direkt hier rechnen.
+        #[cfg(target_arch = "wasm32")]
+        let (mut core, out) = work();
         // Ketten zurück in den Hauptthread und hier freigeben.
         for i in slots {
             ctl.send(Command::SetInserts(i, None));

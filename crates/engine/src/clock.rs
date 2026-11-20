@@ -2,13 +2,12 @@
 //! Damit lassen sich Abspiel- und Aufnahmezeitpunkte vergleichen, um die
 //! Aufnahme latenzfrei an die richtige Projektposition zu legen.
 
-use std::{
-    sync::{
-        OnceLock,
-        atomic::{AtomicU64, Ordering},
-    },
-    time::Instant,
+use std::sync::{
+    OnceLock,
+    atomic::{AtomicU64, Ordering},
 };
+
+use web_time::Instant;
 
 static EPOCH: OnceLock<Instant> = OnceLock::new();
 

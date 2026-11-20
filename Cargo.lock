@@ -3562,6 +3562,7 @@ dependencies = [
  "rtrb",
  "studiocraft-plugin-host",
  "studiocraft-project",
+ "web-time",
 ]
 
 [[package]]
@@ -3605,6 +3606,21 @@ dependencies = [
  "studiocraft-engine",
  "studiocraft-plugin-host",
  "studiocraft-project",
+ "web-time",
+]
+
+[[package]]
+name = "studiocraft-web"
+version = "0.1.0"
+dependencies = [
+ "eframe",
+ "egui",
+ "studiocraft-engine",
+ "studiocraft-project",
+ "studiocraft-ui",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
 ]
 
 [[package]]

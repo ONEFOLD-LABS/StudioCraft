@@ -6,8 +6,8 @@
 //! Ergebnis mit [`ProjectWindow::audio_switched`]. Der Eingang wird bei der nächsten
 //! Aufnahme mit dem neuen Gerät geöffnet.
 
-use studiocraft_engine::DeviceChoice;
 use studiocraft_engine::output::{BLOCK_SIZES, SAMPLE_RATES, available_hosts};
+use studiocraft_engine::{DeviceChoice, EngineControl};
 
 use crate::ProjectWindow;
 
@@ -109,6 +109,15 @@ impl ProjectWindow {
     }
 
     /// Ergebnis eines Gerätewechsels durch die App: neue Statuszeile oder Fehler.
+    /// Hängt eine Engine an, die erst nach dem Start entsteht (im Browser gibt es Ton erst
+    /// nach der ersten Eingabe). Song und Inserts werden danach neu an sie übergeben.
+    pub fn attach_transport(&mut self, transport: EngineControl, status: String) {
+        self.sample_rate = transport.sample_rate;
+        self.transport = Some(transport);
+        self.audio_status = status;
+        self.dirty = true;
+    }
+
     pub fn audio_switched(&mut self, result: Result<String, String>) {
         match result {
             Ok(status) => {
