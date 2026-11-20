@@ -27,6 +27,7 @@ pub mod input;
 pub mod inserts;
 pub mod meters;
 pub mod midi;
+mod midi_backend;
 pub mod midi_out;
 pub mod monitor;
 pub mod offline;

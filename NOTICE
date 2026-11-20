@@ -28,3 +28,6 @@ packaging/macos), licensed under Apache-2.0.
 Linux packaging: packaging/linux/flatpak-bundle.sh, the Flatpak manifest and
 postinst.sh are adapted from SoundCraft (storytold/soundcraft, packaging/linux),
 licensed under Apache-2.0.
+
+FreeBSD packaging: packaging/freebsd/package.sh is adapted from SoundCraft
+(storytold/soundcraft, packaging/freebsd), licensed under Apache-2.0.
