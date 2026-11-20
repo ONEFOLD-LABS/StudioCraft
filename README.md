@@ -5,7 +5,7 @@ personal project. Its operating concept follows the established DAW workflow des
 [`docs/spec.md`](docs/spec.md) and is built clean-room: no code, assets or texts from other
 products, no decompiling or reverse engineering.
 
-The project follows the conventions of the open Craft app family (pure Rust, egui, permissive
+The project follows the conventions inspired of the open Craft app family (pure Rust, egui, permissive
 licences, same packaging layout) and uses some of its shared libraries (`craft-audio`,
 `craft-window`) and CI actions. It is not an official part of that family.
 
