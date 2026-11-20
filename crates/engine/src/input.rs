@@ -67,17 +67,32 @@ pub struct Recorder {
 
 /// Laufender Eingang. Beim Drop endet der Stream.
 pub struct AudioInput {
-    _stream: Stream,
+    _stream: InputStream,
     pub info: InputInfo,
     /// Pegel und Anzeige je Gerätekanal.
     pub levels: Arc<InputLevels>,
 }
 
 pub struct PreparedInput {
-    device: Device,
-    config: StreamConfig,
-    format: SampleFormat,
+    backend: Backend,
     pub info: InputInfo,
+}
+
+enum Backend {
+    Cpal {
+        device: Device,
+        config: StreamConfig,
+        format: SampleFormat,
+    },
+    #[cfg(windows)]
+    Wasapi(crate::wasapi::Prepared),
+}
+
+/// Laufender Eingang über cpal oder den eigenen WASAPI-Pfad; beim Drop endet er.
+enum InputStream {
+    Cpal(#[allow(dead_code)] Stream),
+    #[cfg(windows)]
+    Wasapi(#[allow(dead_code)] crate::wasapi::Running),
 }
 
 impl PreparedInput {
@@ -92,6 +107,69 @@ impl PreparedInput {
         device: Option<&str>,
         rate: u32,
     ) -> Result<Self, String> {
+        #[cfg(windows)]
+        if let Some(mode) = host_name.and_then(crate::wasapi::Mode::from_host) {
+            return Self::open_wasapi(mode, device, rate);
+        }
+        Self::open_cpal(host_name, device, rate)
+    }
+
+    /// Eigener WASAPI-Eingang (exklusiv oder mit geringer Latenz, wie die Ausgabe). Lehnt das
+    /// Gerät den Modus ab, geht es eine Stufe zurück bis zum gemeinsamen Modus über cpal.
+    #[cfg(windows)]
+    fn open_wasapi(
+        mode: crate::wasapi::Mode,
+        device: Option<&str>,
+        rate: u32,
+    ) -> Result<Self, String> {
+        use crate::wasapi::{Direction, Mode};
+        let host = crate::output::host_by_name(Some(mode.host_name()))?;
+        let dev = match device {
+            None => host
+                .default_input_device()
+                .ok_or("Kein Audio-Eingang gefunden")?,
+            Some(wanted) => host
+                .input_devices()
+                .map_err(|e| format!("Eingabegeräte: {e}"))?
+                .find(|d| crate::output::device_name(d) == wanted)
+                .ok_or_else(|| format!("Eingabegerät „{wanted}“ nicht gefunden"))?,
+        };
+        let name = crate::output::device_name(&dev);
+        let id = dev
+            .id()
+            .map_err(|e| format!("Eingang „{name}“: {e}"))?
+            .id()
+            .to_owned();
+        let mut modes = vec![mode];
+        if mode == Mode::Exclusive {
+            modes.push(Mode::LowLatency);
+        }
+        for m in modes {
+            // Fehler hier: nächste Stufe; der gemeinsame Modus meldet den Grund selbst.
+            if let Ok(prepared) = crate::wasapi::prepare(
+                &id,
+                Direction::Capture,
+                m,
+                rate,
+                crate::output::DEFAULT_BLOCK_FRAMES,
+            ) && prepared.format.rate == rate
+            {
+                let info = InputInfo {
+                    host: m.host_name().to_owned(),
+                    device: name,
+                    sample_rate: prepared.format.rate,
+                    channels: prepared.format.channels,
+                };
+                return Ok(Self {
+                    backend: Backend::Wasapi(prepared),
+                    info,
+                });
+            }
+        }
+        Self::open_cpal(Some("WASAPI"), Some(&name), rate)
+    }
+
+    fn open_cpal(host_name: Option<&str>, device: Option<&str>, rate: u32) -> Result<Self, String> {
         let host = crate::output::host_by_name(host_name)?;
         let device = match device {
             None => host
@@ -128,9 +206,11 @@ impl PreparedInput {
             channels: config.channels,
         };
         Ok(Self {
-            device,
-            config,
-            format,
+            backend: Backend::Cpal {
+                device,
+                config,
+                format,
+            },
             info,
         })
     }
@@ -138,32 +218,45 @@ impl PreparedInput {
     /// Startet Eingang und Recorder-Thread. Der dritte Teil speist das Mithören und gehört
     /// per [`crate::Command::SetMonitorInput`] in die Engine.
     pub fn start(self) -> Result<(AudioInput, Recorder, MonitorInput), String> {
-        let Self {
-            device,
-            config,
-            format,
-            info,
-        } = self;
-        let capacity = config.sample_rate as usize * usize::from(config.channels) * RING_SECONDS;
+        let Self { backend, info } = self;
+        let capacity = info.sample_rate as usize * usize::from(info.channels) * RING_SECONDS;
         let (producer, consumer) = rtrb::RingBuffer::new(capacity);
-        let (monitor_tx, monitor) = monitor_ring(
-            config.channels,
-            config.sample_rate,
-            crate::core::SCRATCH_FRAMES,
-        );
+        let (monitor_tx, monitor) =
+            monitor_ring(info.channels, info.sample_rate, crate::core::SCRATCH_FRAMES);
         let overruns = Arc::new(AtomicU64::new(0));
         let clock = Arc::new(CaptureClock::default());
         let levels = Arc::new(InputLevels::default());
-        let (o, c, l) = (overruns.clone(), clock.clone(), levels.clone());
-        let stream = match format {
-            SampleFormat::F32 => build::<f32>(&device, &config, producer, monitor_tx, o, c, l),
-            SampleFormat::I16 => build::<i16>(&device, &config, producer, monitor_tx, o, c, l),
-            SampleFormat::I32 => build::<i32>(&device, &config, producer, monitor_tx, o, c, l),
-            SampleFormat::U16 => build::<u16>(&device, &config, producer, monitor_tx, o, c, l),
-            SampleFormat::F64 => build::<f64>(&device, &config, producer, monitor_tx, o, c, l),
-            other => Err(format!("Sampleformat {other} wird nicht unterstützt")),
-        }?;
-        stream.play().map_err(|e| format!("Eingang starten: {e}"))?;
+        let sink = InputSink {
+            producer,
+            monitor: monitor_tx,
+            overruns: overruns.clone(),
+            clock: clock.clone(),
+            levels: levels.clone(),
+            channels: usize::from(info.channels.max(1)),
+            frames_seen: 0,
+        };
+        let stream = match backend {
+            Backend::Cpal {
+                device,
+                config,
+                format,
+            } => {
+                let stream = match format {
+                    SampleFormat::F32 => build::<f32>(&device, &config, sink),
+                    SampleFormat::I16 => build::<i16>(&device, &config, sink),
+                    SampleFormat::I32 => build::<i32>(&device, &config, sink),
+                    SampleFormat::U16 => build::<u16>(&device, &config, sink),
+                    SampleFormat::F64 => build::<f64>(&device, &config, sink),
+                    other => Err(format!("Sampleformat {other} wird nicht unterstützt")),
+                }?;
+                stream.play().map_err(|e| format!("Eingang starten: {e}"))?;
+                InputStream::Cpal(stream)
+            }
+            #[cfg(windows)]
+            Backend::Wasapi(prepared) => {
+                InputStream::Wasapi(prepared.start(crate::wasapi::Job::Capture(Box::new(sink)))?)
+            }
+        };
         let recorder =
             Recorder::spawn_with_clock(consumer, info.channels, info.sample_rate, overruns, clock);
         Ok((
@@ -178,69 +271,84 @@ impl PreparedInput {
     }
 }
 
-fn build<T>(
-    device: &Device,
-    config: &StreamConfig,
-    mut producer: rtrb::Producer<f32>,
-    mut monitor: rtrb::Producer<f32>,
+/// Was der Eingangs-Callback braucht; gleich für cpal und den eigenen WASAPI-Pfad.
+pub(crate) struct InputSink {
+    producer: rtrb::Producer<f32>,
+    monitor: rtrb::Producer<f32>,
     overruns: Arc<AtomicU64>,
     clock: Arc<CaptureClock>,
     levels: Arc<InputLevels>,
-) -> Result<Stream, String>
+    channels: usize,
+    frames_seen: u64,
+}
+
+impl InputSink {
+    /// Nimmt einen verschachtelten Gerätepuffer an. `latency_ns`: wie lange das erste Sample
+    /// schon zurückliegt. Echtzeit: nur kopieren, nie warten.
+    pub(crate) fn push<T>(&mut self, data: &[T], latency_ns: u64)
+    where
+        T: SizedSample,
+        f32: FromSample<T>,
+    {
+        let channels = self.channels;
+        // Wann das erste Sample dieses Puffers erfasst wurde.
+        self.clock
+            .publish(self.frames_seen, now_nanos().saturating_sub(latency_ns));
+        self.frames_seen += (data.len() / channels) as u64;
+
+        // Pegel der Eingangskanalzüge, einmal je Puffer gelesen.
+        let mut gains = [1.0f32; MAX_INPUT_CHANNELS];
+        for (c, g) in gains.iter_mut().enumerate().take(channels) {
+            *g = self.levels.gain(c);
+        }
+        let sample = |i: usize, s: &T| -> f32 {
+            let v = s.to_sample::<f32>();
+            gains.get(i % channels).map_or(v, |g| v * g)
+        };
+        let mut peaks = [0.0f32; MAX_INPUT_CHANNELS];
+        for (i, s) in data.iter().enumerate() {
+            if let Some(p) = peaks.get_mut(i % channels) {
+                *p = p.max(sample(i, s).abs());
+            }
+        }
+        for (c, &p) in peaks.iter().enumerate().take(channels) {
+            self.levels.feed(c, p);
+        }
+
+        let n = data.len().min(self.producer.slots());
+        if let Ok(mut chunk) = self.producer.write_chunk_uninit(n) {
+            let (a, b) = chunk.as_mut_slices();
+            let mut src = data.iter().enumerate().map(|(i, s)| sample(i, s));
+            for slot in a.iter_mut().chain(b.iter_mut()) {
+                slot.write(src.next().unwrap_or(0.0));
+            }
+            // SAFETY: alle `n` Plätze wurden oben beschrieben.
+            unsafe { chunk.commit_all() };
+        }
+        push_frames(
+            &mut self.monitor,
+            channels,
+            data.iter().enumerate().map(|(i, s)| sample(i, s)),
+        );
+        if n < data.len() {
+            self.overruns
+                .fetch_add((data.len() - n) as u64, Ordering::Relaxed);
+        }
+    }
+}
+
+fn build<T>(device: &Device, config: &StreamConfig, mut sink: InputSink) -> Result<Stream, String>
 where
     T: SizedSample,
     f32: FromSample<T>,
 {
-    let channels = usize::from(config.channels.max(1));
-    let mut frames_seen = 0u64;
     device
         .build_input_stream(
             *config,
             move |data: &[T], info: &cpal::InputCallbackInfo| {
-                // Echtzeit: nur kopieren, nie warten.
-                // Wann das erste Sample dieses Puffers erfasst wurde.
                 let ts = info.timestamp();
                 let latency = ts.callback.saturating_duration_since(ts.capture).as_nanos() as u64;
-                clock.publish(frames_seen, now_nanos().saturating_sub(latency));
-                frames_seen += (data.len() / channels) as u64;
-
-                // Pegel der Eingangskanalzüge, einmal je Puffer gelesen.
-                let mut gains = [1.0f32; MAX_INPUT_CHANNELS];
-                for (c, g) in gains.iter_mut().enumerate().take(channels) {
-                    *g = levels.gain(c);
-                }
-                let sample = |i: usize, s: &T| -> f32 {
-                    let v = s.to_sample::<f32>();
-                    gains.get(i % channels).map_or(v, |g| v * g)
-                };
-                let mut peaks = [0.0f32; MAX_INPUT_CHANNELS];
-                for (i, s) in data.iter().enumerate() {
-                    if let Some(p) = peaks.get_mut(i % channels) {
-                        *p = p.max(sample(i, s).abs());
-                    }
-                }
-                for (c, &p) in peaks.iter().enumerate().take(channels) {
-                    levels.feed(c, p);
-                }
-
-                let n = data.len().min(producer.slots());
-                if let Ok(mut chunk) = producer.write_chunk_uninit(n) {
-                    let (a, b) = chunk.as_mut_slices();
-                    let mut src = data.iter().enumerate().map(|(i, s)| sample(i, s));
-                    for slot in a.iter_mut().chain(b.iter_mut()) {
-                        slot.write(src.next().unwrap_or(0.0));
-                    }
-                    // SAFETY: alle `n` Plätze wurden oben beschrieben.
-                    unsafe { chunk.commit_all() };
-                }
-                push_frames(
-                    &mut monitor,
-                    channels,
-                    data.iter().enumerate().map(|(i, s)| sample(i, s)),
-                );
-                if n < data.len() {
-                    overruns.fetch_add((data.len() - n) as u64, Ordering::Relaxed);
-                }
+                sink.push(data, latency);
             },
             |err| eprintln!("Audio-Eingang: {err}"),
             None,
