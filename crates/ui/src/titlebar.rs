@@ -1,8 +1,8 @@
-//! Titelleiste wie in den anderen Craft-Apps: App-Symbol, Menü, Projekt-Titel und Fensterknöpfe
+//! Eigene Titelleiste: App-Symbol, Menü, Projekt-Titel und Fensterknöpfe
 //! in einer Zeile, statt Titelzeile des Systems plus Menüzeile.
 //!
-//! Wer den Rahmen zeichnet, entscheidet `craft-window` (storytold/craft-libs) für alle Craft-Apps
-//! gleich: auf Windows, GNOME, KDE und den meisten Desktops die App, auf Tiling-Desktops das
+//! Wer den Rahmen zeichnet, entscheidet `craft-window` (storytold/craft-libs) nach einer festen
+//! Regel: auf Windows, GNOME, KDE und den meisten Desktops die App, auf Tiling-Desktops das
 //! System, auf macOS die App mit den Ampelknöpfen über ihrer Leiste. Die Knöpfe stehen in der
 //! Reihenfolge des Desktops. `STUDIOCRAFT_TITLEBAR=system` (oder `CRAFT_TITLEBAR`) behält den
 //! Rahmen des Systems, `=app` erzwingt die eigene Leiste.

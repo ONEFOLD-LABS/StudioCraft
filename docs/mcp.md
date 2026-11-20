@@ -6,8 +6,8 @@ Clients mit `2025-03-26` und `2024-11-05` werden angenommen). So kann ein Agent 
 Claude Desktop, Codex, Cursor …) Projekte anlegen, bearbeiten, speichern und als Mixdown rendern.
 
 Der Server steckt in `crates/automation` (`studiocraft-automation`). Das Protokoll kommt aus
-`craft-mcp-server`, der Steuerkanal zur App aus `craft-control` (beide craft-libs), wie in den
-anderen Craft-Apps. Es gibt zwei Betriebsarten:
+`craft-mcp-server`, der Steuerkanal zur App aus `craft-control` (beide craft-libs). Es gibt
+zwei Betriebsarten:
 
 | Betriebsart | Aufruf | Was gesteuert wird |
 |---|---|---|
@@ -75,7 +75,7 @@ studiocraft-cli mcp --automation-read-root /arbeit/projekt --automation-write-ro
 - `ui_click` klickt wie die Maus in der Mitte des Elements, also nur, was im Fenster sichtbar
   ist. Ein Dialog, der durch den Klick aufgeht, ist beim nächsten `ui_inspect` zu sehen.
 - Die App selbst prüft keine Pfade. Wer die Token-Datei lesen kann (also derselbe Benutzer), kann
-  sie direkt steuern, wie bei den anderen Craft-Apps. Die Begrenzung gilt für den MCP-Server.
+  sie direkt steuern. Die Begrenzung gilt für den MCP-Server.
 
 ## Dateizugriff begrenzen
 

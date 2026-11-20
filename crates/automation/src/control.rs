@@ -4,7 +4,7 @@
 //! code as the headless server ([`crate::exec`]).
 //!
 //! The app itself does not confine paths: anyone who can read the user's token file can drive it,
-//! as with the other Craft apps. `studiocraft-cli mcp --connect` confines them before they are
+//! by design. `studiocraft-cli mcp --connect` confines them before they are
 //! sent ([`crate::confine`]).
 
 use std::ffi::OsString;

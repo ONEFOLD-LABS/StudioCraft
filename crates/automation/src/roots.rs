@@ -1,4 +1,4 @@
-//! Confined file access for agents (craft-contrib standard `app-agents`, rule 18): every path an
+//! Confined file access for agents: every path an
 //! agent passes must lie inside a read root (to read) or a write root (to write).
 //!
 //! A path is made absolute against the working directory and its links are followed. For a path
