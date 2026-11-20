@@ -142,6 +142,8 @@ pub fn apply(samples: &mut [f32], step: &studiocraft_project::ClipProcess) {
         K::FadeIn => fade_in(samples, r),
         K::FadeOut => fade_out(samples, r),
         K::RemoveDc => remove_dc(samples, r),
+        // Plugins rechnet die Oberfläche mit einer Instanz (`processes_ui.rs`).
+        K::Plugin => {}
     }
 }
 
@@ -232,10 +234,8 @@ mod tests {
     fn a_process_list_renders_in_order_and_skips_switched_off_steps() {
         use studiocraft_project::{ClipProcess, ProcessKind};
         let step = |kind, on| ClipProcess {
-            kind,
-            from: 0,
-            to: 4,
             on,
+            ..ClipProcess::new(kind, 0, 4)
         };
         let src: Vec<f32> = (1..=4).flat_map(|i| [i as f32, i as f32]).collect();
         let out = render(

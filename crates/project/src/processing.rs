@@ -35,6 +35,8 @@ pub enum ProcessKind {
     FadeOut,
     /// Gleichanteil entfernen.
     RemoveDc,
+    /// Ein Effekt-Plugin offline (Plugin und Einstellungen in [`ClipProcess::plugin`]).
+    Plugin,
 }
 
 impl ProcessKind {
@@ -49,6 +51,7 @@ impl ProcessKind {
             Self::FadeIn => "Fade-In",
             Self::FadeOut => "Fade-Out",
             Self::RemoveDc => "DC-Offset entfernen",
+            Self::Plugin => "Plugin",
         }
     }
 
@@ -68,7 +71,7 @@ impl ProcessKind {
 }
 
 /// Eine Bearbeitung im Frame-Bereich `from..to` des Original-Clips.
-#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ClipProcess {
     #[serde(flatten)]
     pub kind: ProcessKind,
@@ -77,6 +80,30 @@ pub struct ClipProcess {
     /// Ausgeschaltet: bleibt in der Liste, wirkt aber nicht.
     #[serde(default = "on", skip_serializing_if = "is_on")]
     pub on: bool,
+    /// Bei [`ProcessKind::Plugin`]: das Plugin mit Parametern und Zustand.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub plugin: Option<crate::InsertSlot>,
+}
+
+impl ClipProcess {
+    /// Eine eingebaute Bearbeitung im Bereich `from..to`.
+    pub fn new(kind: ProcessKind, from: u64, to: u64) -> Self {
+        Self {
+            kind,
+            from: from.min(to),
+            to: from.max(to),
+            on: true,
+            plugin: None,
+        }
+    }
+
+    /// Name für Listen: bei Plugins der Plugin-Name.
+    pub fn name(&self) -> &str {
+        match (&self.kind, &self.plugin) {
+            (ProcessKind::Plugin, Some(p)) => &p.name,
+            (k, _) => k.label(),
+        }
+    }
 }
 
 fn on() -> bool {
@@ -154,12 +181,7 @@ mod tests {
     }
 
     fn step(kind: ProcessKind) -> ClipProcess {
-        ClipProcess {
-            kind,
-            from: 0,
-            to: 100,
-            on: true,
-        }
+        ClipProcess::new(kind, 0, 100)
     }
 
     #[test]
@@ -193,10 +215,9 @@ mod tests {
             Derived {
                 source: a,
                 steps: vec![ClipProcess {
-                    kind: ProcessKind::Gain { db: f32::NAN },
                     from: 80,
                     to: 1000,
-                    on: true,
+                    ..ClipProcess::new(ProcessKind::Gain { db: f32::NAN }, 0, 0)
                 }],
             },
         );
@@ -216,9 +237,32 @@ mod tests {
         );
         assert!(p.sanitize_derived());
         assert_eq!(p.derived.len(), 1);
-        let s = p.derived[&b].steps[0];
+        let s = p.derived[&b].steps[0].clone();
         assert_eq!(s.kind, ProcessKind::Gain { db: 0.0 });
         assert_eq!((s.from, s.to), (50, 50));
         assert!(!p.sanitize_derived());
+    }
+
+    #[test]
+    fn plugin_steps_keep_their_settings_through_save_and_load() {
+        let mut p = Project::default();
+        let a = clip(&mut p, 1000);
+        let b = clip(&mut p, 1000);
+        let slot = crate::InsertSlot {
+            plugin_id: "org.example.delay".into(),
+            name: "Delay".into(),
+            bypass: false,
+            params: vec![(3, 0.25)],
+            state: Some("AAEC".into()),
+        };
+        let step = ClipProcess {
+            plugin: Some(slot.clone()),
+            ..ClipProcess::new(ProcessKind::Plugin, 0, 500)
+        };
+        assert_eq!(step.name(), "Delay");
+        p.set_derived(b, a, vec![step]);
+        let json = serde_json::to_string(&p).unwrap();
+        let back: Project = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.derived[&b].steps[0].plugin, Some(slot));
     }
 }
