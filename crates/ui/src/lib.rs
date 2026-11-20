@@ -188,6 +188,9 @@ pub struct ProjectWindow {
     clipboard: shortcuts::Clipboard,
     /// Rechte Zone (Medien, Plugins) sichtbar.
     show_right: bool,
+    /// KI-Assistent: die App bietet ihn an (`enable_assistant`) und zeigt ihn gerade.
+    assistant_available: bool,
+    show_assistant: bool,
     right: rightzone::RightZone,
     view: timeline::View,
     selected_track: Option<usize>,
@@ -385,6 +388,8 @@ impl ProjectWindow {
             show_status: true,
             clipboard: shortcuts::Clipboard::default(),
             show_right: false,
+            assistant_available: false,
+            show_assistant: false,
             right: rightzone::RightZone::default(),
             view: timeline::View::default(),
             selected_track: Some(0),
@@ -1011,6 +1016,13 @@ impl ProjectWindow {
 
     /// Zeichnet das ganze Projektfenster.
     pub fn ui(&mut self, ui: &mut Ui) {
+        self.ui_with(ui, &mut |_, _| {});
+    }
+
+    /// Wie [`Self::ui`]; `side` zeichnet eine Leiste der App (den KI-Assistenten) unter
+    /// Menü und Werkzeugzeile und über der Transportleiste, rechts neben Arrangement und
+    /// unterer Zone.
+    pub fn ui_with(&mut self, ui: &mut Ui, side: &mut dyn FnMut(&mut Ui, &mut ProjectWindow)) {
         if !self.theme_installed {
             theme::install(ui.ctx(), self.theme);
             self.theme_installed = true;
@@ -1062,6 +1074,7 @@ impl ProjectWindow {
         if self.show_transport {
             egui::Panel::bottom("transportleiste").show(ui, |ui| self.transport_bar(ui));
         }
+        side(ui, self);
         let mut zones = focus::ZoneRects::default();
         if self.show_lower {
             let r = egui::Panel::bottom(("untere-zone", self.layout_gen))

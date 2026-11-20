@@ -105,6 +105,12 @@ fn parse(text: &'static str) -> HashMap<&'static str, &'static str> {
         .collect()
 }
 
+/// Ob es für den deutschen Text `de` eine englische Übersetzung gibt (für die Tests anderer
+/// Crates, die `tr` benutzen).
+pub fn has_english(de: &str) -> bool {
+    EN.contains_key(de)
+}
+
 /// Übersetzt den deutschen Text `de` in die eingestellte Sprache.
 pub fn tr(de: &'static str) -> &'static str {
     match CURRENT.with(Cell::get) {
@@ -126,13 +132,6 @@ pub fn tr_dyn(de: &str) -> String {
         .map(|w| EN.get(w).copied().unwrap_or(w))
         .collect::<Vec<_>>()
         .join(" ")
-}
-
-/// Ob es für `de` eine englische Zeile gibt (Tests für Texte, die nicht als `tr("…")` im Code
-/// stehen, etwa Befehlsnamen).
-#[cfg(test)]
-pub(crate) fn has_english(de: &str) -> bool {
-    EN.contains_key(de)
 }
 
 /// Wie [`tr`], füllt danach `{name}`-Platzhalter mit den Werten.

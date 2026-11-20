@@ -209,6 +209,9 @@ impl ProjectWindow {
                 ui.checkbox(&mut self.show_transport, tr("Transportleiste (F2)"));
                 ui.checkbox(&mut self.show_status, tr("Statuszeile"));
                 ui.checkbox(&mut self.show_right, tr("Rechte Zone (Alt+R)"));
+                if self.assistant_available {
+                    ui.checkbox(&mut self.show_assistant, tr("KI-Assistent"));
+                }
                 ui.menu_button(tr("Layouts"), |ui| self.layouts_menu(ui));
                 if ui
                     .selectable_label(self.windows.mixer, tr("Mixer-Fenster (F3)"))

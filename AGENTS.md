@@ -74,6 +74,7 @@ Plugin editor windows need a display: `STUDIOCRAFT_GUI_TEST=1 cargo test -p stud
 | `crates/graph` | Signal-graph helpers. |
 | `crates/ui` | egui UI: project window, timeline, inspector, mixer, key editor, menus, theme, settings. |
 | `crates/automation` | MCP server for AI agents (`studiocraft-cli mcp`): tools over a headless `ProjectWindow`, or over the app's window through its control channel (`studiocraft --control PORT`, `--connect`); file access confined to the granted roots. |
+| `crates/assistant` | AI assistant panel in the app: chat with an OpenAI-compatible model (local or cloud) that edits the project through the automation tools; consent before data leaves the computer; files only in the project folder. |
 | `apps/studiocraft` | The eframe desktop app. |
 | `apps/studiocraft-cli` | Command-line player for tests and scripting. |
 | `xtask` | `cargo xtask ci`, `cargo xtask version`. |
