@@ -32,6 +32,7 @@ pub mod quantize;
 pub mod recording;
 pub mod sanitize;
 pub mod shapes;
+pub mod smf;
 pub mod time;
 
 pub use automation::{AutoParam, AutoPoint, AutomationLane};
