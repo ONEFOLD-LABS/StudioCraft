@@ -61,10 +61,10 @@ fn caption_width(family: CaptionFamily) -> f32 {
 
 fn caption_button(ui: &mut Ui, which: Button, family: CaptionFamily, maximized: bool) {
     let label = match which {
-        Button::Minimize => "Minimieren",
-        Button::Maximize if maximized => "Wiederherstellen",
-        Button::Maximize => "Maximieren",
-        Button::Close => "Schließen",
+        Button::Minimize => crate::i18n::tr("Minimieren"),
+        Button::Maximize if maximized => crate::i18n::tr("Wiederherstellen"),
+        Button::Maximize => crate::i18n::tr("Maximieren"),
+        Button::Close => crate::i18n::tr("Schließen"),
     };
     let size = vec2(caption_width(family), ui.available_height());
     let (rect, resp) = ui.allocate_exact_size(size, Sense::click());
@@ -191,7 +191,7 @@ impl ProjectWindow {
                     .iter()
                     .map(|l| {
                         ui.painter()
-                            .layout_no_wrap((*l).to_owned(), font.clone(), t.text)
+                            .layout_no_wrap(crate::i18n::tr(l).to_owned(), font.clone(), t.text)
                             .size()
                             .x
                             + pad

@@ -261,3 +261,380 @@ Zurückspulen um einen Takt	Back one bar
 {name} · {n} Noten	{name} · {n} notes
 {name}: Event konnte nicht angelegt werden	{name}: the event could not be created
 {n} Events	{n} events
++ Controller-Spur	+ Controller Lane
+1 Takt	1 bar
+2 Takte	2 bars
+4 Takte	4 bars
+Ab dem Takt am Cursor (bzw. dem nächsten, wenn der Cursor im Takt steht)	From the bar at the cursor (or the next one if the cursor is inside a bar)
+Abspielen	Play
+Aftertouch	Aftertouch
+Akustisches Feedback	Acoustic feedback
+An Zoom anpassen	Adapt to zoom
+Anfangstempo	Start tempo
+Angeklickte und verschobene Noten erklingen	Clicked and moved notes sound
+Audio	Audio
+Aufnahme im Vorzähler abgebrochen	Recording stopped during the count-in
+Aufnahme nicht möglich: {e}	Cannot record: {e}
+Aufnahme: {e}	Recording: {e}
+Aus	Off
+Aus: festes Tempo aus der Transportleiste	Off: fixed tempo from the transport bar
+Auswahl	Select
+Auswahl vorhören	Preview selection
+Auswahl {a}–{b} s	Selection {a}–{b} s
+Bereich	Range
+Bildlaufleiste Spuren	Track scroll bar
+Bildlaufleiste Zeit	Time scroll bar
+Blau	Blue
+Clip fehlt im Pool	Clip missing from the pool
+Clip ist nicht geladen	Clip is not loaded
+Comping	Comping
+Cursor	Cursor
+Cycle aus Locatoren	Loop from Locators
+Cycle-Marker: die Locatoren liegen aufeinander	Loop marker: the locators are at the same position
+Die Ansicht folgt dem Cursor während der Wiedergabe	The view follows the cursor during playback
+Doppelklick auf ein Audio-Event öffnet es hier.	Double-click an audio event to open it here.
+Doppelklick auf einen Part öffnet ihn hier im Key-Editor	Double-click a part to open it here in the piano roll
+Eigene	Custom
+Eingefroren	Frozen
+Einpassen	Fit
+Einzeln:	Single:
+Ende	End
+Ersetzen	Replace
+Event auf Auswahl	Event to Selection
+Event fehlt	Event missing
+Event-Farbe	Event color
+Events	Events
+Events + Cursor	Events + Cursor
+Events + Raster + Cursor	Events + Grid + Cursor
+Exponentiell	Exponential
+Expression	Expression
+Fade	Fade
+Fade-In	Fade-in
+Fade-Out	Fade-out
+Festes Tempo – Tempospur im Inspector einschalten	Fixed tempo – switch on the tempo track in the inspector
+Folgen (F)	Follow (F)
+Frames (25 fps)	Frames (25 fps)
+FX-Kanal	FX Channel
+Gelb	Yellow
+Gestapelt	Stacked
+Gleiche Lautstärke	Equal gain
+Gleiche Leistung	Equal power
+Glocke	Bell
+Gruppe	Group
+Größe ändern	Resize
+Größe ändern, Inhalt mitschieben	Resize, slide content
+Größe ändern, Inhalt strecken	Resize, stretch content
+Grün	Green
+H	B
+High-Cut	High cut
+High-Shelf	High shelf
+Hinspringen	Go there
+Höchstens {max} Controller-Spuren	At most {max} controller lanes
+Höchstens {max} Stücke; der Rest bleibt ein Event	At most {max} pieces; the rest stays one event
+Im Cycle	In loop
+Inhalt strecken geht bisher nur bei MIDI-Parts	Stretching content only works on MIDI parts so far
+kein Audio-Event	not an audio event
+kein Bereich	no range
+Keine Auswahl	No selection
+Keine Spur aufnahmebereit (R im Spurkopf)	No track is record-enabled (R in the track header)
+Klang	Sound
+Kleben	Glue
+Kurve Fade-In	Fade-in curve
+Kurve Fade-Out	Fade-out curve
+Lautstärke	Volume
+Lautstärke (dB)	Volume (dB)
+Low-Cut	Low cut
+Low-Shelf	Low shelf
+Länge	Length
+Länge (Ticks)	Length (ticks)
+Länge {len}	Length {len}
+Marker {id} gibt es nicht	Marker {id} does not exist
+Metronom	Metronome
+MIDI	MIDI
+MIDI-Aufnahme	MIDI recording
+MIDI: aus	MIDI: off
+MIDI: kein Eingang	MIDI: no input
+Mischen	Merge
+Mix	Mix
+Modulation	Modulation
+Nachträgliche Aufnahme: keine Instrument-Spur gewählt	Retrospective recording: no instrument track selected
+Nachträgliche Aufnahme: keine vollständige Note	Retrospective recording: no complete note
+Nachträgliche Aufnahme: nichts gespielt	Retrospective recording: nothing played
+Name von Marker {id}	Name of marker {id}
+Neue Audio-Spur	New audio track
+Neue Instrument-Spur	New instrument track
+Neuer Part	New part
+Noch keine Marker	No markers yet
+Normalisieren	Normalize
+normalisiert	normalized
+Orange	Orange
+Ordner	Folder
+Panorama	Pan
+Pink	Pink
+Pitchbend	Pitch bend
+Punkt am Cursor	Point at Cursor
+punktiert	dotted
+Quantisieren (Q)	Quantize (Q)
+Quantisierung	Quantize
+Quantisierung verwenden	Use quantize value
+Quantisierungs-Panel	Quantize Panel
+Rampe	Ramp
+Raster	Grid
+Raster + Cursor	Grid + Cursor
+Raster relativ	Grid relative
+Rot	Red
+S-Kurve	S-curve
+Sample-Editor: {e}	Sample editor: {e}
+Samples	Samples
+Schieben	Shuffle
+Sekunden	Seconds
+Snap-Modus	Snap mode
+Spur {name} entfernen	Remove lane {name}
+Spuren: ziehen oder daneben klicken	Tracks: drag or click beside it
+Spurfarbe übernehmen	Use track color
+Stereo kombiniert	Stereo combined
+Stereo-Balance	Stereo balance
+Stumm	Mute
+stumm	muted
+Stärke	Strength
+Swing	Swing
+Takt 1	Bar 1
+Takt {bar}	Bar {bar}
+Takt-Eins betonen	Accent the downbeat
+Taktart	Time signature
+Taktart Takt 1	Time signature bar 1
+Taktart Takt {bar}	Time signature bar {bar}
+Taktwechsel am Cursor	Time Signature Change at Cursor
+Tempo bei {pos}	Tempo at {pos}
+Tempo gleitet vom vorigen Punkt hierher	Tempo glides here from the previous point
+Tempospur aktiv	Tempo track active
+Tonhöhe	Pitch
+Tonhöhe „{t}“ nicht verstanden	Pitch “{t}” not understood
+Trennen	Split
+triolisch	triplet
+Türkis	Turquoise
+umgekehrt	reversed
+Umkehren	Reverse
+Velocity	Velocity
+Velocity „{t}“ nicht verstanden	Velocity “{t}” not understood
+Violett	Violet
+Vorzähler	Count-in
+Weitere Controller	More controllers
+Werte der ersten Note; Änderungen wirken relativ auf alle	Values of the first note; changes apply relatively to all
+Werte des ersten Events; Zeitwerte ändern alle relativ	Values of the first event; time values change all relatively
+Wiedergabe	Play
+Zeichnen	Draw
+Zeit: ziehen oder daneben klicken	Time: drag or click beside it
+Zeitkorrektur	Time Warp
+Zoom	Zoom
+Zählzeit	Beat
+{device} · {n} Kanäle	{device} · {n} channels
+{label} Nenner	{label} denominator
+{label} Zähler	{label} numerator
+{n} Noten	{n} notes
+{n} Take(s) aufgenommen, aber {overruns} Samples verloren (Puffer voll)	{n} take(s) recorded, but {overruns} samples lost (buffer full)
+{rows} Spuren	{rows} tracks
+Über bestehenden Parts	Over existing parts
++ Befehl	+ Command
+Abtastrate	Sample rate
+Aktuelles speichern	Save Current
+Alle	All
+Alle 10 Minuten	Every 10 minutes
+Alle 15 Minuten	Every 15 minutes
+Alle 2 Minuten	Every 2 minutes
+Alle 5 Minuten	Every 5 minutes
+An Ort und Stelle rendern	Render in Place
+Anzahl	Count
+Anzahl Sicherungen	Number of backups
+Audio importieren …	Import Audio…
+Audio- und MIDI-Geräte	Audio and MIDI Devices
+Audio-Dateien des Projekts (Pool)	The project's audio files (pool)
+Audiogerät nicht mehr verfügbar ({status}). Im Menü Transport unter „Audio- und MIDI-Geräte …“ ein anderes wählen.	Audio device no longer available ({status}). Choose another one under Transport > “Audio and MIDI Devices…”.
+Auf eine Spur ziehen oder erst eine Spur mit Mixer-Kanal wählen	Drag onto a track, or first select a track with a mixer channel
+Automatisch	Automatic
+Automatisch sichern	Autosave
+Befehl an Makro {slot} anhängen	Append a command to macro {slot}
+Bitte einen Namen für das Layout eingeben	Please enter a name for the layout
+Blockgröße	Block size
+Crossfade: die Events müssen sich auf einer Spur überlappen	Crossfade: the events must overlap on one track
+Dateibrowser mit Vorhören	File browser with preview
+Dateien	Files
+Dateiname	File name
+Der Pool ist leer. Audiodateien importieren oder ins Projekt ziehen.	The pool is empty. Import audio files or drag them into the project.
+Doppelklick oder auf eine leere Fläche ziehen: neue Instrument-Spur	Double-click or drag onto an empty area: new instrument track
+Doppelklick: als Insert auf die gewählte Spur; oder auf eine Spur ziehen	Double-click: insert on the selected track; or drag onto a track
+Effekt-Plugins: als Insert auf eine Spur legen	Effect plugins: put on a track as an insert
+Effekte	Effects
+Eine andere Abtastrate gilt nach einem Neustart.	A different sample rate takes effect after a restart.
+Erst ein Event oder einen Part auswählen	Select an event or part first
+Export übersteuert (Spitze {db} dBFS) – Ausgang leiser stellen	Export clipped (peak {db} dBFS) – turn the output down
+Exportieren	Export
+Fehlende Audiodateien: {liste}	Missing audio files: {liste}
+Format	Format
+Geteilte Kopien	Shared copies
+Host	Host
+Höchstens {max} Layouts; erst eins entfernen	At most {max} layouts; remove one first
+In die untere Zone	Back to the Bottom Panel
+Inserts, EQ, Fader und Panorama des Kanals	The channel's inserts, EQ, fader and pan
+Instrument-Plugins: neue Instrument-Spur anlegen	Instrument plugins: create a new instrument track
+Instrumente	Instruments
+Jede Minute	Every minute
+Kanäle (zwischen den Locatoren, sonst das ganze Projekt):	Channels (between the locators, otherwise the whole project):
+Kein Audio: Gerät getrennt	No audio: device disconnected
+Kein Ordner	No folder
+kein Ordner	no folder
+kein Ort für Einstellungen	no place for settings
+Keine	None
+Keine Kanäle gewählt	No channels selected
+Keine Makros	No macros
+Keine passenden Plugins gefunden	No matching plugins found
+Layout {slot} entfernen	Remove layout {slot}
+Layout {slot} ist nicht belegt	Layout {slot} is empty
+Letzten Befehl aus Makro {slot} entfernen	Remove the last command from macro {slot}
+Läuft im eigenen Fenster.	Running in its own window.
+Makros	Macros
+Makros bearbeiten …	Edit Macros…
+Maximieren	Maximize
+Medien	Media
+MIDI-Eingänge	MIDI inputs
+Minimieren	Minimize
+Mit Kanalbearbeitung	With channel processing
+Mit Kanaleinstellungen	With Channel Settings
+Name von Makro {slot}	Name of macro {slot}
+Neu laden	Reload
+Neueste Sicherung: {path}	Latest backup: {path}
+Nichts zu rendern	Nothing to render
+Noch keine Layouts gespeichert	No layouts saved yet
+Nur Instrument und Inserts	Instrument and Inserts Only
+Ordner neu einlesen	Reread folder
+Ordner …	Folder…
+Plugins	Plugins
+Rendern abgebrochen	Rendering aborted
+Rendern ohne: {liste}	Rendering without: {liste}
+Rendern: nur Stille	Render: silence only
+Schließen	Close
+Sicherung fehlgeschlagen	Backup failed
+Sicherung fehlgeschlagen: {e}	Backup failed: {e}
+Sicherung geöffnet: {path}	Backup opened: {path}
+Sicherung öffnen	Open Backup
+Spur einfrieren	Freeze Track
+Spur ist eingefroren – erst „Einfrieren aufheben“	The track is frozen – choose “Unfreeze” first
+Standard	Default
+Start	Start
+Stems exportieren	Export Stems
+StudioCraft wurde nicht sauber beendet.	StudioCraft did not shut down cleanly.
+Verwerfen	Discard
+Vorhören	Preview
+Vorhören stoppen	Stop preview
+Vorhören: {e}	Preview: {e}
+Wiederholen	Repeat
+Wird übernommen …	Applying…
+zip: keine .{ext}-Datei	zip: no .{ext} file
+zip: zu groß	zip: too large
+Zurückholen	Bring Back
+{name} (eingefroren)	{name} (frozen)
+{name} (gerendert)	{name} (rendered)
+{name}: keine Audiodaten	{name}: no audio data
+{n} Dateien geschrieben	{n} files written
+{projekt}, {kanal} und {nr} werden ersetzt	{projekt}, {kanal} and {nr} are replaced
+Übergeordneter Ordner	Parent folder
+Übernehmen	Apply
+Übernommen	Applied
+Alle auf Standard	All to Default
+Audio importieren	Import Audio
+Audio-Mixdown exportieren	Export Audio Mixdown
+Auf Projekt zoomen	Zoom to Project
+Bearbeitung	Editing
+Cycle	Loop
+Der Wiedergabe folgen	Follow Playback
+Editor im eigenen Fenster	Editor in Its Own Window
+Eingabe	Enter
+Entf	Del
+Exportieren …	Export…
+Horizontal auszoomen	Zoom Out Horizontally
+Horizontal einzoomen	Zoom In Horizontally
+Importieren …	Import…
+Inspector	Inspector
+Layout 1	Layout 1
+Layout 2	Layout 2
+Layout 3	Layout 3
+Layout 4	Layout 4
+Layout 5	Layout 5
+Layout 6	Layout 6
+Layout 7	Layout 7
+Layout 8	Layout 8
+Layout 9	Layout 9
+Leertaste	Space
+Linke Zone	Left Panel
+Locatoren auf Auswahl	Locators to Selection
+Länge kürzen	Shorten Length
+Länge verlängern	Extend Length
+Makro 1	Macro 1
+Makro 2	Macro 2
+Makro 3	Macro 3
+Makro 4	Macro 4
+Makro 5	Macro 5
+Makro 6	Macro 6
+Makro 7	Macro 7
+Makro 8	Macro 8
+Makro {slot}	Macro {slot}
+Makro {slot}: {name}	Macro {slot}: {name}
+Mixer-Fenster	Mixer Window
+Navigation	Navigation
+Noten eine Oktave höher	Notes One Octave Up
+Noten eine Oktave tiefer	Notes One Octave Down
+Nudge links	Nudge Left
+Nudge rechts	Nudge Right
+Nächste Spur	Next Track
+Nächstes Event	Next Event
+Pfeil hoch	Up
+Pfeil links	Left
+Pfeil rechts	Right
+Pfeil runter	Down
+Pos1	Home
+Punch-In	Punch In
+Punch-Out	Punch Out
+Rechte Zone	Right Panel
+Rücktaste	Backspace
+Setzen	Set
+Snap an/aus	Snap On/Off
+Solo	Solo
+Speichern unter	Save As
+Strg	Ctrl
+Tastaturbefehle	Keyboard Shortcuts
+Taste für {name} setzen	Set key for {name}
+Taste für „{name}“ drücken (Escape: abbrechen)	Press the key for “{name}” (Escape: cancel)
+Transportleiste	Transport Bar
+Umschalt	Shift
+Vorherige Spur	Previous Track
+Vorheriges Event	Previous Event
+Werkzeug Auswahl	Select Tool
+Werkzeug Bereich	Range Tool
+Werkzeug Comping	Comp Tool
+Werkzeug Kleben	Glue Tool
+Werkzeug Löschen	Erase Tool
+Werkzeug Stumm	Mute Tool
+Werkzeug Trennen	Split Tool
+Werkzeug Wiedergabe	Play Tool
+Werkzeug Zeichnen	Draw Tool
+Werkzeug Zeitkorrektur	Time Warp Tool
+Werkzeug Zoom	Zoom Tool
+Werkzeuge	Tools
+Zeile {line}: kein „=“	Line {line}: no “=”
+Zeile {line}: Makro im Makro ({step})	Line {line}: macro inside a macro ({step})
+Zeile {line}: mehr als {max} Befehle	Line {line}: more than {max} commands
+Zeile {line}: unbekannte Taste {key}	Line {line}: unknown key {key}
+Zeile {line}: unbekannter Befehl {step}	Line {line}: unknown command {step}
+Zeile {line}: unbekanntes Feld {field}	Line {line}: unknown field {field}
+Zeile {line}: unbekanntes Makro {slot}	Line {line}: unknown macro {slot}
+Zu Marker 1	Go to Marker 1
+Zu Marker 2	Go to Marker 2
+Zu Marker 3	Go to Marker 3
+Zu Marker 4	Go to Marker 4
+Zu Marker 5	Go to Marker 5
+Zu Marker 6	Go to Marker 6
+Zu Marker 7	Go to Marker 7
+Zu Marker 8	Go to Marker 8
+Zu Marker 9	Go to Marker 9
+{key} gehört schon zu „{name}“.	{key} already belongs to “{name}”.
+Öffnen	Open

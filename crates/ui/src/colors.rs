@@ -2,6 +2,7 @@
 //! erben sie. Ein Klick auf die Farbleiste im Spurkopf öffnet die Palette; über
 //! Bearbeiten → Event-Farbe bekommen gewählte Events eine eigene Farbe oder wieder die der Spur.
 
+use crate::i18n::tr;
 use egui::{Color32, Context, Id, Pos2, Response, Sense, Stroke, Ui, vec2};
 use studiocraft_project::TRACK_COLORS;
 
@@ -45,7 +46,7 @@ pub(crate) fn palette(ui: &mut Ui, current: Option<[u8; 3]>) -> Option<[u8; 3]> 
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 2.0;
         for (c, name) in TRACK_COLORS.iter().zip(NAMES) {
-            if swatch(ui, *c, name, current == Some(*c)).clicked() {
+            if swatch(ui, *c, crate::i18n::tr(name), current == Some(*c)).clicked() {
                 picked = Some(*c);
             }
         }
@@ -75,10 +76,10 @@ impl ProjectWindow {
             .show(ctx, |ui| {
                 egui::Frame::popup(ui.style())
                     .show(ui, |ui| {
-                        ui.label("Spurfarbe");
+                        ui.label(tr("Spurfarbe"));
                         let picked = palette(ui, Some(current));
                         let mut custom = rgb(current);
-                        let l = ui.weak("Eigene");
+                        let l = ui.weak(tr("Eigene"));
                         let changed = ui
                             .color_edit_button_srgba(&mut custom)
                             .labelled_by(l.id)
@@ -122,12 +123,12 @@ impl ProjectWindow {
     pub(crate) fn event_color_menu(&mut self, ui: &mut Ui) {
         let enabled = !self.selection.is_empty();
         ui.add_enabled_ui(enabled, |ui| {
-            ui.menu_button("Event-Farbe", |ui| {
+            ui.menu_button(tr("Event-Farbe"), |ui| {
                 if let Some(c) = palette(ui, None) {
                     self.set_event_color(Some(c));
                     ui.close();
                 }
-                if ui.button("Spurfarbe übernehmen").clicked() {
+                if ui.button(tr("Spurfarbe übernehmen")).clicked() {
                     self.set_event_color(None);
                     ui.close();
                 }

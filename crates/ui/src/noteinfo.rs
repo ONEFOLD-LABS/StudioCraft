@@ -4,6 +4,7 @@
 //! später: alle einen Takt später; Tonhöhe +2: alle zwei Halbtöne höher). Jede Änderung ist
 //! ein Rückgängig-Schritt.
 
+use crate::i18n::tr;
 use egui::{RichText, Ui};
 use studiocraft_project::{EventId, Position};
 
@@ -72,34 +73,48 @@ impl ProjectWindow {
         let multi = sel.len() > 1;
         if multi {
             let t = crate::theme::tokens(ui.ctx());
-            ui.label(RichText::new(format!("{} Noten", sel.len())).color(t.solo))
-                .on_hover_text("Werte der ersten Note; Änderungen wirken relativ auf alle");
+            ui.label(
+                RichText::new(crate::i18n::trf("{n} Noten", &[("n", &sel.len())])).color(t.solo),
+            )
+            .on_hover_text(tr(
+                "Werte der ersten Note; Änderungen wirken relativ auf alle",
+            ));
         }
         let tempo = &self.project.tempo;
         let start = ev.start.0.saturating_add_signed(n.start);
         let mut edits = Vec::new();
         if let Some(t) = field(
             ui,
-            "Anfang",
+            tr("Anfang"),
             tempo.format_position(Position(start)),
             80.0,
             multi,
         ) {
             edits.extend(tempo.parse_position(&t).map(|p| NoteEdit::Start(p.0)));
         }
-        if let Some(t) = field(ui, "Länge", tempo.format_length(n.length), 70.0, multi) {
+        if let Some(t) = field(ui, tr("Länge"), tempo.format_length(n.length), 70.0, multi) {
             edits.extend(tempo.parse_length(&t).map(NoteEdit::Length));
         }
-        if let Some(t) = field(ui, "Tonhöhe", note_name(n.pitch), 44.0, multi) {
+        if let Some(t) = field(ui, tr("Tonhöhe"), note_name(n.pitch), 44.0, multi) {
             match parse_pitch(&t) {
                 Some(p) => edits.push(NoteEdit::Pitch(p)),
-                None => self.message = Some(format!("Tonhöhe „{t}“ nicht verstanden")),
+                None => {
+                    self.message = Some(crate::i18n::trf(
+                        "Tonhöhe „{t}“ nicht verstanden",
+                        &[("t", &t)],
+                    ))
+                }
             }
         }
-        if let Some(t) = field(ui, "Velocity", n.velocity.to_string(), 36.0, multi) {
+        if let Some(t) = field(ui, tr("Velocity"), n.velocity.to_string(), 36.0, multi) {
             match t.trim().parse::<u8>() {
                 Ok(v) => edits.push(NoteEdit::Velocity(v.clamp(1, 127))),
-                Err(_) => self.message = Some(format!("Velocity „{t}“ nicht verstanden")),
+                Err(_) => {
+                    self.message = Some(crate::i18n::trf(
+                        "Velocity „{t}“ nicht verstanden",
+                        &[("t", &t)],
+                    ))
+                }
             }
         }
         for e in edits {

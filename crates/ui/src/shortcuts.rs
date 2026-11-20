@@ -10,6 +10,7 @@
 //! Die Kürzel werden vor [`ProjectWindow::handle_keys`] verbraucht, damit dort keine
 //! Doppelbelegung greift (z. B. Alt+X gegen X).
 
+use crate::i18n::tr;
 use studiocraft_project::{Event, EventId, Note, Position};
 
 use crate::ProjectWindow;
@@ -59,18 +60,18 @@ impl ProjectWindow {
         }
         let mut open = true;
         let mut run = false;
-        egui::Window::new("Wiederholen")
+        egui::Window::new(tr("Wiederholen"))
             .open(&mut open)
             .resizable(false)
             .collapsible(false)
             .show(ctx, |ui| {
                 ui.horizontal(|ui| {
-                    let l = ui.label("Anzahl");
+                    let l = ui.label(tr("Anzahl"));
                     ui.add(egui::DragValue::new(&mut self.repeat_dialog.count).range(1..=99))
                         .labelled_by(l.id);
                 });
-                ui.checkbox(&mut self.repeat_dialog.shared, "Geteilte Kopien");
-                if ui.button("Wiederholen").clicked() {
+                ui.checkbox(&mut self.repeat_dialog.shared, tr("Geteilte Kopien"));
+                if ui.button(tr("Wiederholen")).clicked() {
                     run = true;
                 }
             });
@@ -184,8 +185,9 @@ impl ProjectWindow {
                 let before = self.project.clone();
                 let ids = self.selection.clone();
                 if !self.project.crossfade_selection(&ids) && !ids.is_empty() {
-                    self.message =
-                        Some("Crossfade: die Events müssen sich auf einer Spur überlappen".into());
+                    self.message = Some(
+                        tr("Crossfade: die Events müssen sich auf einer Spur überlappen").into(),
+                    );
                 }
                 self.checkpoint(before);
             }

@@ -6,6 +6,7 @@
 //! in einem eigenen Thread (er ist für die Plugins der Audio-Thread), danach gehen Kern und
 //! Kette zurück und werden im Hauptthread freigegeben (CLAP-Thread-Regeln).
 
+use crate::i18n::tr;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -78,7 +79,7 @@ impl ProjectWindow {
     pub(crate) fn render_offline(&mut self, spec: RenderSpec) -> Result<Vec<f32>, String> {
         let (a, b) = spec.range;
         if b <= a {
-            return Err("Nichts zu rendern".into());
+            return Err(crate::i18n::tr("Nichts zu rendern").into());
         }
         // Aktuelle Plugin-Zustände ins Projekt, damit die frischen Instanzen sie laden.
         self.capture_plugin_states();
@@ -87,7 +88,7 @@ impl ProjectWindow {
         let keep: Vec<usize> = match spec.target {
             RenderTarget::Main => (0..project.tracks.len()).collect(),
             RenderTarget::Track(t) if t < project.tracks.len() => self.feeding(t),
-            RenderTarget::Track(_) => return Err("Nichts zu rendern".into()),
+            RenderTarget::Track(_) => return Err(crate::i18n::tr("Nichts zu rendern").into()),
         };
         let ids: Vec<u32> = keep.iter().map(|&i| project.tracks[i].id).collect();
         for (i, t) in project.tracks.iter_mut().enumerate() {
@@ -181,7 +182,10 @@ impl ProjectWindow {
             }
         }
         if !missing.is_empty() {
-            self.message = Some(format!("Rendern ohne: {}", missing.join(", ")));
+            self.message = Some(crate::i18n::trf(
+                "Rendern ohne: {liste}",
+                &[("liste", &missing.join(", "))],
+            ));
         }
         let tempo = project.tempo.clone();
         let start = tempo.frames(a, rate);
@@ -209,7 +213,7 @@ impl ProjectWindow {
             .spawn(work)
             .map_err(|e| format!("Render-Thread: {e}"))?
             .join()
-            .map_err(|_| "Rendern abgebrochen".to_owned())?;
+            .map_err(|_| crate::i18n::tr("Rendern abgebrochen").to_owned())?;
         // Im Browser gibt es keine Threads (und keine Plugins): direkt hier rechnen.
         #[cfg(target_arch = "wasm32")]
         let (mut core, out) = work();
@@ -234,7 +238,7 @@ impl ProjectWindow {
             }
         };
         if audio.iter().all(|s| *s == 0.0) {
-            self.message = Some("Rendern: nur Stille".into());
+            self.message = Some(tr("Rendern: nur Stille").into());
             return;
         }
         let RenderTarget::Track(source) = spec.target else {
@@ -242,7 +246,7 @@ impl ProjectWindow {
         };
         let before = self.project.clone();
         let src = &self.project.tracks[source];
-        let name = format!("{} (gerendert)", src.name);
+        let name = crate::i18n::trf("{name} (gerendert)", &[("name", &src.name)]);
         let color = src.color;
         let t = self.project.add_track(TrackKind::Audio, &name);
         // Unter die Quelle legen.
@@ -277,13 +281,13 @@ impl ProjectWindow {
         });
         let range = target.and_then(|t| self.render_range(t));
         ui.add_enabled_ui(range.is_some(), |ui| {
-            ui.menu_button("An Ort und Stelle rendern", |ui| {
+            ui.menu_button(tr("An Ort und Stelle rendern"), |ui| {
                 let (Some(track), Some(range)) = (target, range) else {
                     return;
                 };
                 for (label, with_channel) in [
-                    ("Nur Instrument und Inserts", false),
-                    ("Mit Kanaleinstellungen", true),
+                    (tr("Nur Instrument und Inserts"), false),
+                    (tr("Mit Kanaleinstellungen"), true),
                 ] {
                     if ui.button(label).clicked() {
                         ui.close();

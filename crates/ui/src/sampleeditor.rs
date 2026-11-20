@@ -7,6 +7,7 @@
 //! dieses Event zeigt; das Original bleibt, Rückgängig stellt den alten Zustand her. Ohne
 //! Auswahl wirkt eine Bearbeitung auf den Teil des Clips, den das Event nutzt.
 
+use crate::i18n::tr;
 use egui::{Rect, Sense, Stroke, StrokeKind, Ui, vec2};
 use studiocraft_engine::{Command, offline};
 use studiocraft_project::{EventId, PoolClip};
@@ -54,11 +55,11 @@ pub(crate) enum Process {
 impl Process {
     fn label(self) -> &'static str {
         match self {
-            Process::Normalize => "normalisiert",
-            Process::Gain(_) => "Gain",
-            Process::Reverse => "umgekehrt",
-            Process::FadeIn => "Fade-In",
-            Process::FadeOut => "Fade-Out",
+            Process::Normalize => tr("normalisiert"),
+            Process::Gain(_) => tr("Gain"),
+            Process::Reverse => tr("umgekehrt"),
+            Process::FadeIn => tr("Fade-In"),
+            Process::FadeOut => tr("Fade-Out"),
         }
     }
 }
@@ -99,16 +100,16 @@ impl ProjectWindow {
 
     /// Wendet `p` auf den Clip des Events an: neuer Clip im Pool, das Event zeigt darauf.
     pub(crate) fn process_clip(&mut self, id: EventId, p: Process) -> Result<(), String> {
-        let ev = self.project.event(id).ok_or("Event fehlt")?;
-        let clip_id = ev.clip.ok_or("kein Audio-Event")?;
-        let (a, b) = self.target_range(id).ok_or("kein Bereich")?;
+        let ev = self.project.event(id).ok_or(tr("Event fehlt"))?;
+        let clip_id = ev.clip.ok_or(tr("kein Audio-Event"))?;
+        let (a, b) = self.target_range(id).ok_or(tr("kein Bereich"))?;
         let pool = self
             .project
             .pool
             .get(clip_id as usize)
             .cloned()
-            .ok_or("Clip fehlt im Pool")?;
-        let loaded = self.clip(clip_id).ok_or("Clip ist nicht geladen")?;
+            .ok_or(tr("Clip fehlt im Pool"))?;
+        let loaded = self.clip(clip_id).ok_or(tr("Clip ist nicht geladen"))?;
         let mut samples = loaded.samples.to_vec();
         match p {
             Process::Normalize => {
@@ -199,7 +200,7 @@ pub(crate) fn show(w: &mut ProjectWindow, ui: &mut Ui) {
         .event
         .filter(|&id| w.project.event(id).is_some())
     else {
-        ui.weak("Doppelklick auf ein Audio-Event öffnet es hier.");
+        ui.weak(tr("Doppelklick auf ein Audio-Event öffnet es hier."));
         return;
     };
     let Some(clip_id) = w.project.event(id).and_then(|e| e.clip) else {
@@ -217,20 +218,20 @@ pub(crate) fn show(w: &mut ProjectWindow, ui: &mut Ui) {
     let mut stop = false;
     ui.horizontal_wrapped(|ui| {
         if ui
-            .button("Abspielen")
-            .on_hover_text("Auswahl vorhören")
+            .button(tr("Abspielen"))
+            .on_hover_text(tr("Auswahl vorhören"))
             .clicked()
         {
             play = true;
         }
-        if ui.button("Stopp").clicked() {
+        if ui.button(tr("Stopp")).clicked() {
             stop = true;
         }
         ui.separator();
         if ui
             .add_enabled(
                 w.sample_editor.selection.is_some_and(|(a, b)| b > a),
-                egui::Button::new("Event auf Auswahl"),
+                egui::Button::new(tr("Event auf Auswahl")),
             )
             .clicked()
         {
@@ -238,35 +239,37 @@ pub(crate) fn show(w: &mut ProjectWindow, ui: &mut Ui) {
         }
         ui.separator();
         for (label, p) in [
-            ("Normalisieren", Process::Normalize),
-            ("Umkehren", Process::Reverse),
-            ("Fade-In", Process::FadeIn),
-            ("Fade-Out", Process::FadeOut),
+            (tr("Normalisieren"), Process::Normalize),
+            (tr("Umkehren"), Process::Reverse),
+            (tr("Fade-In"), Process::FadeIn),
+            (tr("Fade-Out"), Process::FadeOut),
         ] {
             if ui.button(label).clicked() {
                 action = Some(p);
             }
         }
-        let l = ui.weak("dB");
+        let l = ui.weak(tr("dB"));
         ui.add(
             egui::DragValue::new(&mut w.sample_editor.gain_db)
                 .range(-24.0..=24.0)
                 .speed(0.1),
         )
         .labelled_by(l.id);
-        if ui.button("Gain").clicked() {
+        if ui.button(tr("Gain")).clicked() {
             action = Some(Process::Gain(w.sample_editor.gain_db));
         }
         ui.separator();
-        if ui.button("Einpassen").clicked() {
+        if ui.button(tr("Einpassen")).clicked() {
             w.sample_editor.per_px = 0.0;
             w.sample_editor.scroll = 0.0;
         }
         if let Some((a, b)) = w.sample_editor.selection {
-            ui.weak(format!(
-                "Auswahl {:.3}–{:.3} s",
-                a as f64 / f64::from(rate),
-                b as f64 / f64::from(rate)
+            ui.weak(crate::i18n::trf(
+                "Auswahl {a}–{b} s",
+                &[
+                    ("a", &format!("{:.3}", a as f64 / f64::from(rate))),
+                    ("b", &format!("{:.3}", b as f64 / f64::from(rate))),
+                ],
             ));
         }
     });
@@ -335,7 +338,7 @@ pub(crate) fn show(w: &mut ProjectWindow, ui: &mut Ui) {
     if let Some(p) = action
         && let Err(e) = w.process_clip(id, p)
     {
-        w.message = Some(format!("Sample-Editor: {e}"));
+        w.message = Some(crate::i18n::trf("Sample-Editor: {e}", &[("e", &e)]));
     }
 }
 

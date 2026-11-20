@@ -113,6 +113,28 @@ pub fn tr(de: &'static str) -> &'static str {
     }
 }
 
+/// Übersetzt einen zur Laufzeit gebildeten Text (etwa „CC 7 Lautstärke“, „1/16 triolisch“):
+/// erst als Ganzes, sonst Wort für Wort; unbekannte Wörter bleiben stehen.
+pub fn tr_dyn(de: &str) -> String {
+    if CURRENT.with(Cell::get) == Lang::De {
+        return de.to_owned();
+    }
+    if let Some(en) = EN.get(de) {
+        return (*en).to_owned();
+    }
+    de.split(' ')
+        .map(|w| EN.get(w).copied().unwrap_or(w))
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// Ob es für `de` eine englische Zeile gibt (Tests für Texte, die nicht als `tr("…")` im Code
+/// stehen, etwa Befehlsnamen).
+#[cfg(test)]
+pub(crate) fn has_english(de: &str) -> bool {
+    EN.contains_key(de)
+}
+
 /// Wie [`tr`], füllt danach `{name}`-Platzhalter mit den Werten.
 pub fn trf(de: &'static str, values: &[(&str, &dyn std::fmt::Display)]) -> String {
     let mut text = tr(de).to_owned();
@@ -210,8 +232,11 @@ mod tests {
         assert_eq!(tr("Speichern"), "Save");
         assert_eq!(tr("gibt es nicht im Katalog"), "gibt es nicht im Katalog");
         assert_eq!(language(), Language::English);
+        assert_eq!(tr_dyn("CC 7 Lautstärke"), "CC 7 Volume");
+        assert_eq!(tr_dyn("1/16 triolisch"), "1/16 triplet");
         set_language(Language::German);
         assert_eq!(tr("Speichern"), "Speichern");
+        assert_eq!(tr_dyn("CC 7 Lautstärke"), "CC 7 Lautstärke");
         set_language(Language::System);
         assert_eq!(tr("Speichern"), "Speichern", "Tests: System = Deutsch");
     }

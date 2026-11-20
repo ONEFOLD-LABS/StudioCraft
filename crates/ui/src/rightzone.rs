@@ -9,6 +9,7 @@
 //! Event-Anzeige ziehen. Ein Klick hört die Datei vor (abschaltbar); geladen wird in einem
 //! eigenen Thread, damit die Oberfläche nicht hängt.
 
+use crate::i18n::tr;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, mpsc};
 
@@ -131,14 +132,14 @@ fn start_dir(w: &ProjectWindow) -> PathBuf {
 
 pub(crate) fn show(w: &mut ProjectWindow, ui: &mut Ui) {
     ui.horizontal(|ui| {
-        ui.selectable_value(&mut w.right.tab, Tab::Home, "Start");
-        ui.selectable_value(&mut w.right.tab, Tab::Media, "Medien");
-        ui.selectable_value(&mut w.right.tab, Tab::Files, "Dateien");
-        ui.selectable_value(&mut w.right.tab, Tab::Plugins, "Plugins");
+        ui.selectable_value(&mut w.right.tab, Tab::Home, tr("Start"));
+        ui.selectable_value(&mut w.right.tab, Tab::Media, tr("Medien"));
+        ui.selectable_value(&mut w.right.tab, Tab::Files, tr("Dateien"));
+        ui.selectable_value(&mut w.right.tab, Tab::Plugins, tr("Plugins"));
     });
     if w.right.tab != Tab::Home {
         ui.horizontal(|ui| {
-            let l = ui.weak("Suche");
+            let l = ui.weak(tr("Suche"));
             ui.add(egui::TextEdit::singleline(&mut w.right.filter).desired_width(f32::INFINITY))
                 .labelled_by(l.id);
         });
@@ -178,7 +179,11 @@ fn home(w: &mut ProjectWindow, ui: &mut Ui) {
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 10.0;
             for &(icon, label, hint) in row {
-                if tile(ui, size, icon, label).on_hover_text(hint).clicked() {
+                // Die deutschen Texte sind zugleich die Auswahl unten; übersetzt wird nur die Anzeige.
+                if tile(ui, size, icon, tr(label))
+                    .on_hover_text(tr(hint))
+                    .clicked()
+                {
                     picked = Some(label);
                 }
             }
@@ -256,15 +261,15 @@ fn files(w: &mut ProjectWindow, ui: &mut Ui) {
         let up = dir.parent().map(Path::to_path_buf);
         if ui
             .add_enabled(up.is_some(), egui::Button::new(".."))
-            .on_hover_text("Übergeordneter Ordner")
+            .on_hover_text(tr("Übergeordneter Ordner"))
             .clicked()
             && let Some(up) = up
         {
             open_dir(w, up);
         }
         if ui
-            .button("Neu laden")
-            .on_hover_text("Ordner neu einlesen")
+            .button(tr("Neu laden"))
+            .on_hover_text(tr("Ordner neu einlesen"))
             .clicked()
         {
             open_dir(w, dir.clone());
@@ -277,15 +282,15 @@ fn files(w: &mut ProjectWindow, ui: &mut Ui) {
             || w.right.loading.is_some();
         use crate::icons::{Icon, icon_button};
         if previewing {
-            if icon_button(ui, Icon::Stop, false, None, "Vorhören stoppen").clicked() {
+            if icon_button(ui, Icon::Stop, false, None, tr("Vorhören stoppen")).clicked() {
                 stop_preview(w);
             }
-        } else if icon_button(ui, Icon::Start, false, None, "Vorhören").clicked()
+        } else if icon_button(ui, Icon::Start, false, None, tr("Vorhören")).clicked()
             && let Some(p) = w.right.selected.clone()
         {
             start_preview(w, &p);
         }
-        ui.checkbox(&mut w.right.auto_preview, "Automatisch");
+        ui.checkbox(&mut w.right.auto_preview, tr("Automatisch"));
     });
     if let Some(e) = &w.right.error {
         ui.colored_label(ui.visuals().warn_fg_color, e);
@@ -372,7 +377,7 @@ fn start_preview(w: &mut ProjectWindow, path: &Path) {
         });
     match spawned {
         Ok(_) => w.right.loading = Some(rx),
-        Err(e) => w.right.error = Some(format!("Vorhören: {e}")),
+        Err(e) => w.right.error = Some(crate::i18n::trf("Vorhören: {e}", &[("e", &e)])),
     }
 }
 
@@ -410,7 +415,7 @@ fn matches(filter: &str, text: &str) -> bool {
 }
 
 fn media(w: &mut ProjectWindow, ui: &mut Ui) {
-    if ui.button("Audio importieren …").clicked() {
+    if ui.button(tr("Audio importieren …")).clicked() {
         w.import_dialog();
     }
     let target = w.selected_track.filter(|&i| {
@@ -420,7 +425,9 @@ fn media(w: &mut ProjectWindow, ui: &mut Ui) {
             .is_some_and(|t| t.kind == TrackKind::Audio)
     });
     if w.project.pool.is_empty() {
-        ui.weak("Der Pool ist leer. Audiodateien importieren oder ins Projekt ziehen.");
+        ui.weak(tr(
+            "Der Pool ist leer. Audiodateien importieren oder ins Projekt ziehen.",
+        ));
         return;
     }
     ui.weak(match target {
@@ -463,7 +470,7 @@ pub(crate) fn place_clip(w: &mut ProjectWindow, clip: ClipId) {
                 .project
                 .pool
                 .get(clip as usize)
-                .map_or_else(|| "Audio".to_owned(), |c| c.name.clone());
+                .map_or_else(|| tr("Audio").to_owned(), |c| c.name.clone());
             let t = w.project.add_track(TrackKind::Audio, name);
             w.selected_track = Some(t);
             t
@@ -484,7 +491,7 @@ fn plugins(w: &mut ProjectWindow, ui: &mut Ui) {
         .cloned()
         .collect();
     if list.is_empty() {
-        ui.weak("Keine passenden CLAP-Plugins gefunden");
+        ui.weak(tr("Keine passenden Plugins gefunden"));
         return;
     }
     let target = w.selected_track.filter(|&i| {
@@ -495,9 +502,9 @@ fn plugins(w: &mut ProjectWindow, ui: &mut Ui) {
     });
     ui.horizontal(|ui| {
         let k = &mut w.right.plugin_kind;
-        ui.selectable_value(k, PluginKind::All, "Alle");
-        ui.selectable_value(k, PluginKind::Instruments, "Instrumente");
-        ui.selectable_value(k, PluginKind::Effects, "Effekte");
+        ui.selectable_value(k, PluginKind::All, tr("Alle"));
+        ui.selectable_value(k, PluginKind::Instruments, tr("Instrumente"));
+        ui.selectable_value(k, PluginKind::Effects, tr("Effekte"));
     });
     let kind = w.right.plugin_kind;
     let mut action: Option<PluginInfo> = None;
@@ -516,11 +523,11 @@ fn plugins(w: &mut ProjectWindow, ui: &mut Ui) {
                 .show(ui, |ui| {
                     for p in list.iter().filter(|p| p.is_instrument() == instruments) {
                         let hint = if instruments {
-                            "Doppelklick oder auf eine leere Fläche ziehen: neue Instrument-Spur"
+                            tr("Doppelklick oder auf eine leere Fläche ziehen: neue Instrument-Spur")
                         } else if target.is_some() {
-                            "Doppelklick: als Insert auf die gewählte Spur; oder auf eine Spur ziehen"
+                            tr("Doppelklick: als Insert auf die gewählte Spur; oder auf eine Spur ziehen")
                         } else {
-                            "Auf eine Spur ziehen oder erst eine Spur mit Mixer-Kanal wählen"
+                            tr("Auf eine Spur ziehen oder erst eine Spur mit Mixer-Kanal wählen")
                         };
                         let label = if p.vendor.is_empty() {
                             p.display_name()

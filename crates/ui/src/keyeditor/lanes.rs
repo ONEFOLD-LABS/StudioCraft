@@ -7,6 +7,7 @@
 //! gewählten Punkte in Zeit und Wert. Löschen-Werkzeug: entfernt Punkte unter dem Zeiger.
 //! Entf löscht die gewählten Punkte. Jede Geste ist ein Rückgängig-Schritt.
 
+use crate::i18n::tr;
 use egui::{Align2, Color32, FontId, Painter, Pos2, Rect, Stroke, Ui, pos2, vec2};
 use studiocraft_project::{CtrlKind, CtrlPoint, EventId};
 
@@ -95,7 +96,10 @@ impl ProjectWindow {
             return;
         }
         if lanes.len() >= MAX_LANES {
-            self.message = Some(format!("Höchstens {MAX_LANES} Controller-Spuren"));
+            self.message = Some(crate::i18n::trf(
+                "Höchstens {max} Controller-Spuren",
+                &[("max", &MAX_LANES)],
+            ));
             return;
         }
         lanes.push(kind);
@@ -142,10 +146,13 @@ pub(super) fn heads(w: &mut ProjectWindow, ui: &mut Ui, lanes: &[Lane], keys_lef
                     }
                 })
                 .response
-                .on_hover_text(lane.kind.label());
+                .on_hover_text(crate::i18n::tr_dyn(&lane.kind.label()));
                 if ui
-                    .small_button("x")
-                    .on_hover_text(format!("Spur {} entfernen", lane.kind.label()))
+                    .small_button(tr("x"))
+                    .on_hover_text(crate::i18n::trf(
+                        "Spur {name} entfernen",
+                        &[("name", &crate::i18n::tr_dyn(&lane.kind.label()))],
+                    ))
                     .clicked()
                 {
                     remove = Some(lane.index);
@@ -179,16 +186,19 @@ pub(crate) fn kind_menu(ui: &mut Ui) -> Option<CtrlKind> {
         CtrlKind::Cc(10),
         CtrlKind::Cc(11),
     ] {
-        if ui.button(k.label()).clicked() {
+        if ui.button(crate::i18n::tr_dyn(&k.label())).clicked() {
             picked = Some(k);
         }
     }
-    ui.menu_button("Weitere Controller", |ui| {
+    ui.menu_button(tr("Weitere Controller"), |ui| {
         egui::ScrollArea::vertical()
             .max_height(260.0)
             .show(ui, |ui| {
                 for n in 0..=127u8 {
-                    if ui.button(CtrlKind::Cc(n).label()).clicked() {
+                    if ui
+                        .button(crate::i18n::tr_dyn(&CtrlKind::Cc(n).label()))
+                        .clicked()
+                    {
                         picked = Some(CtrlKind::Cc(n));
                     }
                 }
@@ -410,7 +420,7 @@ pub(super) fn paint(
         p.text(
             r.right_top() + vec2(-4.0, 2.0),
             Align2::RIGHT_TOP,
-            lane.kind.label(),
+            crate::i18n::tr_dyn(&lane.kind.label()),
             FontId::proportional(10.0),
             v.weak_text_color(),
         );

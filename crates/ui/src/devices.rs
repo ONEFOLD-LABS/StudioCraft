@@ -6,6 +6,7 @@
 //! Ergebnis mit [`ProjectWindow::audio_switched`]. Der Eingang wird bei der nächsten
 //! Aufnahme mit dem neuen Gerät geöffnet.
 
+use crate::i18n::tr;
 use studiocraft_engine::output::{BLOCK_SIZES, SAMPLE_RATES, available_hosts};
 use studiocraft_engine::{DeviceChoice, EngineControl};
 
@@ -34,12 +35,14 @@ fn pick<T: Clone + PartialEq>(
 ) -> bool {
     let before = value.clone();
     ui.label(label);
-    let text = value.as_ref().map_or_else(|| "Standard".to_owned(), &show);
+    let text = value
+        .as_ref()
+        .map_or_else(|| tr("Standard").to_owned(), &show);
     egui::ComboBox::from_id_salt(label)
         .selected_text(text)
         .width(220.0)
         .show_ui(ui, |ui| {
-            ui.selectable_value(value, None, "Standard");
+            ui.selectable_value(value, None, tr("Standard"));
             for o in options {
                 ui.selectable_value(value, Some(o.clone()), show(o));
             }
@@ -122,7 +125,7 @@ impl ProjectWindow {
         match result {
             Ok(status) => {
                 self.audio_status = status;
-                self.device_dialog.message = Some("Übernommen".into());
+                self.device_dialog.message = Some(tr("Übernommen").into());
             }
             Err(e) => {
                 self.device_dialog.message = Some(e.clone());
@@ -133,12 +136,12 @@ impl ProjectWindow {
 
     /// Das Audiogerät ist verschwunden (Fehler des Streams).
     pub fn audio_lost(&mut self) {
-        let msg = format!(
-            "Audiogerät nicht mehr verfügbar ({}). Im Menü Transport unter „Audio- und MIDI-Geräte …“ ein anderes wählen.",
-            self.audio_status
+        let msg = crate::i18n::trf(
+            "Audiogerät nicht mehr verfügbar ({status}). Im Menü Transport unter „Audio- und MIDI-Geräte …“ ein anderes wählen.",
+            &[("status", &self.audio_status)],
         );
         self.message = Some(msg);
-        self.audio_status = "Kein Audio: Gerät getrennt".into();
+        self.audio_status = crate::i18n::tr("Kein Audio: Gerät getrennt").into();
     }
 
     /// MIDI-Eingänge an oder aus (sofort).
@@ -148,7 +151,7 @@ impl ProjectWindow {
             self.open_midi_inputs();
         } else {
             self.midi_inputs = None;
-            self.midi_status = "MIDI: aus".into();
+            self.midi_status = crate::i18n::tr("MIDI: aus").into();
         }
         self.save_settings();
     }
@@ -165,7 +168,7 @@ impl ProjectWindow {
         let status = self.audio_status.clone();
         let hosts: Vec<String> = available_hosts().into_iter().map(str::to_owned).collect();
         let d = &mut self.device_dialog;
-        egui::Window::new("Audio- und MIDI-Geräte")
+        egui::Window::new(tr("Audio- und MIDI-Geräte"))
             .open(&mut open)
             .resizable(false)
             .collapsible(false)
@@ -173,22 +176,34 @@ impl ProjectWindow {
                 ui.label(egui::RichText::new(status).weak());
                 ui.separator();
                 egui::Grid::new("geraete").num_columns(2).show(ui, |ui| {
-                    if pick(ui, "Host", &mut d.choice.host, &hosts, Clone::clone) {
+                    if pick(
+                        ui,
+                        crate::i18n::tr("Host"),
+                        &mut d.choice.host,
+                        &hosts,
+                        Clone::clone,
+                    ) {
                         // Andere Geräte: Auswahl zurück auf Standard.
                         d.choice.output = None;
                         d.choice.input = None;
                     }
                     pick(
                         ui,
-                        "Ausgang",
+                        tr("Ausgang"),
                         &mut d.choice.output,
                         &d.outputs,
                         Clone::clone,
                     );
-                    pick(ui, "Eingang", &mut d.choice.input, &d.inputs, Clone::clone);
                     pick(
                         ui,
-                        "Abtastrate",
+                        crate::i18n::tr("Eingang"),
+                        &mut d.choice.input,
+                        &d.inputs,
+                        Clone::clone,
+                    );
+                    pick(
+                        ui,
+                        tr("Abtastrate"),
                         &mut d.choice.sample_rate,
                         &SAMPLE_RATES,
                         |r| format!("{r} Hz"),
@@ -196,7 +211,7 @@ impl ProjectWindow {
                     let rate = d.choice.sample_rate.unwrap_or(rate_now);
                     pick(
                         ui,
-                        "Blockgröße",
+                        tr("Blockgröße"),
                         &mut d.choice.block_frames,
                         &BLOCK_SIZES,
                         |b| format!("{b} ({:.1} ms)", block_ms(*b, rate)),
@@ -205,12 +220,12 @@ impl ProjectWindow {
                 if d.choice.sample_rate.is_some_and(|r| r != rate_now) {
                     ui.colored_label(
                         ui.visuals().warn_fg_color,
-                        "Eine andere Abtastrate gilt nach einem Neustart.",
+                        tr("Eine andere Abtastrate gilt nach einem Neustart."),
                     );
                 }
-                ui.checkbox(&mut midi, "MIDI-Eingänge");
+                ui.checkbox(&mut midi, tr("MIDI-Eingänge"));
                 ui.horizontal(|ui| {
-                    if ui.button("Übernehmen").clicked() {
+                    if ui.button(tr("Übernehmen")).clicked() {
                         apply = true;
                     }
                     if let Some(m) = &d.message {
@@ -231,7 +246,7 @@ impl ProjectWindow {
             self.audio_host = choice.host.clone();
             self.audio_choice = choice.clone();
             self.device_request = Some(choice);
-            self.device_dialog.message = Some("Wird übernommen …".into());
+            self.device_dialog.message = Some(tr("Wird übernommen …").into());
             self.save_settings();
         }
         if !open {

@@ -2,6 +2,7 @@
 //! „An Zoom anpassen“. Events und Cursor wirken magnetisch nur in der Nähe (wenige Pixel),
 //! das Raster überall. Alt beim Ziehen hebt Snap auf (in den Zieh-Funktionen).
 
+use crate::i18n::tr;
 use egui::Ui;
 use studiocraft_project::{EventId, TICKS_PER_QUARTER};
 
@@ -30,7 +31,7 @@ pub(crate) fn toolbar(w: &mut ProjectWindow, ui: &mut Ui) {
             }
         })
         .response
-        .on_hover_text("Snap-Modus");
+        .on_hover_text(tr("Snap-Modus"));
     egui::ComboBox::from_id_salt("raster")
         .selected_text(w.grid.label())
         .width(90.0)
@@ -39,10 +40,10 @@ pub(crate) fn toolbar(w: &mut ProjectWindow, ui: &mut Ui) {
                 ui.selectable_value(&mut w.grid, g, g.label());
             }
             ui.separator();
-            ui.checkbox(&mut w.grid_zoom, "An Zoom anpassen");
+            ui.checkbox(&mut w.grid_zoom, tr("An Zoom anpassen"));
         })
         .response
-        .on_hover_text("Raster");
+        .on_hover_text(tr("Raster"));
 }
 
 impl ProjectWindow {

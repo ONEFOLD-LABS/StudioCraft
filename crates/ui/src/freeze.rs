@@ -3,6 +3,7 @@
 //! Lautstärke und Panorama) bleibt live. „Einfrieren aufheben“ lädt die Plugins wieder aus
 //! ihrem gespeicherten Zustand; der Clip bleibt im Pool.
 
+use crate::i18n::tr;
 use studiocraft_engine::AudioClip;
 use studiocraft_project::{Frozen, PoolClip, Project, TrackKind};
 
@@ -34,7 +35,7 @@ impl ProjectWindow {
         ) else {
             return;
         };
-        let name = format!("{} (eingefroren)", t.name);
+        let name = crate::i18n::trf("{name} (eingefroren)", &[("name", &t.name)]);
         // Plugin-Latenz: der gerenderte Clip käme um so viel zu spät.
         let latency = self.track_latency(track) as usize;
         let mut audio = match self.render_offline(RenderSpec {
@@ -116,7 +117,7 @@ impl ProjectWindow {
             }
         }
         if locked {
-            self.message = Some("Spur ist eingefroren – erst „Einfrieren aufheben“".into());
+            self.message = Some(tr("Spur ist eingefroren – erst „Einfrieren aufheben“").into());
         }
     }
 
@@ -127,7 +128,7 @@ impl ProjectWindow {
             .and_then(|t| self.project.tracks.get(t))
             .is_some_and(|t| t.frozen.is_some());
         if frozen {
-            if ui.button("Einfrieren aufheben").clicked() {
+            if ui.button(tr("Einfrieren aufheben")).clicked() {
                 ui.close();
                 if let Some(t) = track {
                     self.unfreeze_track(t);
@@ -136,7 +137,7 @@ impl ProjectWindow {
         } else {
             let can = track.is_some_and(|t| self.can_freeze(t));
             if ui
-                .add_enabled(can, egui::Button::new("Spur einfrieren"))
+                .add_enabled(can, egui::Button::new(tr("Spur einfrieren")))
                 .clicked()
             {
                 ui.close();
