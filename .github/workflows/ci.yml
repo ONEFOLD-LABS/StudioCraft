@@ -1,7 +1,8 @@
 name: CI
 
 # Prüfungen für jeden Push auf main und jeden Pull Request (`cargo xtask ci`), über den
-# gemeinsamen Gate-Workflow der Craft-Familie (storytold/craft-common-actions).
+# Gate-Workflow aus storytold/craft-common-actions, auf einen festen Commit
+# gepinnt: Änderungen dort kommen nur über einen eigenen Pull Request hier an.
 on:
   push:
     branches: [main]
@@ -17,7 +18,7 @@ concurrency:
 
 jobs:
   gate:
-    uses: storytold/craft-common-actions/.github/workflows/gate.yml@main
+    uses: storytold/craft-common-actions/.github/workflows/gate.yml@0bef64f155fcea81edbd9542381777358bfbdcf4 # main 2026-11-20
     with:
       packages: >-
         pkg-config libxkbcommon-dev libwayland-dev libx11-dev libxcb1-dev libxcursor-dev
