@@ -84,10 +84,18 @@ fn status_line(info: &OutputInfo) -> String {
     let block = info
         .block_frames
         .map_or("Treiber".into(), |b| b.to_string());
-    format!(
+    let mut line = format!(
         "{} · {} · {} Hz · Block {block}",
         info.host, info.device, info.sample_rate
-    )
+    );
+    if let Some(ms) = info.latency_ms() {
+        line.push_str(&format!(" · Latenz {ms:.1} ms"));
+    }
+    // Das Gerät lehnte den gewählten Modus ab: sagen, warum ein anderer läuft.
+    if let Some(note) = &info.note {
+        line.push_str(&format!(" · Rückfall ({note})"));
+    }
+    line
 }
 
 impl App {
