@@ -73,6 +73,7 @@ Plugin editor windows need a display: `STUDIOCRAFT_GUI_TEST=1 cargo test -p stud
 | `crates/plugin-host` | CLAP hosting (clap-sys + libloading): scan, instances, parameters, state, editor windows. The only crate with substantial `unsafe`. |
 | `crates/graph` | Signal-graph helpers. |
 | `crates/ui` | egui UI: project window, timeline, inspector, mixer, key editor, menus, theme, settings. |
+| `crates/automation` | MCP server for AI agents (`studiocraft-cli mcp`): tools over a headless `ProjectWindow`, file access confined to the granted roots. |
 | `apps/studiocraft` | The eframe desktop app. |
 | `apps/studiocraft-cli` | Command-line player for tests and scripting. |
 | `xtask` | `cargo xtask ci`, `cargo xtask version`. |

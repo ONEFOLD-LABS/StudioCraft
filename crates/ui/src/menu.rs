@@ -403,7 +403,7 @@ impl ProjectWindow {
             .set_file_name(format!("{name}.wav"))
             .save_file()
         {
-            Some(p) => self.export_mixdown(&p),
+            Some(p) => self.export_mixdown(&p).map(|_| ()),
             None => Ok(()),
         }
     }

@@ -45,6 +45,8 @@ cargo run --release -p studiocraft -- a.wav b.wav           # each file on its o
 cargo run --release -p studiocraft -- Song/Song.studiocraft # open a project
 cargo run --release -p studiocraft -- --list-hosts          # audio hosts in this build
 cargo run -p studiocraft-cli -- file.wav --loop 1 5         # command-line player
+cargo run -p studiocraft-cli -- mcp --automation-read-root DIR --automation-write-root DIR
+                                                            # MCP server for AI agents (docs/mcp.md)
 ```
 
 ## Layout
@@ -52,12 +54,13 @@ cargo run -p studiocraft-cli -- file.wav --loop 1 5         # command-line playe
 | Path | Role |
 | --- | --- |
 | `apps/studiocraft` | Desktop app (eframe/egui) |
-| `apps/studiocraft-cli` | Command-line player for tests and scripting |
+| `apps/studiocraft-cli` | Command-line player for tests and scripting; `mcp` serves the MCP server |
 | `crates/project` | Project model, edits, tempo map, versioned file format |
 | `crates/engine` | Real-time audio: transport, mixing and routing, recording, MIDI, export |
 | `crates/plugin-host` | Plugin hosting (CLAP, LV2) |
 | `crates/graph` | Signal-graph helpers |
 | `crates/ui` | Project window, mixer, editors, menus, theme, settings |
+| `crates/automation` | MCP server for AI agents on a headless project window |
 | `xtask` | `cargo xtask ci`, `cargo xtask version` |
 | `packaging/` | Package scripts per platform |
 
