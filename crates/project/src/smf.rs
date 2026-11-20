@@ -464,6 +464,7 @@ impl Project {
                 comp: 0,
                 color: None,
                 shared: None,
+                musical: None,
             });
             added.push(i);
         }

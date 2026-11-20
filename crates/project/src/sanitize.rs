@@ -245,6 +245,13 @@ impl Project {
                     finite_f32(e.gain_db, (MIN_DB, crate::EVENT_MAX_DB), 0.0)
                 );
                 clamp!(e.lane, e.lane.map(|l| l.min(MAX_LANE)));
+                // Tempo der Datei: endlich und im Bereich, nur bei Audio-Events.
+                clamp!(
+                    e.musical,
+                    e.musical
+                        .filter(|b| b.is_finite() && e.clip.is_some())
+                        .map(|b| b.clamp(BPM.0, BPM.1))
+                );
                 clamp!(e.comp, e.comp.min(MAX_LANE));
                 for n in &mut e.notes {
                     let max = MAX_TICKS as i64;

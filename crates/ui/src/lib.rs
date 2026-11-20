@@ -4200,6 +4200,22 @@ mod tests {
     }
 
     #[test]
+    fn render_info_line_of_audio_following_the_tempo() {
+        shot("musical_audio", |w| {
+            let c = w.project.add_clip(PoolClip {
+                name: "Loop 96bpm".into(),
+                path: None,
+                sample_rate: 48_000,
+                frames: 96_000,
+            });
+            let id = w.project.tracks[0].events[0].id;
+            w.project.event_mut(id).unwrap().clip = Some(c);
+            assert!(w.project.set_musical(id, Some(96.0)));
+            w.selection = vec![id];
+        });
+    }
+
+    #[test]
     fn render_scrollbars() {
         shot("scrollbars", |w| {
             w.view.scroll_ticks = 8.0 * 3840.0;
