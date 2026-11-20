@@ -99,9 +99,9 @@ Der Spurtyp legt fest, welche Events eine Spur trägt und ob sie einen Mixer-Kan
 | Ordner | andere Spuren, ein-/ausklappbar | nein | Mute/Solo für alle enthaltenen | ja |
 | Marker | Marker und Cycle-Marker | nein | Marker-Liste | ja |
 | Tempo/Taktart | Tempo- und Taktart-Ereignisse | nein | Tempo-Modus fest/variabel | ja |
-| Lineal | zusätzliches Zeitlineal mit eigenem Format | nein | Anzeigeformat | später |
+| Lineal | zusätzliches Zeitlineal mit eigenem Format | nein | Anzeigeformat | später (#44, 0.8) |
 | Automation | Kurve eines Parameters, unter ihrer Spur | nein | Parameter-Auswahl, Modus | ja |
-| Video | Videoframes als Thumbnails | nein | Offset, Ton an/aus | später |
+| Video | Videoframes als Thumbnails | nein | Offset, Ton an/aus | später (#174; Codec-Lizenzen vorher prüfen) |
 
 **Spurkopf in der Spurliste:** links eine Farbleiste mit der Spurnummer, daneben zwei Zeilen. Oben: Automationspfeil, Mute, Solo, Name und ein Lautstärkeregler (Strg+Klick: 0 dB). Unten: Aufnahme bereit, Monitor, Automation lesen, Automation schreiben, Zeitbasis, Lanes ein/aus. Breite und sichtbare Elemente sind pro Spurtyp einstellbar.
 
@@ -207,7 +207,7 @@ Die Transportleiste unten im Projektfenster bedient Wiedergabe, Aufnahme und Loc
 
 Die MIDI-Modi stehen unter Transport → „MIDI-Aufnahme“ (Projekteinstellung; Standard: neuer Part, im Cycle gestapelt). „Nachträgliche Aufnahme“ (Umschalt + Nummernblock-Mal, auch im Menü Transport) übernimmt die zuletzt gespielten, nicht aufgenommenen Noten der Keyboard-Spur als neuen Part: während der Wiedergabe an ihrer Position (im Cycle der letzte Durchgang), im Stopp ab dem Cursor im gespielten Abstand.
 
-**Takes und Lanes:** Takes einer Spur liegen in Lanes unter ihr. Mit dem Comp-Werkzeug wählt man pro Abschnitt den besten Take; die Spur spielt nur die gewählten Abschnitte. Comping kommt nach dem MVP.
+**Takes und Lanes:** Takes einer Spur liegen in Lanes unter ihr. Mit dem Comp-Werkzeug wählt man pro Abschnitt den besten Take; die Spur spielt nur die gewählten Abschnitte. Comping ist seit 0.7 da (Comp-Werkzeug, kurze Crossfades an den Abschnittsgrenzen).
 
 **Nummernblock-Belegung**
 
@@ -267,7 +267,7 @@ Die Insert-Aufteilung Pre/Post ist eine Projekt-Voreinstellung; jeder Slot ist e
 - Rack-Ansicht oberhalb der Fader blendet Inserts, EQ, Sends ein und aus
 - Kanalbreite schmal/breit; Konfigurationen der Sichtbarkeit speicherbar
 
-**Link-Gruppen (später):** Ausgewählte Kanäle lassen sich verknüpfen, sodass Fader, Mute und Solo gemeinsam reagieren.
+**Link-Gruppen (seit 0.6):** Ausgewählte Kanäle lassen sich verknüpfen, sodass Fader, Mute und Solo gemeinsam reagieren.
 
 ## Editoren
 
@@ -276,10 +276,10 @@ Doppelklick auf ein Event öffnet den Standard-Editor seines Typs: Audio → Sam
 | Editor | Zeigt | Kernfunktionen | MVP |
 | --- | --- | --- | --- |
 | Key-Editor | Noten als Balken über einer Klaviatur, darunter Controller-Lanes | Zeichnen, Länge ziehen, Velocity in Lane, Quantisieren, Transponieren mit Pfeil hoch/runter | ja |
-| Drum-Editor | Noten als Rauten pro Instrument-Zeile, Namen aus der Drum-Map | Eigene Quantisierung pro Zeile, Länge ignoriert, Mute/Solo pro Zeile | später |
-| List-Editor | Alle Events als Tabelle (Position, Länge, Wert, Kanal) | Werte direkt eingeben, filtern nach Event-Typ | später |
+| Drum-Editor | Noten als Rauten pro Instrument-Zeile, Namen aus der Drum-Map | Eigene Quantisierung pro Zeile, Länge ignoriert, Mute/Solo pro Zeile | 0.6 (Drum-Maps bearbeiten: #161) |
+| List-Editor | Alle Events als Tabelle (Position, Länge, Wert, Kanal) | Werte direkt eingeben, filtern nach Event-Typ | 0.6 |
 | Sample-Editor | Wellenform eines Clips in voller Größe | Bereich wählen, Offline-Effekte, Hitpoints, Tempo-Erkennung | ja (ohne Hitpoints) |
-| Noten-Editor | Partitur | Notensatz, Druck | später |
+| Noten-Editor | Partitur | Notensatz, Druck | später (#40) |
 
 **Gemeinsames Verhalten**
 
@@ -289,7 +289,7 @@ Doppelklick auf ein Event öffnet den Standard-Editor seines Typs: Audio → Sam
 - Mehrere Parts gleichzeitig öffnen; ein aktiver Part, die anderen gedämpft
 - „Editor folgt Wiedergabe“ scrollt automatisch mit (Taste F)
 
-**Controller-Lanes im Key-Editor:** Beliebig viele Lanes, jede zeigt einen Datentyp (Velocity, Pitchbend, CC 1–127, Aftertouch). Zeichnen mit Linien-, Parabel- und Sinus-Formen; die Formen kommen nach dem MVP.
+**Controller-Lanes im Key-Editor:** Beliebig viele Lanes, jede zeigt einen Datentyp (Velocity, Pitchbend, CC 1–127, Aftertouch). Zeichnen mit Linien-, Parabel-, Sinus- und Rechteck-Formen (seit 0.6).
 
 ## Automation
 
@@ -301,8 +301,8 @@ Jeder Parameter eines Kanals oder Plugins kann automatisiert werden; die Kurve l
 | --- | --- | --- |
 | Touch | Schreibt, solange das Bedienelement gehalten wird; danach zurück zur bestehenden Kurve | ja |
 | Auto-Latch | Schreibt ab Berührung bis zum Stopp mit dem letzten Wert | ja |
-| Overwrite | Schreibt ab Start nur für die Lautstärke, unabhängig von Berührung | später |
-| Trim | Verändert die bestehende Kurve relativ | später |
+| Overwrite | Schreibt ab Start nur für die Lautstärke, unabhängig von Berührung | ja |
+| Trim | Verändert die bestehende Kurve relativ | ja |
 
 **Automationsspuren**
 
@@ -313,7 +313,7 @@ Jeder Parameter eines Kanals oder Plugins kann automatisiert werden; die Kurve l
 **Kurvenbearbeitung**
 
 - Klick mit Objektauswahl auf die Linie setzt einen Punkt; Ziehen bewegt Punkte
-- Zeichnen-Werkzeug zeichnet frei; Linie mit Formen (Linie, Parabel, Sinus, Rechteck) kommt später
+- Zeichnen-Werkzeug zeichnet frei oder mit Formen (Linie, Parabel, Sinus, Rechteck; Rechtsklick auf das Werkzeug)
 - Bereichsauswahl auf einer Automationsspur skaliert die Punkte im Bereich per Ziehen nach oben/unten
 - Punkte werden beim Schreiben ausgedünnt (Reduktionsgrad einstellbar)
 
@@ -368,34 +368,38 @@ Der MVP ist erreicht, wenn man ein Lied mit Audio- und Instrument-Spuren aufnehm
 | --- | --- |
 | Fensternamen | allgemeine Begriffe: Mixer, Browser, Inspector |
 | Plugin-Formate | CLAP zuerst, dann VST3, AU (nur macOS) und LV2; kein VST2 |
-| Audio-Backend | cpal: PipeWire, ALSA, JACK (Linux, FreeBSD), WASAPI, ASIO (Windows), CoreAudio (macOS), Web Audio (WASM) |
-| Lizenzierung | keine Aktivierung |
+| Audio-Backend | cpal: PipeWire, ALSA, JACK (Linux, FreeBSD), WASAPI (Windows; dazu eigene Hosts für WASAPI exklusiv und mit geringer Latenz), CoreAudio (macOS), Web Audio (WASM). ASIO nicht in den Paketen (SDK-Lizenz), nur als Feature im Code |
+| Lizenzierung | keine Aktivierung; eigener Code MIT oder Apache-2.0, Lizenzhinweise aller Komponenten in THIRD-PARTY-LICENSES.txt |
 | Projektformat | offenes, versioniertes Textformat plus Audio-Ordner; diff- und git-freundlich |
 | Plattform | Linux, Windows, macOS, FreeBSD und Web (WASM), Pakete nach den Konventionen der Craft-Apps |
 
 **MVP-Umfang**
 
-Stand 2026-11-19; offen heißt: fehlt oder ist nicht auf echter Hardware geprüft.
+Stand 2026-11-20 (Version 0.6.1, 0.7 in Arbeit); offen heißt: fehlt oder ist nicht auf echter
+Hardware geprüft. Alle Punkte bis auf die Latenzmessung sind umgesetzt und durch Tests abgedeckt.
 
 - [ ] Audio-Engine über cpal auf allen Systemen, Latenz ≤ 10 ms bei 48 kHz / 256 Samples
-  (Engine, Blockgröße und Latenzausgleich vorhanden; die Latenz ist auf Hardware nicht gemessen)
+  (Engine, Blockgröße und Latenzausgleich vorhanden; die Latenz ist auf Hardware nicht gemessen,
+  unter Windows fehlt der Test der eigenen WASAPI-Hosts: #152)
 - [x] Projektfenster mit Spurliste, Event-Anzeige, Lineal, Inspector, Transportleiste
-- [ ] Spurtypen Audio, Instrument, MIDI, Gruppe, FX, Ordner, Marker, Tempo
-  (Audio, Instrument, MIDI, Gruppe und FX fertig; Ordner nur als Typ ohne Funktion; Marker und
-  Tempo fehlen, das Tempo ist fest)
-- [ ] Werkzeuge 1 bis 9, Snap, Raster, Fades, Crossfades (alles bis auf Crossfades)
+- [x] Spurtypen Audio, Instrument, MIDI, Gruppe, FX, Ordner, Marker, Tempo
+- [x] Werkzeuge 1 bis 0, Snap, Raster, Fades, Crossfades (Werkzeug 0 Zeitkorrektur seit 0.7)
 - [x] Aufnahme Audio und MIDI inkl. Cycle-Takes, Punch, Metronom
-- [ ] Mixer mit Inserts, Sends, EQ, Gruppen, Bussen (alles bis auf den Kanal-EQ)
-- [x] CLAP-Hosting mit Plugin-GUI
-- [ ] Key-Editor und Sample-Editor (Basis) (Key-Editor fertig, Sample-Editor fehlt)
+- [x] Mixer mit Inserts, Sends, Kanal-EQ, Gruppen, Bussen
+- [x] Plugin-Hosting mit Plugin-GUI: CLAP, VST3, LV2, AU (nur macOS)
+- [x] Key-Editor und Sample-Editor (dazu Drum- und List-Editor)
 - [x] Automation Read/Write mit Touch und Auto-Latch (dazu Overwrite und Trim)
-- [ ] Frei belegbare Tastatur mit Standardbelegung (Standardbelegung fertig, Belegen fehlt)
-- [x] Export als WAV/FLAC (Mixdown der Locator-Range)
+- [x] Frei belegbare Tastatur mit Standardbelegung
+- [x] Export als WAV, FLAC und AIFF (Mixdown der Locator-Range, Stems)
+
+**Über den MVP hinaus umgesetzt:** Standard-MIDI-Dateien (0.6), Audio folgt dem Tempo mit
+Time-Stretch und Warp-Markern (0.7), Hitpoints und Tempo-Erkennung (0.7), Offline-Bearbeitung je
+Clip (0.7), Pakete für alle Plattformen und den Browser (0.5), englische Oberfläche (0.5).
 
 **Offene Fragen**
 
 - [ ] Projektname: entschieden, StudioCraft (Repo unter Dokumente/GitHub/StudioCraft). Verworfen: SoundCraft (in der Familie vergeben), AudioCraft (Meta), MixCraft (bestehende DAW), RecordCraft (Rust-Recorder kaptaindieter/RecordCraft). Markenrecherche steht noch aus.
-- [ ] GUI-Toolkit: entschieden, egui/eframe mit craft-ui wie die Craft-Apps (nativ und Web). Prototyp bestätigt: 0,15 ms CPU pro Frame bei 100 und 1000 Spuren (Release-Build)
-- [ ] Plugin-GUIs unter Wayland: Fremdfenster einbetten geht nur über X11/XWayland; als eigene Fenster öffnen?
+- [x] GUI-Toolkit: entschieden, egui/eframe mit craft-ui wie die Craft-Apps (nativ und Web). Prototyp bestätigt: 0,15 ms CPU pro Frame bei 100 und 1000 Spuren (Release-Build)
+- [ ] Plugin-GUIs unter Wayland: Fremdfenster einbetten geht nur über X11/XWayland; als eigene Fenster öffnen? (#175, 0.8)
 - [x] Standard-MIDI-Dateien: entschieden, nicht im MVP, sondern in 0.6 (Issue #47). Datei → MIDI-Datei importieren legt je Spur und Kanal der Datei eine MIDI-Spur mit einem Part an (Noten, CC, Pitchbend, Aftertouch, erstes Programm); in einem Projekt ohne Events gelten danach Tempo und Taktarten der Datei, sonst beginnen die Parts am Takt des Cursors. Datei → MIDI-Datei exportieren schreibt Format 1 mit Tempospur und je MIDI- und Instrument-Spur einer Spur (stumme Parts und ausgeblendete Noten fehlen, Tempo-Rampen als Stufen je Sechzehntel). AAF/OMF-Import kommt später (Issue #154).
 - [ ] Wer übernimmt die Spec-Autor-Rolle, wer implementiert (Cleanroom-Trennung)?
