@@ -5325,6 +5325,23 @@ mod tests {
         assert!(events >= 15, "{events}");
         h.state_mut().undo();
         assert_eq!(h.state().project.tracks[0].events.len(), 1);
+        // An event that follows the tempo (file at 120 BPM, project at 100): slices land on
+        // the project's beats, one quarter apart.
+        assert!(h.state_mut().project.set_musical(id, Some(120.0)));
+        h.run_steps(1);
+        h.state_mut().slice_at_hitpoints(id);
+        let mut starts: Vec<u64> = h.state().project.tracks[0]
+            .events
+            .iter()
+            .map(|e| e.start.0)
+            .collect();
+        starts.sort_unstable();
+        for w in starts.windows(2) {
+            let gap = w[1] - w[0];
+            assert!(gap.abs_diff(TPQ as u64) <= 20, "a quarter apart: {gap}");
+        }
+        h.state_mut().undo();
+        assert_eq!(h.state().project.tracks[0].events.len(), 1);
         // Tempo: about 120 BPM, taken over as project tempo.
         h.get_by_label("Tempo erkennen").click();
         h.run_steps(2);

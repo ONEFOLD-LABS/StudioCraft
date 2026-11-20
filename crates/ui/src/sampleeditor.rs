@@ -100,10 +100,19 @@ impl ProjectWindow {
     fn event_frames(&self, id: EventId) -> Option<(u64, u64)> {
         let ev = self.project.event(id)?;
         let rate = self.project.pool.get(ev.clip? as usize)?.sample_rate;
-        let len = self
-            .project
-            .tempo
-            .duration_frames(ev.start.0, ev.length, rate);
+        // Folgt das Event dem Tempo, zählt das Tempo der Datei.
+        let len = match ev.musical {
+            Some(_) => studiocraft_project::content_frames(
+                &self.project.tempo,
+                ev.musical,
+                ev.length,
+                rate,
+            ),
+            None => self
+                .project
+                .tempo
+                .duration_frames(ev.start.0, ev.length, rate),
+        };
         Some((ev.offset, ev.offset.saturating_add(len)))
     }
 
@@ -180,6 +189,15 @@ impl ProjectWindow {
         let ev = self.project.event(id)?;
         let rate = self.project.pool.get(ev.clip? as usize)?.sample_rate;
         let tempo = &self.project.tempo;
+        // Folgt das Event dem Tempo, gilt das Tempo der Datei ab dem Event-Anfang.
+        if ev.musical.is_some() {
+            let ticks = |d: u64| studiocraft_project::content_ticks(tempo, ev.musical, d, rate);
+            return Some(if f >= ev.offset {
+                ev.start.0.saturating_add(ticks(f - ev.offset))
+            } else {
+                ev.start.0.saturating_sub(ticks(ev.offset - f))
+            });
+        }
         // Über die Zeitachse in Frames, damit Tempowechsel stimmen.
         let start_f = tempo.frames(ev.start.0, rate);
         Some(if f >= ev.offset {
