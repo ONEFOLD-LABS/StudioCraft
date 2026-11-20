@@ -534,6 +534,50 @@ pub fn group_gap(ui: &mut Ui) {
     ui.add_space(4.0);
 }
 
+/// Das App-Zeichen (wie das App-Icon, siehe `packaging/make_icon_svg.py`): eine Scheibe mit
+/// Verlauf und einer ausklingenden Welle. Die Welle wird in `background` gezeichnet und wirkt so
+/// wie die Aussparung im Icon. Vektor, also bei jeder Skalierung scharf.
+pub(crate) fn app_mark(painter: &egui::Painter, rect: egui::Rect, background: egui::Color32) {
+    let t = crate::theme::tokens(painter.ctx());
+    let r = rect.width().min(rect.height()) / 2.0;
+    let c = rect.center();
+    // Verlauf entlang der Diagonale (oben links hell, unten rechts dunkel), wie im Icon.
+    let dir = egui::vec2(0.6, 1.0).normalized();
+    let color_at = |p: egui::Pos2| {
+        let k = (((p - c).dot(dir) / r) * 0.5 + 0.5).clamp(0.0, 1.0);
+        lerp_color(t.brand_light, t.brand_dark, k)
+    };
+    let mut mesh = egui::Mesh::default();
+    mesh.colored_vertex(c, color_at(c));
+    const N: u32 = 48;
+    for i in 0..=N {
+        let a = i as f32 / N as f32 * std::f32::consts::TAU;
+        let p = c + egui::vec2(a.cos(), a.sin()) * r;
+        mesh.colored_vertex(p, color_at(p));
+        if i > 0 {
+            mesh.add_triangle(0, i, i + 1);
+        }
+    }
+    painter.add(egui::Shape::mesh(mesh));
+    // Welle wie `AUSKLANG_SMALL` im Icon-Generator (512er Raster).
+    let s = 2.0 * r / 452.0;
+    let wave: Vec<egui::Pos2> = (0..=60)
+        .map(|i| {
+            let k = i as f32 / 60.0;
+            let env = (k / 0.12).min(1.0) * (-1.9 * k).exp();
+            let x = (118.0 + 282.0 * k - 256.0) * s;
+            let y = -140.0 * env * (std::f32::consts::TAU * 1.8 * k).sin() * s;
+            c + egui::vec2(x, y)
+        })
+        .collect();
+    painter.line(wave, egui::Stroke::new((44.0 * s).max(1.5), background));
+}
+
+fn lerp_color(a: egui::Color32, b: egui::Color32, k: f32) -> egui::Color32 {
+    let l = |x: u8, y: u8| (f32::from(x) + (f32::from(y) - f32::from(x)) * k).round() as u8;
+    egui::Color32::from_rgb(l(a.r(), b.r()), l(a.g(), b.g()), l(a.b(), b.b()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
