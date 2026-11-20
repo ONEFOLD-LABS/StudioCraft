@@ -41,7 +41,9 @@ impl ProjectWindow {
             .project_path
             .as_ref()
             .and_then(|p| p.file_stem())
-            .map_or("Unbenannt".into(), |s| s.to_string_lossy().into_owned());
+            .map_or(crate::i18n::tr("Unbenannt").into(), |s| {
+                s.to_string_lossy().into_owned()
+            });
         let star = if self.is_modified() { " *" } else { "" };
         format!("{name}{star} – StudioCraft")
     }
@@ -100,10 +102,9 @@ impl ProjectWindow {
                 }
                 // Keine Datei (z. B. synthetisch erzeugt): Samples als WAV ablegen.
                 _ => {
-                    let loaded = self
-                        .clips
-                        .get(&(id as u32))
-                        .ok_or_else(|| format!("{}: keine Audiodaten", clip.name))?;
+                    let loaded = self.clips.get(&(id as u32)).ok_or_else(|| {
+                        crate::i18n::trf("{name}: keine Audiodaten", &[("name", &clip.name)])
+                    })?;
                     let target = unique_name(&audio, &format!("{}.wav", sanitize(&clip.name)));
                     export::write_wav_f32(&loaded.samples, clip.sample_rate, &target)?;
                     PathBuf::from(AUDIO_DIR).join(target.file_name().unwrap_or_default())
@@ -183,7 +184,10 @@ impl ProjectWindow {
         self.replace_project(project, clips, Some(path.to_path_buf()));
         self.saved = Some(saved);
         if !missing.is_empty() {
-            self.message = Some(format!("Fehlende Audiodateien: {}", missing.join(", ")));
+            self.message = Some(crate::i18n::trf(
+                "Fehlende Audiodateien: {liste}",
+                &[("liste", &missing.join(", "))],
+            ));
         }
         Ok(())
     }
@@ -211,9 +215,9 @@ impl ProjectWindow {
             |t: u64| (tempo.seconds(Position(t)) * f64::from(self.sample_rate)).round() as u64;
         let peak = export::render_file(&song, self.sample_rate, frames(a), frames(b), path)?;
         self.message = (peak > 1.0).then(|| {
-            format!(
-                "Export übersteuert (Spitze {:+.1} dBFS) – Ausgang leiser stellen",
-                20.0 * peak.log10()
+            crate::i18n::trf(
+                "Export übersteuert (Spitze {db} dBFS) – Ausgang leiser stellen",
+                &[("db", &format!("{:+.1}", 20.0 * peak.log10()))],
             )
         });
         Ok(())

@@ -5,6 +5,7 @@
 //! gleich lang sind. Mit Kanalbearbeitung: Inserts, EQ, Fader und Panorama des Kanals; ohne:
 //! nur was hineinläuft (Instrumente spielen immer).
 
+use crate::i18n::tr;
 use std::path::{Path, PathBuf};
 
 use studiocraft_engine::export;
@@ -97,7 +98,7 @@ impl ProjectWindow {
             .io
             .outputs
             .first()
-            .map_or("Summe".to_owned(), |b| b.name.clone());
+            .map_or(tr("Summe").to_owned(), |b| b.name.clone());
         out.push((None, main));
         out
     }
@@ -129,14 +130,16 @@ impl ProjectWindow {
     pub(crate) fn export_stems(&mut self, folder: &Path) -> Result<Vec<PathBuf>, String> {
         let chosen = self.stems.chosen.clone();
         if chosen.is_empty() {
-            return Err("Keine Kanäle gewählt".into());
+            return Err(crate::i18n::tr("Keine Kanäle gewählt").into());
         }
         std::fs::create_dir_all(folder).map_err(|e| format!("{}: {e}", folder.display()))?;
         let range = self.export_range();
         let project = self
             .project_path()
             .and_then(Path::file_stem)
-            .map_or("Projekt".to_owned(), |n| n.to_string_lossy().into_owned());
+            .map_or(tr("Projekt").to_owned(), |n| {
+                n.to_string_lossy().into_owned()
+            });
         let names = self.stem_channels();
         let (pattern, format, processing) = (
             self.stems.pattern.clone(),
@@ -161,7 +164,7 @@ impl ProjectWindow {
             let channel = names
                 .iter()
                 .find(|(c, _)| c == choice)
-                .map_or("Kanal".to_owned(), |(_, n)| n.clone());
+                .map_or(tr("Kanal").to_owned(), |(_, n)| n.clone());
             let path = folder.join(file_name(
                 &pattern,
                 &project,
@@ -184,12 +187,14 @@ impl ProjectWindow {
         let mut open = true;
         let mut run = false;
         let d = &mut self.stems;
-        egui::Window::new("Stems exportieren")
+        egui::Window::new(tr("Stems exportieren"))
             .open(&mut open)
             .resizable(false)
             .collapsible(false)
             .show(ctx, |ui| {
-                ui.label("Kanäle (zwischen den Locatoren, sonst das ganze Projekt):");
+                ui.label(tr(
+                    "Kanäle (zwischen den Locatoren, sonst das ganze Projekt):",
+                ));
                 egui::ScrollArea::vertical()
                     .max_height(220.0)
                     .show(ui, |ui| {
@@ -205,24 +210,24 @@ impl ProjectWindow {
                         }
                     });
                 ui.horizontal(|ui| {
-                    if ui.small_button("Alle").clicked() {
+                    if ui.small_button(tr("Alle")).clicked() {
                         d.chosen = channels.iter().map(|(id, _)| *id).collect();
                     }
-                    if ui.small_button("Keine").clicked() {
+                    if ui.small_button(tr("Keine")).clicked() {
                         d.chosen.clear();
                     }
                 });
                 ui.separator();
-                ui.checkbox(&mut d.with_processing, "Mit Kanalbearbeitung")
-                    .on_hover_text("Inserts, EQ, Fader und Panorama des Kanals");
+                ui.checkbox(&mut d.with_processing, tr("Mit Kanalbearbeitung"))
+                    .on_hover_text(tr("Inserts, EQ, Fader und Panorama des Kanals"));
                 ui.horizontal(|ui| {
-                    let l = ui.label("Dateiname");
+                    let l = ui.label(tr("Dateiname"));
                     ui.add(egui::TextEdit::singleline(&mut d.pattern).desired_width(200.0))
                         .labelled_by(l.id)
-                        .on_hover_text("{projekt}, {kanal} und {nr} werden ersetzt");
+                        .on_hover_text(tr("{projekt}, {kanal} und {nr} werden ersetzt"));
                 });
                 ui.horizontal(|ui| {
-                    let l = ui.label("Format");
+                    let l = ui.label(tr("Format"));
                     egui::ComboBox::from_id_salt("stem-format")
                         .selected_text(d.format.label())
                         .show_ui(ui, |ui| {
@@ -237,10 +242,10 @@ impl ProjectWindow {
                     let folder = d
                         .folder
                         .as_ref()
-                        .map_or("kein Ordner".to_owned(), |p| p.display().to_string());
+                        .map_or(tr("kein Ordner").to_owned(), |p| p.display().to_string());
                     ui.label(folder);
                     #[cfg(not(target_arch = "wasm32"))]
-                    if ui.button("Ordner …").clicked()
+                    if ui.button(tr("Ordner …")).clicked()
                         && let Some(p) = rfd::FileDialog::new().pick_folder()
                     {
                         d.folder = Some(p);
@@ -251,7 +256,7 @@ impl ProjectWindow {
                 }
                 let ready = !d.chosen.is_empty() && d.folder.is_some();
                 if ui
-                    .add_enabled(ready, egui::Button::new("Exportieren"))
+                    .add_enabled(ready, egui::Button::new(tr("Exportieren")))
                     .clicked()
                 {
                     run = true;
@@ -259,7 +264,7 @@ impl ProjectWindow {
             });
         if run && let Some(folder) = self.stems.folder.clone() {
             self.stems.message = Some(match self.export_stems(&folder) {
-                Ok(files) => format!("{} Dateien geschrieben", files.len()),
+                Ok(files) => crate::i18n::trf("{n} Dateien geschrieben", &[("n", &files.len())]),
                 Err(e) => e,
             });
         }

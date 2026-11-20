@@ -2,6 +2,7 @@
 //! Issue #1). Bearbeitet werden sie im Dialog „Tastaturbefehle“, ausgelöst über ihre Taste oder
 //! das Menü Bearbeiten → Makros.
 
+use crate::i18n::tr;
 use crate::keymap::{COMMANDS, Cmd, MACROS, MAX_NAME, MAX_STEPS, info};
 
 /// Kurzer Name eines Befehls für die Schrittliste.
@@ -13,7 +14,7 @@ impl crate::ProjectWindow {
     /// Abschnitt „Makros“ im Dialog „Tastaturbefehle“.
     pub(crate) fn macros_ui(&mut self, ui: &mut egui::Ui) {
         let mut changed = false;
-        egui::CollapsingHeader::new("Makros")
+        egui::CollapsingHeader::new(tr("Makros"))
             .id_salt("makros")
             .show(ui, |ui| {
                 for slot in 1..=MACROS as u8 {
@@ -36,19 +37,22 @@ impl crate::ProjectWindow {
             let name = ui
                 .add(
                     egui::TextEdit::singleline(&mut m.name)
-                        .hint_text("Name")
+                        .hint_text(tr("Name"))
                         .char_limit(MAX_NAME)
                         .desired_width(140.0),
                 )
-                .on_hover_text(format!("Name von Makro {slot}"));
-            let label = format!("Name von Makro {slot}");
+                .on_hover_text(crate::i18n::trf(
+                    "Name von Makro {slot}",
+                    &[("slot", &slot)],
+                ));
+            let label = crate::i18n::trf("Name von Makro {slot}", &[("slot", &slot)]);
             name.widget_info(|| {
                 egui::WidgetInfo::labeled(egui::Role::TextInput, true, label.as_str())
             });
             changed |= name.changed();
             let mut add = None;
             ui.add_enabled_ui(m.steps.len() < MAX_STEPS, |ui| {
-                let r = ui.menu_button("+ Befehl", |ui| {
+                let r = ui.menu_button(tr("+ Befehl"), |ui| {
                     let mut category = "";
                     for c in COMMANDS.iter().filter(|c| !matches!(c.cmd, Cmd::Macro(_))) {
                         if c.category == category {
@@ -65,7 +69,7 @@ impl crate::ProjectWindow {
                         });
                     }
                 });
-                let label = format!("Befehl an Makro {slot} anhängen");
+                let label = crate::i18n::trf("Befehl an Makro {slot} anhängen", &[("slot", &slot)]);
                 r.response.on_hover_text(label.as_str()).widget_info(|| {
                     egui::WidgetInfo::labeled(egui::Role::Button, true, label.as_str())
                 });
@@ -75,8 +79,14 @@ impl crate::ProjectWindow {
                 changed = true;
             }
             if ui
-                .add_enabled(!m.steps.is_empty(), egui::Button::new("Entfernen").small())
-                .on_hover_text(format!("Letzten Befehl aus Makro {slot} entfernen"))
+                .add_enabled(
+                    !m.steps.is_empty(),
+                    egui::Button::new(tr("Entfernen")).small(),
+                )
+                .on_hover_text(crate::i18n::trf(
+                    "Letzten Befehl aus Makro {slot} entfernen",
+                    &[("slot", &slot)],
+                ))
                 .clicked()
             {
                 m.steps.pop();
@@ -84,7 +94,7 @@ impl crate::ProjectWindow {
             }
             let steps: Vec<&str> = m.steps.iter().map(|c| step_name(*c)).collect();
             let text = if steps.is_empty() {
-                "leer".to_owned()
+                crate::i18n::tr("leer").to_owned()
             } else {
                 steps.join(", ")
             };
@@ -95,7 +105,7 @@ impl crate::ProjectWindow {
 
     /// Untermenü Bearbeiten → Makros: belegte Makros ausführen, Dialog öffnen.
     pub(crate) fn macros_menu(&mut self, ui: &mut egui::Ui) {
-        ui.menu_button("Makros", |ui| {
+        ui.menu_button(tr("Makros"), |ui| {
             let mut any = false;
             for slot in 1..=MACROS as u8 {
                 let filled = self
@@ -114,10 +124,10 @@ impl crate::ProjectWindow {
                 }
             }
             if !any {
-                ui.add_enabled(false, egui::Button::new("Keine Makros"));
+                ui.add_enabled(false, egui::Button::new(tr("Keine Makros")));
             }
             ui.separator();
-            if ui.button("Makros bearbeiten …").clicked() {
+            if ui.button(tr("Makros bearbeiten …")).clicked() {
                 self.key_dialog.open = true;
                 ui.close();
             }

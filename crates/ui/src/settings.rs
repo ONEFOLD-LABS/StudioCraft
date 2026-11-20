@@ -4,6 +4,7 @@
 //! macOS `~/Library/Application Support/StudioCraft`, Windows `%APPDATA%\StudioCraft`.
 //! `STUDIOCRAFT_CONFIG_DIR` überschreibt den Ort (Tests).
 
+use crate::i18n::tr;
 use std::path::PathBuf;
 
 use egui::ThemePreference;
@@ -231,7 +232,7 @@ impl Settings {
     }
 
     pub fn save(&self) -> Result<(), String> {
-        let d = dir().ok_or("kein Ort für Einstellungen")?;
+        let d = dir().ok_or(tr("kein Ort für Einstellungen"))?;
         std::fs::create_dir_all(&d).map_err(|e| format!("{}: {e}", d.display()))?;
         let text = serde_json::to_string_pretty(&self.to_file()).map_err(|e| e.to_string())?;
         std::fs::write(d.join("settings.json"), text + "\n")

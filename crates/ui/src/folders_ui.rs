@@ -2,6 +2,7 @@
 //! mit der gewählten Spur darin) und im Inspector einer Spur ihren Ordner wählen. Auf- und
 //! zuklappen über den Pfeil im Spurkopf der Ordnerspur.
 
+use crate::i18n::tr;
 use egui::Ui;
 use studiocraft_project::TrackKind;
 
@@ -18,9 +19,10 @@ impl ProjectWindow {
             .iter()
             .filter(|t| t.kind == TrackKind::Folder)
             .count();
-        let folder = self
-            .project
-            .add_track(TrackKind::Folder, format!("Ordner {:02}", n + 1));
+        let folder = self.project.add_track(
+            TrackKind::Folder,
+            format!("{} {:02}", crate::i18n::tr("Ordner"), n + 1),
+        );
         if let Some(sel) = self.selected_track.filter(|&s| s != folder) {
             let outer = self.project.parent_of(sel);
             self.project.set_parent(folder, outer);
@@ -48,15 +50,15 @@ impl ProjectWindow {
         let current = self.project.parent_of(idx);
         let current_name = current
             .and_then(|c| self.project.tracks.get(c))
-            .map_or("Kein Ordner".to_owned(), |t| t.name.clone());
+            .map_or(tr("Kein Ordner").to_owned(), |t| t.name.clone());
         let mut pick: Option<Option<usize>> = None;
         ui.horizontal(|ui| {
-            let l = ui.label("Ordner");
+            let l = ui.label(tr("Ordner"));
             egui::ComboBox::from_id_salt(("ordner", idx))
                 .selected_text(current_name)
                 .show_ui(ui, |ui| {
                     if ui
-                        .selectable_label(current.is_none(), "Kein Ordner")
+                        .selectable_label(current.is_none(), tr("Kein Ordner"))
                         .clicked()
                     {
                         pick = Some(None);

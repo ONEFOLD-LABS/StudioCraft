@@ -435,3 +435,108 @@ Zählzeit	Beat
 {n} Take(s) aufgenommen, aber {overruns} Samples verloren (Puffer voll)	{n} take(s) recorded, but {overruns} samples lost (buffer full)
 {rows} Spuren	{rows} tracks
 Über bestehenden Parts	Over existing parts
++ Befehl	+ Command
+Abtastrate	Sample rate
+Aktuelles speichern	Save Current
+Alle	All
+Alle 10 Minuten	Every 10 minutes
+Alle 15 Minuten	Every 15 minutes
+Alle 2 Minuten	Every 2 minutes
+Alle 5 Minuten	Every 5 minutes
+An Ort und Stelle rendern	Render in Place
+Anzahl	Count
+Anzahl Sicherungen	Number of backups
+Audio importieren …	Import Audio…
+Audio- und MIDI-Geräte	Audio and MIDI Devices
+Audio-Dateien des Projekts (Pool)	The project's audio files (pool)
+Audiogerät nicht mehr verfügbar ({status}). Im Menü Transport unter „Audio- und MIDI-Geräte …“ ein anderes wählen.	Audio device no longer available ({status}). Choose another one under Transport > “Audio and MIDI Devices…”.
+Auf eine Spur ziehen oder erst eine Spur mit Mixer-Kanal wählen	Drag onto a track, or first select a track with a mixer channel
+Automatisch	Automatic
+Automatisch sichern	Autosave
+Befehl an Makro {slot} anhängen	Append a command to macro {slot}
+Bitte einen Namen für das Layout eingeben	Please enter a name for the layout
+Blockgröße	Block size
+Crossfade: die Events müssen sich auf einer Spur überlappen	Crossfade: the events must overlap on one track
+Dateibrowser mit Vorhören	File browser with preview
+Dateien	Files
+Dateiname	File name
+Der Pool ist leer. Audiodateien importieren oder ins Projekt ziehen.	The pool is empty. Import audio files or drag them into the project.
+Doppelklick oder auf eine leere Fläche ziehen: neue Instrument-Spur	Double-click or drag onto an empty area: new instrument track
+Doppelklick: als Insert auf die gewählte Spur; oder auf eine Spur ziehen	Double-click: insert on the selected track; or drag onto a track
+Effekt-Plugins: als Insert auf eine Spur legen	Effect plugins: put on a track as an insert
+Effekte	Effects
+Eine andere Abtastrate gilt nach einem Neustart.	A different sample rate takes effect after a restart.
+Erst ein Event oder einen Part auswählen	Select an event or part first
+Export übersteuert (Spitze {db} dBFS) – Ausgang leiser stellen	Export clipped (peak {db} dBFS) – turn the output down
+Exportieren	Export
+Fehlende Audiodateien: {liste}	Missing audio files: {liste}
+Format	Format
+Geteilte Kopien	Shared copies
+Host	Host
+Höchstens {max} Layouts; erst eins entfernen	At most {max} layouts; remove one first
+In die untere Zone	Back to the Bottom Panel
+Inserts, EQ, Fader und Panorama des Kanals	The channel's inserts, EQ, fader and pan
+Instrument-Plugins: neue Instrument-Spur anlegen	Instrument plugins: create a new instrument track
+Instrumente	Instruments
+Jede Minute	Every minute
+Kanäle (zwischen den Locatoren, sonst das ganze Projekt):	Channels (between the locators, otherwise the whole project):
+Kein Audio: Gerät getrennt	No audio: device disconnected
+Kein Ordner	No folder
+kein Ordner	no folder
+kein Ort für Einstellungen	no place for settings
+Keine	None
+Keine Kanäle gewählt	No channels selected
+Keine Makros	No macros
+Keine passenden Plugins gefunden	No matching plugins found
+Layout {slot} entfernen	Remove layout {slot}
+Layout {slot} ist nicht belegt	Layout {slot} is empty
+Letzten Befehl aus Makro {slot} entfernen	Remove the last command from macro {slot}
+Läuft im eigenen Fenster.	Running in its own window.
+Makros	Macros
+Makros bearbeiten …	Edit Macros…
+Maximieren	Maximize
+Medien	Media
+MIDI-Eingänge	MIDI inputs
+Minimieren	Minimize
+Mit Kanalbearbeitung	With channel processing
+Mit Kanaleinstellungen	With Channel Settings
+Name von Makro {slot}	Name of macro {slot}
+Neu laden	Reload
+Neueste Sicherung: {path}	Latest backup: {path}
+Nichts zu rendern	Nothing to render
+Noch keine Layouts gespeichert	No layouts saved yet
+Nur Instrument und Inserts	Instrument and Inserts Only
+Ordner neu einlesen	Reread folder
+Ordner …	Folder…
+Plugins	Plugins
+Rendern abgebrochen	Rendering aborted
+Rendern ohne: {liste}	Rendering without: {liste}
+Rendern: nur Stille	Render: silence only
+Schließen	Close
+Sicherung fehlgeschlagen	Backup failed
+Sicherung fehlgeschlagen: {e}	Backup failed: {e}
+Sicherung geöffnet: {path}	Backup opened: {path}
+Sicherung öffnen	Open Backup
+Spur einfrieren	Freeze Track
+Spur ist eingefroren – erst „Einfrieren aufheben“	The track is frozen – choose “Unfreeze” first
+Standard	Default
+Start	Start
+Stems exportieren	Export Stems
+StudioCraft wurde nicht sauber beendet.	StudioCraft did not shut down cleanly.
+Verwerfen	Discard
+Vorhören	Preview
+Vorhören stoppen	Stop preview
+Vorhören: {e}	Preview: {e}
+Wiederholen	Repeat
+Wird übernommen …	Applying…
+zip: keine .{ext}-Datei	zip: no .{ext} file
+zip: zu groß	zip: too large
+Zurückholen	Bring Back
+{name} (eingefroren)	{name} (frozen)
+{name} (gerendert)	{name} (rendered)
+{name}: keine Audiodaten	{name}: no audio data
+{n} Dateien geschrieben	{n} files written
+{projekt}, {kanal} und {nr} werden ersetzt	{projekt}, {kanal} and {nr} are replaced
+Übergeordneter Ordner	Parent folder
+Übernehmen	Apply
+Übernommen	Applied
