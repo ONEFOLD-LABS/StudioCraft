@@ -333,6 +333,12 @@ pub(crate) fn show(w: &mut ProjectWindow, ui: &mut Ui) {
                 db: w.sample_editor.gain_db,
             });
         }
+        // Effekt-Plugin offline auf die Auswahl bzw. das Event (processes_ui.rs).
+        if let Some(range) = w.target_range(id) {
+            ui.menu_button(tr("Plugin anwenden"), |ui| {
+                w.plugin_process_menu(ui, id, range);
+            });
+        }
 
         ui.separator();
         if ui.button(tr("Einpassen")).clicked() {

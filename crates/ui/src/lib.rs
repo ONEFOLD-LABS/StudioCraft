@@ -3749,6 +3749,93 @@ mod tests {
     }
 
     #[test]
+    fn an_effect_plugin_processes_a_clip_offline_and_stays_in_the_list() {
+        let mut w = ProjectWindow::new(Project::default(), None, String::new());
+        let Some(fx) = test_effect(&mut w) else {
+            eprintln!("kein Effekt installiert – übersprungen");
+            return;
+        };
+        let clip = AudioClip {
+            sample_rate: 48_000,
+            samples: (0..48_000)
+                .flat_map(|i| {
+                    let v = (i as f32 * 0.05).sin() * 0.3;
+                    [v, v]
+                })
+                .collect::<Vec<f32>>()
+                .into(),
+        };
+        let id = w.import_clip("Take", None, clip, None).unwrap();
+        let source = w.project.event(id).unwrap().clip.unwrap();
+        let slot = studiocraft_project::InsertSlot {
+            plugin_id: fx.id.clone(),
+            name: fx.name.clone(),
+            bypass: false,
+            params: Vec::new(),
+            state: None,
+        };
+        w.add_plugin_process(id, slot, (0, 24_000))
+            .unwrap_or_else(|e| panic!("{}: {e}", fx.name));
+        let (src, steps) = w.event_processes(id).unwrap();
+        assert_eq!(src, source);
+        assert_eq!(steps.len(), 1);
+        assert_eq!(steps[0].name(), fx.name);
+        let now = w.project.event(id).unwrap().clip.unwrap();
+        assert_ne!(now, source, "a new clip, the original stays");
+        let s = &w.clip(now).unwrap().samples;
+        assert_eq!(s.len(), 96_000, "length kept");
+        assert!(s.iter().all(|v| v.is_finite()));
+        assert!(
+            s[..48_000].iter().any(|v| v.abs() > 1e-3),
+            "{} passes signal",
+            fx.name
+        );
+        // The part outside the range is untouched.
+        let orig = w.clip(source).unwrap().samples.clone();
+        assert_eq!(&s[48_000..], &orig[48_000..]);
+        // Switching it off brings back the original sound (re-rendered from the source).
+        let (src, mut steps) = w.event_processes(id).unwrap();
+        steps[0].on = false;
+        w.rerender_processes(id, src, steps).unwrap();
+        let now = w.project.event(id).unwrap().clip.unwrap();
+        assert_eq!(&w.clip(now).unwrap().samples[..], &orig[..]);
+    }
+
+    #[test]
+    fn the_sample_editor_applies_an_effect_plugin_from_its_menu() {
+        let (mut w, id) = one_event_window();
+        let Some(fx) = test_effect(&mut w) else {
+            eprintln!("kein Effekt installiert – übersprungen");
+            return;
+        };
+        w.open_sample_editor(id);
+        w.clear_history();
+        let mut h = window_harness(w);
+        h.run_steps(2);
+        h.get_by_label("Plugin anwenden").click();
+        h.run_steps(2);
+        let vendor = if fx.vendor.is_empty() {
+            "Ohne Hersteller".to_owned()
+        } else {
+            fx.vendor.clone()
+        };
+        h.get_by_label_contains(&format!("{vendor} (")).click();
+        h.run_steps(2);
+        h.get_all_by_label(&fx.display_name())
+            .last()
+            .unwrap()
+            .click();
+        h.run_steps(3);
+        let (_, steps) = h.state().event_processes(id).unwrap();
+        assert_eq!(steps.len(), 1, "{:?}", h.state().message);
+        assert_eq!(steps[0].kind, studiocraft_project::ProcessKind::Plugin);
+        assert_eq!(steps[0].name(), fx.name);
+        h.get_by_label(&format!("1. {}", fx.name));
+        h.state_mut().undo();
+        assert!(h.state().event_processes(id).unwrap().1.is_empty());
+    }
+
+    #[test]
     fn the_edit_menu_renders_the_selected_track_in_place() {
         let (mut w, _) = one_event_window();
         w.selected_track = Some(0);

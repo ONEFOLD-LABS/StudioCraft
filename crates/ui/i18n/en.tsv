@@ -727,3 +727,7 @@ Bearbeitung {nr} nach oben	Move process {nr} up
 Bearbeitung {nr} entfernen	Remove process {nr}
 Bearbeitungen: {e}	Processes: {e}
 hoch	up
+Plugin anwenden	Apply plugin
+Inserts der Spur	Track inserts
+Plugin-Bearbeitung abgebrochen	Plugin processing aborted
+Plugin	Plugin

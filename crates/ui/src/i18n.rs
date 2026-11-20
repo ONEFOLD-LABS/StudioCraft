@@ -218,6 +218,7 @@ mod tests {
             K::FadeIn,
             K::FadeOut,
             K::RemoveDc,
+            K::Plugin,
         ]
         .map(|k| k.label());
         let labels = studiocraft_project::DrawShape::ALL.map(|s| s.label());
