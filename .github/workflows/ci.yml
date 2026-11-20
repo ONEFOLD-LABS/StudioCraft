@@ -23,3 +23,9 @@ jobs:
         pkg-config libxkbcommon-dev libwayland-dev libx11-dev libxcb1-dev libxcursor-dev
         libxrandr-dev libxi-dev libfontconfig1-dev libfreetype-dev mesa-vulkan-drivers
         libgl1-mesa-dev libasound2-dev libpipewire-0.3-dev libclang-dev
+      # Windows and macOS legs: on pull requests only when platform cfg code, its dependents or
+      # the build setup change (or with the label full-ci); on pushes to main always. Only the
+      # Linux leg is a required check.
+      os: '["ubuntu-24.04","windows-latest","macos-latest"]'
+      select-os: '["windows-latest","macos-latest"]'
+      select-label: full-ci
