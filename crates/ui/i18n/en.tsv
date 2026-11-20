@@ -752,3 +752,49 @@ Inserts der Spur	Track inserts
 Plugin-Bearbeitung abgebrochen	Plugin processing aborted
 Plugin	Plugin
 Steuerkanal: {fehler}	Control channel: {fehler}
+KI-Assistent	AI assistant
+API-Schlüssel	API key
+Abgebrochen.	Cancelled.
+Adresse	Address
+Antwort nicht lesbar: {fehler}	Cannot read the reply: {fehler}
+Assistent	Assistant
+Cloud: Daten gehen an {host}.	Cloud: data goes to {host}.
+Das Modell hat leer geantwortet.	The model sent an empty reply.
+Deine Nachrichten und Projektdaten (Spurnamen, Noten, Tempo) gehen an {host}. Der Anbieter kann sie speichern.	Your messages and project data (track names, notes, tempo) go to {host}. The provider may store them.
+Denkt nach …	Thinking …
+Der Dienst hat die Antwort gefiltert.	The service filtered the reply.
+Der Endpunkt hat den Schlüssel abgelehnt	The endpoint refused the key
+Der Endpunkt hat kein JSON geschickt: {fehler}	The endpoint sent no JSON: {fehler}
+Der Endpunkt hat keine Nachricht geschickt.	The endpoint sent no message.
+Der Endpunkt nennt keine Modelle.	The endpoint lists no models.
+Die Adresse muss mit http:// oder https:// beginnen.	The address must start with http:// or https://.
+Die Anfrage ist ohne Antwort abgebrochen.	The request ended without a reply.
+Die Antwort wurde abgeschnitten (Grenze des Modells).	The reply was cut off (model limit).
+Du	You
+Endpunkt nicht erreichbar (läuft der Server?).	Cannot reach the endpoint (is the server running?).
+Endpunkt oder Modell nicht gefunden	Endpoint or model not found
+Erlauben	Allow
+Fehler: {fehler}	Error: {fehler}
+Frage Modelle ab …	Asking for models …
+Im Einstellungsordner, nur für dich lesbar	In the settings folder, readable only by you
+Kein Modell gewählt.	No model chosen.
+Keine Antwort in der Zeit.	No reply in time.
+Lokal: nichts verlässt diesen Rechner.	Local: nothing leaves this computer.
+Modell	Model
+Modell wählen	Choose model
+Modelle abfragen	List models
+Nach {n} Schritten angehalten; schreib weiter, um fortzufahren.	Stopped after {n} steps; write again to continue.
+Nachricht	Message
+Neues Gespräch beginnen	Start a new conversation
+Sag dem Assistenten, was er im Projekt tun soll. Jede Änderung lässt sich mit Strg+Z zurücknehmen.	Tell the assistant what to do in the project. Every change can be undone with Ctrl+Z.
+Schlüssel speichern	Remember key
+Senden	Send
+Sichern	Save
+Verbindung	Connection
+Verbindung gesichert.	Connection saved.
+Zu viele Anfragen oder Kontingent aufgebraucht	Too many requests or quota used up
+Zum Beispiel: Lege eine Bass-Spur mit einem Part über 4 Takte an	For example: add a bass track with a 4-bar part
+http:// nur zu diesem Rechner; sonst https:// verwenden.	http:// only to this computer; use https:// otherwise.
+leer für lokale Server	empty for local servers
+{n} Modelle gefunden.	{n} models found.
+Keine Zertifikate des Systems gefunden.	No system certificates found.

@@ -90,6 +90,20 @@ impl ProjectWindow {
         }
     }
 
+    /// Die App bietet den KI-Assistenten an: „Ansicht → KI-Assistent“ erscheint.
+    pub fn enable_assistant(&mut self) {
+        self.assistant_available = true;
+    }
+
+    /// Ob der KI-Assistent gerade zu sehen sein soll.
+    pub fn assistant_open(&self) -> bool {
+        self.assistant_available && self.show_assistant
+    }
+
+    pub fn set_assistant_open(&mut self, open: bool) {
+        self.show_assistant = open;
+    }
+
     /// Die App wechselt das Audiogerät auf diese Wahl (einmal abholen).
     pub fn take_device_request(&mut self) -> Option<DeviceChoice> {
         self.device_request.take()

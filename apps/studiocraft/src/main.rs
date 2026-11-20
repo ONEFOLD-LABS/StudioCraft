@@ -22,6 +22,7 @@ mod macos_open;
 
 use std::{path::Path, process::ExitCode, time::Duration};
 
+use studiocraft_assistant::Assistant;
 use studiocraft_automation::control::Control;
 use studiocraft_engine::{
     AudioOutput, DeviceChoice, EngineCore, OutputInfo, PreparedOutput, engine,
@@ -61,6 +62,8 @@ struct App {
     // Plugin-Instanzen.
     /// Steuerkanal für KI-Agenten (`--control`).
     control: Option<Control>,
+    /// KI-Assistent (Ansicht → KI-Assistent).
+    assistant: Assistant,
     window: ProjectWindow,
     /// Hält den Audio-Stream am Leben.
     audio: Option<AudioOutput>,
@@ -78,7 +81,8 @@ impl eframe::App for App {
         if let Some(control) = &mut self.control {
             control.poll(&mut self.window, Some(ui.ctx()));
         }
-        self.window.ui(ui);
+        // Das Fenster mit der Leiste des KI-Assistenten am rechten Rand.
+        self.assistant.window_ui(ui, &mut self.window);
         if let Some(choice) = self.window.take_device_request() {
             self.switch_audio(&choice);
         }
@@ -351,6 +355,7 @@ fn main() -> ExitCode {
         options,
         Box::new(move |cc| {
             let mut window = window;
+            window.enable_assistant();
             let control = control_port.and_then(|port| {
                 let ctx = cc.egui_ctx.clone();
                 match Control::start(port, move || ctx.request_repaint()) {
@@ -367,6 +372,7 @@ fn main() -> ExitCode {
             });
             Ok(Box::new(App {
                 control,
+                assistant: Assistant::new(),
                 window,
                 audio,
                 parked: None,
