@@ -98,6 +98,49 @@ pub struct Event {
     /// dass eine Viertel der Datei eine Viertel im Projekt dauert. `None`: Wiedergabe 1:1.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub musical: Option<f64>,
+    /// Art des Time-Stretch für solche Events (Korngröße: Klangcharakter gegen Rechenzeit).
+    #[serde(default, skip_serializing_if = "StretchMode::is_standard")]
+    pub stretch_mode: StretchMode,
+}
+
+/// Art des Time-Stretch eines Audio-Events, das dem Tempo folgt.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, Default, serde::Serialize, serde::Deserialize,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum StretchMode {
+    /// Mittlere Körner (etwa 43 ms): für gemischtes Material.
+    #[default]
+    Standard,
+    /// Kurze Körner (etwa 21 ms): Anschläge bleiben knackig (Schlagzeug, Perkussion).
+    Rhythmic,
+    /// Lange Körner (etwa 85 ms): weiche, stehende Klänge (Flächen, Gesang), mehr Rechenzeit.
+    Pad,
+}
+
+impl StretchMode {
+    pub const ALL: [StretchMode; 3] = [Self::Standard, Self::Rhythmic, Self::Pad];
+
+    pub fn is_standard(&self) -> bool {
+        *self == Self::Standard
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Standard => "Standard",
+            Self::Rhythmic => "Rhythmisch",
+            Self::Pad => "Flächig",
+        }
+    }
+
+    /// Korngröße in Frames bei 48 kHz.
+    pub fn grain_48k(self) -> usize {
+        match self {
+            Self::Standard => 2048,
+            Self::Rhythmic => 1024,
+            Self::Pad => 4096,
+        }
+    }
 }
 
 /// Frames des Clip-Inhalts für `ticks`: bei Events, die dem Tempo folgen (`musical`), im
@@ -1011,6 +1054,7 @@ impl Project {
                         color: None,
                         shared: None,
                         musical: None,
+                        stretch_mode: StretchMode::Standard,
                         gain_db: 0.0,
                         fade_in_curve: FadeCurve::Linear,
                         fade_out_curve: FadeCurve::Linear,
@@ -1223,6 +1267,7 @@ impl Project {
                 color: None,
                 shared: None,
                 musical: None,
+                stretch_mode: StretchMode::Standard,
                 gain_db: 0.0,
                 fade_in_curve: FadeCurve::Linear,
                 fade_out_curve: FadeCurve::Linear,
@@ -1640,6 +1685,7 @@ impl Project {
                 color: None,
                 shared: None,
                 musical: None,
+                stretch_mode: StretchMode::Standard,
                 gain_db: 0.0,
                 fade_in_curve: FadeCurve::Linear,
                 fade_out_curve: FadeCurve::Linear,
@@ -1730,6 +1776,7 @@ impl Project {
             color: None,
             shared: None,
             musical: None,
+            stretch_mode: StretchMode::Standard,
             gain_db: 0.0,
             fade_in_curve: FadeCurve::Linear,
             fade_out_curve: FadeCurve::Linear,
