@@ -4,6 +4,9 @@
 //!   Clippy ohne Warnungen, alle Tests.
 //! - `cargo xtask version` – zeigt die Version; `cargo xtask version set 0.2.0` setzt sie
 //!   (sie steht nur in `[workspace.package]` der Wurzel-Cargo.toml).
+//! - `cargo xtask licenses` – schreibt `THIRD-PARTY-LICENSES.txt`; `--check` prüft nur.
+
+mod licenses;
 
 use std::{path::PathBuf, process::Command, process::ExitCode};
 
@@ -28,6 +31,8 @@ fn run(step: &str, cmd: &mut Command) -> Result<(), String> {
 }
 
 fn ci() -> Result<(), String> {
+    eprintln!("==> Lizenzen von Drittanbietern");
+    licenses::run(&root(), true)?;
     run(
         "Formatierung",
         Command::new("cargo").args(["fmt", "--all", "--check"]),
@@ -101,7 +106,9 @@ fn main() -> ExitCode {
         ["ci"] => ci(),
         ["version"] => version(None),
         ["version", "set", v] => version(Some(v)),
-        _ => Err("Aufruf: cargo xtask ci | version [set X.Y.Z]".into()),
+        ["licenses"] => licenses::run(&root(), false),
+        ["licenses", "--check"] => licenses::run(&root(), true),
+        _ => Err("Aufruf: cargo xtask ci | version [set X.Y.Z] | licenses [--check]".into()),
     };
     match result {
         Ok(()) => ExitCode::SUCCESS,

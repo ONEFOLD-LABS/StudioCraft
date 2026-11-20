@@ -16,6 +16,7 @@
     )
 )]
 
+mod about;
 mod automation_panel;
 mod automation_write;
 mod autosave;
@@ -160,6 +161,8 @@ pub struct ProjectWindow {
     crossfade_editor: Option<fades_ui::CrossfadeEditor>,
     /// Dialog „Wiederholen“ (Strg+K).
     repeat_dialog: shortcuts::RepeatDialog,
+    /// Dialog „Über StudioCraft“.
+    about: about::About,
     /// Sample-Editor in der unteren Zone.
     sample_editor: sampleeditor::SampleEditor,
     /// Globaler Quantisierungswert mit Swing und Stärke (Taste Q).
@@ -362,6 +365,7 @@ impl ProjectWindow {
             fade_editor: None,
             crossfade_editor: None,
             repeat_dialog: shortcuts::RepeatDialog::default(),
+            about: about::About::Closed,
             sample_editor: sampleeditor::SampleEditor::default(),
             quantize: studiocraft_project::Quantize::default(),
             auto_writer: automation_write::AutomationWriter::default(),
@@ -1153,6 +1157,7 @@ impl ProjectWindow {
         }
 
         self.confirm_dialog(ui);
+        self.about_dialog(ui);
         self.sync_title_bar(ui.ctx());
         let title = self.title();
         if title != self.last_title {
@@ -4233,6 +4238,30 @@ mod tests {
             assert!(w.project.set_musical(id, Some(96.0)));
             w.selection = vec![id];
         });
+    }
+
+    #[test]
+    fn the_help_menu_shows_the_licences() {
+        let (w, _) = one_event_window();
+        let mut h = window_harness(w);
+        h.get_by_label("Hilfe").click();
+        h.run_steps(2);
+        h.get_by_label("Über StudioCraft …").click();
+        h.run_steps(2);
+        assert!(h.query_by_label_contains("Version").is_some());
+        h.get_by_label("Lizenzen der Open-Source-Komponenten")
+            .click();
+        h.run_steps(2);
+        assert_eq!(h.state().about, about::About::Licenses);
+        assert!(
+            h.query_by_label_contains("StudioCraft – third-party licences")
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn render_about_dialog() {
+        shot("about", |w| w.about = about::About::Licenses);
     }
 
     #[test]

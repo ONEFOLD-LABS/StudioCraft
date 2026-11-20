@@ -281,6 +281,12 @@ impl ProjectWindow {
                     }
                 });
             });
+            ui.menu_button(tr("Hilfe"), |ui| {
+                if ui.button(tr("Über StudioCraft …")).clicked() {
+                    self.about = crate::about::About::Open;
+                    ui.close();
+                }
+            });
         });
     }
 
