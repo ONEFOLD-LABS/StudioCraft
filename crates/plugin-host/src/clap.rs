@@ -1,5 +1,6 @@
 //! CLAP über die C-Schnittstelle (`clap-sys`), Bibliotheken über `libloading`.
 
+pub use crate::info::{MAX_LATENCY, ParamInfo};
 use std::{
     collections::HashMap,
     ffi::{CStr, CString, c_char, c_void},
@@ -423,20 +424,6 @@ impl ClapHandle {
 // ---------------------------------------------------------------------------
 // Instanz.
 
-/// Ein Parameter eines Plugins.
-#[derive(Debug, Clone, PartialEq)]
-pub struct ParamInfo {
-    pub id: u32,
-    pub name: String,
-    pub module: String,
-    pub min: f64,
-    pub max: f64,
-    pub default: f64,
-    /// Wert beim Anlegen der Instanz.
-    pub value: f64,
-    pub stepped: bool,
-}
-
 /// Puffer für alle Audio-Anschlüsse einer Richtung. Laut CLAP muss der Host
 /// für jeden gemeldeten Anschluss Puffer liefern (auch Sidechains). Alles wird
 /// beim Erzeugen angelegt; die Zeiger bleiben gültig, weil die Daten auf dem
@@ -482,10 +469,6 @@ impl PortSet {
         self.main.and_then(|m| self.bufs.get(m)).map_or(0, Vec::len)
     }
 }
-
-/// Höchste Latenz, die der Host ausgleicht (frames; 2 s bei 48 kHz). Mehr meldet nur ein
-/// fehlerhaftes Plugin.
-pub const MAX_LATENCY: u32 = 96_000;
 
 /// Eine laufende Plugin-Instanz mit Stereo-Ein- und -Ausgang.
 pub struct ClapInstance {
