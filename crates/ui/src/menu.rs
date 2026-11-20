@@ -178,6 +178,10 @@ impl ProjectWindow {
                     ui.close();
                     self.add_tempo_track();
                 }
+                if ui.button(tr("Lineal-Spur hinzufügen")).clicked() {
+                    ui.close();
+                    self.add_ruler_track();
+                }
                 let insert = egui::Button::new(tr("Marker einfügen"))
                     .shortcut_text(self.key_label(ui.ctx(), Cmd::InsertMarker));
                 if ui.add(insert).clicked() {

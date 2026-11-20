@@ -36,6 +36,11 @@ Position	Position
 Folgt dem Tempo	Follows Tempo
 Audio wird gedehnt, sodass es zum Projekttempo passt (Tonhöhe bleibt)	Audio is stretched to fit the project tempo (pitch stays)
 Datei-Tempo	File Tempo
+Lineal	Ruler
+Lineal-Spur hinzufügen	Add Ruler Track
+Takte	Bars
+Timecode 25 fps	Timecode 25 fps
+Timecode 30 fps	Timecode 30 fps
 Hoch	Up
 Runter	Down
 Drum-Map: {spur}	Drum Map: {spur}
