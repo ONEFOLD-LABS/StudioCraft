@@ -90,7 +90,7 @@ if [[ "$(uname -s)" = FreeBSD ]] && command -v pkg >/dev/null; then
     echo "comment: \"Digital audio workstation: record, arrange and mix music\""
     echo "desc: \"StudioCraft is a cross-platform digital audio workstation written in Rust.\""
     echo "maintainer: \"StudioCraft contributors\""
-    echo "www: https://github.com/xXCrusaderXx/StudioCraft"
+    echo "www: https://github.com/ONEFOLD-LABS/StudioCraft"
     echo "prefix: /usr/local"
     echo "abi: \"$ABI\""
     echo "licenselogic: dual"

@@ -157,7 +157,7 @@ jobs:
           fi
           studiocraft-cli --version
           studiocraft --version
-          test -f /usr/share/mime/packages/io.github.xxcrusaderxx.studiocraft.xml
+          test -f /usr/share/mime/packages/io.github.onefold_labs.studiocraft.xml
 
   windows:
     strategy:

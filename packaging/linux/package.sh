@@ -141,7 +141,7 @@ if has appimage; then
   cp "$ROOT/assets/app-icon/hicolor/256x256/apps/studiocraft.png" "$APPDIR/studiocraft.png"
   ln -s studiocraft.png "$APPDIR/.DirIcon"
   OUT="$(cd "$DIST" && pwd)/$BASENAME.AppImage"
-  REPO="${GITHUB_REPOSITORY:-xXCrusaderXx/StudioCraft}"
+  REPO="${GITHUB_REPOSITORY:-ONEFOLD-LABS/StudioCraft}"
   UPDATE_INFO="gh-releases-zsync|${REPO%%/*}|${REPO#*/}|latest|studiocraft-*-linux-$ARCH.AppImage.zsync"
   (cd "$DIST" && ARCH="$ARCH" APPIMAGE_EXTRACT_AND_RUN=1 "$TOOL" --no-appstream \
     --runtime-file "$RUNTIME" -u "$UPDATE_INFO" "$APPDIR" "$OUT")
