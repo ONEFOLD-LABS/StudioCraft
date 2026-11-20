@@ -938,6 +938,7 @@ impl Lv2Instance {
 
     /// Einen Stereo-Block an Ort und Stelle rechnen (Audio-Thread, keine Allokation).
     pub fn process(&mut self, left: &mut [f32], right: &mut [f32]) {
+        let _tests = crate::clap::test_process_guard();
         let total = left.len().min(right.len());
         let mut done = 0;
         while done < total {
