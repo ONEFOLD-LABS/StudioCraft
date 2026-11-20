@@ -30,6 +30,7 @@ mod file_dialog;
 mod focus;
 mod folders_ui;
 mod freeze;
+pub mod i18n;
 mod icons;
 mod infoline;
 mod inserts;
@@ -315,6 +316,7 @@ impl ProjectWindow {
         let bar = project.tempo.signature.bar_ticks();
         let sample_rate = transport.as_ref().map_or(48_000, |t| t.sample_rate);
         let prefs = settings::Settings::load();
+        i18n::set_language(prefs.language);
         let mut w = Self {
             project,
             transport,
@@ -694,6 +696,7 @@ impl ProjectWindow {
             windows: self.windows.rects,
             autosave_minutes: self.autosave.minutes,
             autosave_keep: self.autosave.keep,
+            language: i18n::language(),
         };
         if let Err(e) = s.save() {
             self.message = Some(format!("Einstellung nicht gespeichert: {e}"));
@@ -3814,6 +3817,33 @@ mod tests {
         assert!((peak - 0.25).abs() < 1e-3, "{peak}");
         let back = AudioClip::from_bytes(&bytes, Some("flac")).unwrap();
         assert!((back.samples[100] - 0.25).abs() < 1e-3);
+    }
+
+    #[test]
+    fn the_view_menu_switches_the_language_at_once() {
+        let (w, _) = one_event_window();
+        let mut h = window_harness(w);
+        h.get_by_label("Ansicht").click();
+        h.run_steps(2);
+        h.get_by_label("Sprache").click();
+        h.run_steps(2);
+        h.get_by_label("English").click();
+        h.run_steps(3);
+        assert_eq!(i18n::language(), i18n::Language::English);
+        h.get_by_label("File").click();
+        h.run_steps(2);
+        assert!(h.query_by_label("Export Stems…").is_some());
+        assert!(h.query_by_label("Stems exportieren …").is_none());
+        i18n::set_language(i18n::Language::German);
+    }
+
+    #[test]
+    fn render_english_menus() {
+        shot("sprache-englisch", |w| {
+            i18n::set_language(i18n::Language::English);
+            w.selected_track = Some(0);
+        });
+        i18n::set_language(i18n::Language::German);
     }
 
     #[test]

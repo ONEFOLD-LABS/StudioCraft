@@ -265,9 +265,9 @@ pub fn tokens(ctx: &Context) -> &'static Tokens {
 /// German label for the settings menu.
 pub fn label(preference: ThemePreference) -> &'static str {
     match preference {
-        ThemePreference::Dark => "Dunkel",
-        ThemePreference::Light => "Hell",
-        ThemePreference::System => "Wie das System",
+        ThemePreference::Dark => crate::i18n::tr("Dunkel"),
+        ThemePreference::Light => crate::i18n::tr("Hell"),
+        ThemePreference::System => crate::i18n::tr("Wie das System"),
     }
 }
 

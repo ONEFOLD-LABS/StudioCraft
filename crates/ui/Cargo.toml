@@ -15,6 +15,8 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 # Instant, das auch im Browser läuft; sonst identisch mit std.
 web-time = "1"
+# Sprache des Systems (Einstellung „Wie das System“); im Browser über navigator.language.
+sys-locale = "0.3"
 # Projekt-Bündel (zip) für den Browser; nur Deflate über das reine Rust-Backend.
 zip = { version = "7", default-features = false, features = ["deflate-flate2"] }
 # Backend für zip: reines Rust (miniz_oxide), läuft nativ und im Browser.
@@ -28,6 +30,7 @@ rfd = "0.17"
 
 # Browser: Datei-Auswahl (rfd, asynchron) und Downloads (Blob-Link).
 [target.'cfg(target_arch = "wasm32")'.dependencies]
+sys-locale = { version = "0.3", features = ["js"] }
 rfd = { version = "0.17", default-features = false }
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"

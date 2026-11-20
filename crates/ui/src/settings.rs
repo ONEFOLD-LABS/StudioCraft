@@ -25,6 +25,8 @@ pub struct Settings {
     /// Automatische Sicherung: Abstand in Minuten (0 = aus) und Anzahl der Sicherungen.
     pub autosave_minutes: u32,
     pub autosave_keep: u32,
+    /// Sprache der Oberfläche.
+    pub language: crate::i18n::Language,
 }
 
 /// Vorgaben der automatischen Sicherung.
@@ -85,6 +87,7 @@ impl Default for Settings {
             windows: WindowRects::default(),
             autosave_minutes: AUTOSAVE_MINUTES,
             autosave_keep: AUTOSAVE_KEEP,
+            language: crate::i18n::Language::System,
         }
     }
 }
@@ -101,6 +104,7 @@ struct File {
     windows: WindowRects,
     autosave_minutes: u32,
     autosave_keep: u32,
+    language: String,
 }
 
 #[derive(Default, serde::Serialize, serde::Deserialize)]
@@ -183,6 +187,7 @@ impl Settings {
             windows: self.windows,
             autosave_minutes: self.autosave_minutes,
             autosave_keep: self.autosave_keep,
+            language: self.language.code().into(),
         }
     }
 
@@ -213,6 +218,7 @@ impl Settings {
             },
             autosave_minutes: f.autosave_minutes.min(120),
             autosave_keep: f.autosave_keep.clamp(1, 100),
+            language: crate::i18n::Language::from_code(&f.language),
         }
     }
 
@@ -263,6 +269,7 @@ mod tests {
             },
             autosave_minutes: 2,
             autosave_keep: 20,
+            language: crate::i18n::Language::English,
         };
         s.save().unwrap();
         assert_eq!(Settings::load(), s);
