@@ -22,6 +22,8 @@ fn main() {
                 "Surge XT".into(),
                 "ZamComp (LV2)".into(),
                 "LSP Compressor Stereo (LV2)".into(),
+                "ZamComp (VST3)".into(),
+                "Compressor Stereo (VST3)".into(),
             ]
         });
     // Namen wie in den Listen: LV2-Plugins mit „(LV2)“.
