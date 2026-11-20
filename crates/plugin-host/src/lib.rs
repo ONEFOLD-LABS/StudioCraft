@@ -36,6 +36,8 @@ mod lv2_gui;
 mod scan;
 #[cfg(not(target_arch = "wasm32"))]
 mod vst3;
+#[cfg(not(target_arch = "wasm32"))]
+mod vst3_gui;
 
 #[cfg(not(target_arch = "wasm32"))]
 pub use clap::{MAX_LATENCY, ParamInfo};

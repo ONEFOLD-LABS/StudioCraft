@@ -179,19 +179,10 @@ impl ProjectWindow {
                     ui.add_space(6.0);
                 }
             }
-            // App-Symbol: kleine Welle in Akzentfarbe.
-            let (r, _) = ui.allocate_exact_size(vec2(22.0, 18.0), Sense::hover());
-            let wave: Vec<_> = (0..=20)
-                .map(|i| {
-                    let x = i as f32 / 20.0;
-                    pos2(
-                        r.left() + 2.0 + x * (r.width() - 4.0),
-                        r.center().y
-                            - (x * std::f32::consts::TAU * 1.5).sin() * 5.0 * (1.0 - x * 0.5),
-                    )
-                })
-                .collect();
-            ui.painter().line(wave, Stroke::new(2.0, t.accent));
+            // App-Symbol: dasselbe Zeichen wie das App-Icon.
+            let (r, _) = ui.allocate_exact_size(vec2(22.0, 20.0), Sense::hover());
+            let mark = Rect::from_center_size(r.center(), vec2(19.0, 19.0));
+            crate::icons::app_mark(ui.painter(), mark, ui.visuals().panel_fill);
             // Die Menüleiste belegt die ganze Breite; ihr Ende aus den Titeln berechnen.
             let font = egui::TextStyle::Button.resolve(ui.style());
             let pad = ui.spacing().button_padding.x * 2.0 + ui.spacing().item_spacing.x;

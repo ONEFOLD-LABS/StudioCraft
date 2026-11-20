@@ -176,7 +176,7 @@ impl PluginHandle {
         match self {
             Self::Clap(h) => h.has_gui(),
             Self::Lv2(h) => h.has_gui(),
-            Self::Vst3(_) => false,
+            Self::Vst3(h) => h.has_gui(),
         }
     }
 
@@ -184,7 +184,7 @@ impl PluginHandle {
         match self {
             Self::Clap(h) => h.gui_open(),
             Self::Lv2(h) => h.gui_open(),
-            Self::Vst3(_) => false,
+            Self::Vst3(h) => h.gui_open(),
         }
     }
 
@@ -201,7 +201,7 @@ impl PluginHandle {
         match self {
             Self::Clap(h) => h.open_gui(title),
             Self::Lv2(h) => h.open_gui(title),
-            Self::Vst3(_) => Err("VST3-Fenster folgen".into()),
+            Self::Vst3(h) => h.open_gui(title),
         }
     }
 
@@ -209,7 +209,7 @@ impl PluginHandle {
         match self {
             Self::Clap(h) => h.close_gui(),
             Self::Lv2(h) => h.close_gui(),
-            Self::Vst3(_) => {}
+            Self::Vst3(h) => h.close_gui(),
         }
     }
 
@@ -218,7 +218,7 @@ impl PluginHandle {
         match self {
             Self::Clap(h) => h.idle(),
             Self::Lv2(h) => h.idle(),
-            Self::Vst3(_) => false,
+            Self::Vst3(h) => h.idle(),
         }
     }
 
@@ -228,7 +228,7 @@ impl PluginHandle {
         match self {
             Self::Clap(_) => Vec::new(),
             Self::Lv2(h) => h.take_param_changes(),
-            Self::Vst3(_) => Vec::new(),
+            Self::Vst3(h) => h.take_param_changes(),
         }
     }
 
@@ -237,7 +237,7 @@ impl PluginHandle {
         match self {
             Self::Clap(_) => {}
             Self::Lv2(h) => h.set_ui_value(id, value),
-            Self::Vst3(_) => {}
+            Self::Vst3(h) => h.set_ui_value(id, value),
         }
     }
 }
