@@ -120,7 +120,7 @@ pub fn models(endpoint: &Endpoint) -> Result<Vec<String>, String> {
         ..endpoint.clone()
     };
     probe.check()?;
-    let mut req = agent().get(probe.api("models"));
+    let mut req = agent(&probe.url).get(probe.api("models"));
     if let Some(key) = key(endpoint) {
         req = req.header("Authorization", format!("Bearer {key}"));
     }
@@ -145,7 +145,9 @@ fn key(endpoint: &Endpoint) -> Option<&str> {
 }
 
 fn post(endpoint: &Endpoint, url: &str, body: &Value) -> Result<Value, String> {
-    let mut req = agent().post(url).header("Content-Type", "application/json");
+    let mut req = agent(url)
+        .post(url)
+        .header("Content-Type", "application/json");
     if let Some(key) = key(endpoint) {
         req = req.header("Authorization", format!("Bearer {key}"));
     }
@@ -234,15 +236,29 @@ fn roots() -> &'static [ureq::tls::Certificate<'static>] {
     })
 }
 
-/// An agent with finite deadlines (a local model may think for minutes) and TLS by rustls with
-/// the operating system's certificates; error statuses come back as responses to be read.
-fn agent() -> ureq::Agent {
+/// An agent for `url` with finite deadlines (a local model may think for minutes) and, for
+/// `https`, TLS by rustls with the operating system's certificates (read only then); error
+/// statuses come back as responses to be read.
+fn agent(url: &str) -> ureq::Agent {
+    let certs = if url.trim().starts_with("https://") {
+        roots()
+    } else {
+        &[]
+    };
     let tls = ureq::tls::TlsConfig::builder()
         .provider(ureq::tls::TlsProvider::Rustls)
-        .root_certs(ureq::tls::RootCerts::new_with_certs(roots()))
+        .root_certs(ureq::tls::RootCerts::new_with_certs(certs))
         .unversioned_rustls_crypto_provider(Arc::new(rustls::crypto::ring::default_provider()))
         .build();
+    // This computer is reached directly, never through a proxy from the environment.
+    let local = host(url).is_some_and(|h| is_loopback(&h));
+    let proxy = if local {
+        None
+    } else {
+        ureq::Proxy::try_from_env()
+    };
     ureq::Agent::config_builder()
+        .proxy(proxy)
         .tls_config(tls)
         .http_status_as_error(false)
         .timeout_connect(Some(Duration::from_secs(15)))

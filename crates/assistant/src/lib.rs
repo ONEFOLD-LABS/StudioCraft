@@ -512,7 +512,9 @@ mod tests {
 
     /// Frames of the panel until the assistant is idle again.
     fn run_until_idle(a: &mut Assistant, window: &mut ProjectWindow, ctx: &egui::Context) {
-        for _ in 0..500 {
+        // Generous: CI machines run many tests at once.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+        while std::time::Instant::now() < deadline {
             let mut out = ctx.run_ui(egui::RawInput::default(), |ui| a.poll(ui.ctx(), window));
             out.textures_delta.clear();
             if !a.busy() {
@@ -727,7 +729,15 @@ mod tests {
         );
     }
 
+    #[test]
+    fn continued_strings_join_with_either_line_end() {
+        assert_eq!(join_continued("a \\\n     b"), "a b");
+        assert_eq!(join_continued("a \\\r\n     b"), "a b");
+    }
+
     fn join_continued(s: &str) -> String {
+        // Checkouts on Windows may have CRLF line ends.
+        let s = s.replace("\r\n", "\n");
         let mut out = String::new();
         let mut lines = s.split("\\\n");
         if let Some(first) = lines.next() {
