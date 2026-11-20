@@ -3,6 +3,7 @@
 //! Stärke. Q wirkt im Key-Editor auf die gewählten Noten (ohne Auswahl auf alle), sonst auf
 //! die gewählten Events.
 
+use crate::i18n::tr;
 use egui::{Context, Ui};
 use studiocraft_project::QuantizeValue;
 
@@ -18,7 +19,7 @@ pub(crate) fn toolbar(w: &mut ProjectWindow, ui: &mut Ui) {
         Icon::QuantizePanel,
         w.show_quantize,
         Some(t.accent),
-        "Quantisierungs-Panel",
+        tr("Quantisierungs-Panel"),
     )
     .clicked()
     {
@@ -32,11 +33,11 @@ fn value_combo(ui: &mut Ui, id: &str, value: &mut QuantizeValue, width: f32) {
         .width(width)
         .show_ui(ui, |ui| {
             for v in QuantizeValue::all() {
-                ui.selectable_value(value, v, v.label());
+                ui.selectable_value(value, v, crate::i18n::tr_dyn(&v.label()));
             }
         })
         .response
-        .on_hover_text("Quantisierung");
+        .on_hover_text(tr("Quantisierung"));
 }
 
 /// Das Quantisierungs-Panel als eigenes Fenster.
@@ -45,7 +46,7 @@ pub(crate) fn panel(w: &mut ProjectWindow, ctx: &Context) {
         return;
     }
     let mut open = true;
-    egui::Window::new("Quantisierung")
+    egui::Window::new(tr("Quantisierung"))
         .open(&mut open)
         .resizable(false)
         .collapsible(false)
@@ -56,24 +57,24 @@ pub(crate) fn panel(w: &mut ProjectWindow, ctx: &Context) {
             egui::Grid::new("quantisierung-panel")
                 .num_columns(2)
                 .show(ui, |ui| {
-                    let l = ui.label("Raster");
+                    let l = ui.label(tr("Raster"));
                     ui.horizontal(|ui| {
                         value_combo(ui, "quantisierung-panel-wert", &mut w.quantize.value, 120.0);
                     })
                     .response
                     .labelled_by(l.id);
                     ui.end_row();
-                    let l = ui.label("Swing");
+                    let l = ui.label(tr("Swing"));
                     ui.add(egui::Slider::new(&mut w.quantize.swing, 0..=100).suffix(" %"))
                         .labelled_by(l.id);
                     ui.end_row();
-                    let l = ui.label("Stärke");
+                    let l = ui.label(tr("Stärke"));
                     ui.add(egui::Slider::new(&mut w.quantize.strength, 0..=100).suffix(" %"))
                         .labelled_by(l.id);
                     ui.end_row();
                 });
             ui.separator();
-            if ui.button("Quantisieren (Q)").clicked() {
+            if ui.button(tr("Quantisieren (Q)")).clicked() {
                 w.quantize_selection();
             }
         });

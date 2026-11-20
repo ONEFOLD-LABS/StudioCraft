@@ -1,6 +1,7 @@
 //! Marker in der Oberfläche (Issue #11): Marker-Spur anlegen, Marker am Cursor einfügen,
 //! Cycle-Marker aus den Locatoren, zu Markern springen und die Marker-Liste im Inspector.
 
+use crate::i18n::tr;
 use egui::Ui;
 use studiocraft_project::TrackKind;
 
@@ -47,7 +48,7 @@ impl ProjectWindow {
             .add_cycle_marker(self.left_locator, self.right_locator)
             .is_none()
         {
-            self.message = Some("Cycle-Marker: die Locatoren liegen aufeinander".into());
+            self.message = Some(tr("Cycle-Marker: die Locatoren liegen aufeinander").into());
         }
         self.checkpoint(before);
     }
@@ -56,7 +57,12 @@ impl ProjectWindow {
     pub(crate) fn locate_marker(&mut self, id: u32) {
         match self.project.marker(id).map(|m| m.start) {
             Some(at) => self.locate(at),
-            None => self.message = Some(format!("Marker {id} gibt es nicht")),
+            None => {
+                self.message = Some(crate::i18n::trf(
+                    "Marker {id} gibt es nicht",
+                    &[("id", &id)],
+                ))
+            }
         }
     }
 
@@ -79,15 +85,15 @@ impl ProjectWindow {
     /// Inspector der Marker-Spur: Liste mit Name und Position, Löschen, Einfügen.
     pub(crate) fn markers_ui(&mut self, ui: &mut Ui) {
         ui.horizontal(|ui| {
-            if ui.button("Marker einfügen").clicked() {
+            if ui.button(tr("Marker einfügen")).clicked() {
                 self.insert_marker();
             }
-            if ui.button("Cycle aus Locatoren").clicked() {
+            if ui.button(tr("Cycle aus Locatoren")).clicked() {
                 self.cycle_marker_from_locators();
             }
         });
         if self.project.markers.is_empty() {
-            ui.weak("Noch keine Marker");
+            ui.weak(tr("Noch keine Marker"));
             return;
         }
         let tempo = self.project.tempo.clone();
@@ -104,11 +110,15 @@ impl ProjectWindow {
                     } else {
                         m.id.to_string()
                     };
-                    if ui.small_button(id).on_hover_text("Hinspringen").clicked() {
+                    if ui
+                        .small_button(id)
+                        .on_hover_text(tr("Hinspringen"))
+                        .clicked()
+                    {
                         go = Some(i);
                     }
                     let mut name = m.name.clone();
-                    let label = format!("Name von Marker {}", m.id);
+                    let label = crate::i18n::trf("Name von Marker {id}", &[("id", &m.id)]);
                     let r = ui.add(egui::TextEdit::singleline(&mut name).desired_width(90.0));
                     r.widget_info(|| {
                         egui::WidgetInfo::labeled(egui::Role::TextInput, true, label.as_str())
@@ -125,7 +135,7 @@ impl ProjectWindow {
                         None => tempo.format_position(studiocraft_project::Position(m.start)),
                     };
                     ui.weak(pos);
-                    if ui.small_button("Löschen").clicked() {
+                    if ui.small_button(tr("Löschen")).clicked() {
                         remove = Some(i);
                     }
                     ui.end_row();

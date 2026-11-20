@@ -1,5 +1,6 @@
 //! Tempospur in der Oberfläche (Issue #50): anlegen, ein- und ausschalten, Punkte im Inspector.
 
+use crate::i18n::tr;
 use egui::Ui;
 use studiocraft_project::{BPM_RANGE, Position, TrackKind};
 
@@ -19,7 +20,7 @@ impl ProjectWindow {
         let before = self.project.clone();
         let t = match self.tempo_track() {
             Some(t) => t,
-            None => self.project.add_track(TrackKind::Tempo, "Tempo"),
+            None => self.project.add_track(TrackKind::Tempo, tr("Tempo")),
         };
         let mut map = self.project.tempo.clone();
         map.use_track = true;
@@ -47,8 +48,8 @@ impl ProjectWindow {
         let mut map = self.project.tempo.clone();
         let mut changed = false;
         changed |= ui
-            .checkbox(&mut map.use_track, "Tempospur aktiv")
-            .on_hover_text("Aus: festes Tempo aus der Transportleiste")
+            .checkbox(&mut map.use_track, tr("Tempospur aktiv"))
+            .on_hover_text(tr("Aus: festes Tempo aus der Transportleiste"))
             .changed();
         let mut remove = None;
         egui::Grid::new("tempo-punkte")
@@ -63,7 +64,7 @@ impl ProjectWindow {
                         .fixed_decimals(1),
                 );
                 r.widget_info(|| {
-                    egui::WidgetInfo::labeled(egui::Role::SpinButton, true, "Anfangstempo")
+                    egui::WidgetInfo::labeled(egui::Role::SpinButton, true, tr("Anfangstempo"))
                 });
                 changed |= r.changed();
                 ui.label("");
@@ -72,7 +73,10 @@ impl ProjectWindow {
                 let tempo = self.project.tempo.clone();
                 for (i, e) in map.events.iter_mut().enumerate() {
                     ui.label(tempo.format_position(Position(e.tick)));
-                    let label = format!("Tempo bei {}", tempo.format_position(Position(e.tick)));
+                    let label = crate::i18n::trf(
+                        "Tempo bei {pos}",
+                        &[("pos", &tempo.format_position(Position(e.tick)))],
+                    );
                     let r = ui.add(
                         egui::DragValue::new(&mut e.bpm)
                             .range(BPM_RANGE.0..=BPM_RANGE.1)
@@ -84,10 +88,10 @@ impl ProjectWindow {
                     });
                     changed |= r.changed();
                     changed |= ui
-                        .checkbox(&mut e.ramp, "Rampe")
-                        .on_hover_text("Tempo gleitet vom vorigen Punkt hierher")
+                        .checkbox(&mut e.ramp, tr("Rampe"))
+                        .on_hover_text(tr("Tempo gleitet vom vorigen Punkt hierher"))
                         .changed();
-                    if ui.small_button("Löschen").clicked() {
+                    if ui.small_button(tr("Löschen")).clicked() {
                         remove = Some(i);
                     }
                     ui.end_row();
@@ -97,32 +101,36 @@ impl ProjectWindow {
             map.events.remove(i);
             changed = true;
         }
-        if ui.button("Punkt am Cursor").clicked() && self.cursor > 0 {
+        if ui.button(tr("Punkt am Cursor")).clicked() && self.cursor > 0 {
             let bpm = map.bpm_at(self.cursor);
             map.set_event(self.cursor, bpm, false);
             map.use_track = true;
             changed = true;
         }
         ui.separator();
-        ui.strong("Taktart");
+        ui.strong(tr("Taktart"));
         let mut remove_sig = None;
         egui::Grid::new("taktwechsel")
             .num_columns(3)
             .striped(true)
             .show(ui, |ui| {
-                ui.label("Takt 1");
-                changed |= signature_fields(ui, "Taktart Takt 1", &mut map.signature);
+                ui.label(tr("Takt 1"));
+                changed |= signature_fields(ui, tr("Taktart Takt 1"), &mut map.signature);
                 ui.label("");
                 ui.end_row();
                 for (i, e) in map.signatures.iter_mut().enumerate() {
-                    ui.label(format!("Takt {}", e.bar));
+                    ui.label(crate::i18n::trf("Takt {bar}", &[("bar", &e.bar)]));
                     let mut sig = e.signature();
-                    if signature_fields(ui, &format!("Taktart Takt {}", e.bar), &mut sig) {
+                    if signature_fields(
+                        ui,
+                        &crate::i18n::trf("Taktart Takt {bar}", &[("bar", &e.bar)]),
+                        &mut sig,
+                    ) {
                         e.numerator = sig.numerator;
                         e.denominator = sig.denominator;
                         changed = true;
                     }
-                    if ui.small_button("Löschen").clicked() {
+                    if ui.small_button(tr("Löschen")).clicked() {
                         remove_sig = Some(i);
                     }
                     ui.end_row();
@@ -133,10 +141,10 @@ impl ProjectWindow {
             changed = true;
         }
         if ui
-            .button("Taktwechsel am Cursor")
-            .on_hover_text(
+            .button(tr("Taktwechsel am Cursor"))
+            .on_hover_text(tr(
                 "Ab dem Takt am Cursor (bzw. dem nächsten, wenn der Cursor im Takt steht)",
-            )
+            ))
             .clicked()
         {
             let (bar, start, sig) = map.bar_at(self.cursor);
@@ -174,7 +182,11 @@ fn signature_fields(
     ui.horizontal(|ui| {
         let r = ui.add(egui::DragValue::new(&mut sig.numerator).range(1..=32));
         r.widget_info(|| {
-            egui::WidgetInfo::labeled(egui::Role::SpinButton, true, format!("{label} Zähler"))
+            egui::WidgetInfo::labeled(
+                egui::Role::SpinButton,
+                true,
+                crate::i18n::trf("{label} Zähler", &[("label", &label)]),
+            )
         });
         changed |= r.changed();
         ui.label("/");
@@ -190,7 +202,11 @@ fn signature_fields(
             })
             .response
             .widget_info(|| {
-                egui::WidgetInfo::labeled(egui::Role::ComboBox, true, format!("{label} Nenner"))
+                egui::WidgetInfo::labeled(
+                    egui::Role::ComboBox,
+                    true,
+                    crate::i18n::trf("{label} Nenner", &[("label", &label)]),
+                )
             });
     });
     changed

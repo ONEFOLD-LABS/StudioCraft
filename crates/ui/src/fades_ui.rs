@@ -1,6 +1,7 @@
 //! Kurveneditor für Fades (Spec „Fades und Crossfades“, Issue #5): Doppelklick auf einen
 //! Fade-Griff öffnet ihn; Form und Länge beider Fades des Events, nicht-destruktiv.
 
+use crate::i18n::tr;
 use egui::{Pos2, Sense, Stroke, pos2, vec2};
 use studiocraft_project::{EventId, FadeCurve};
 
@@ -110,20 +111,23 @@ impl crate::ProjectWindow {
         let (mut out_curve, mut in_curve) = (a.fade_out_curve, b.fade_in_curve);
         let overlap = a.end().saturating_sub(b.start.0);
         let tempo = self.project.tempo.clone();
-        egui::Window::new("Crossfade")
+        egui::Window::new(tr("Crossfade"))
             .open(&mut open)
             .resizable(false)
             .collapsible(false)
             .show(ctx, |ui| {
                 ui.label(format!("{} / {}", a.name, b.name));
-                ui.label(format!("Länge {}", tempo.format_length(overlap)));
+                ui.label(crate::i18n::trf(
+                    "Länge {len}",
+                    &[("len", &tempo.format_length(overlap))],
+                ));
                 crossfade_preview(ui, out_curve, in_curve);
                 let mut shared = (out_curve == in_curve).then_some(out_curve);
                 for (c, label) in [
-                    (FadeCurve::Linear, "Gleiche Lautstärke"),
-                    (FadeCurve::EqualPower, "Gleiche Leistung"),
-                    (FadeCurve::SCurve, "S-Kurve"),
-                    (FadeCurve::Exponential, "Exponentiell"),
+                    (FadeCurve::Linear, tr("Gleiche Lautstärke")),
+                    (FadeCurve::EqualPower, tr("Gleiche Leistung")),
+                    (FadeCurve::SCurve, tr("S-Kurve")),
+                    (FadeCurve::Exponential, tr("Exponentiell")),
                 ] {
                     if ui.radio_value(&mut shared, Some(c), label).changed() {
                         out_curve = c;
@@ -132,28 +136,36 @@ impl crate::ProjectWindow {
                 }
                 ui.separator();
                 ui.horizontal(|ui| {
-                    ui.label("Einzeln:");
+                    ui.label(tr("Einzeln:"));
                     egui::ComboBox::from_id_salt("xfade-out")
-                        .selected_text(out_curve.label())
+                        .selected_text(tr(out_curve.label()))
                         .show_ui(ui, |ui| {
                             for c in FadeCurve::ALL {
-                                ui.selectable_value(&mut out_curve, c, c.label());
+                                ui.selectable_value(&mut out_curve, c, tr(c.label()));
                             }
                         })
                         .response
                         .widget_info(|| {
-                            egui::WidgetInfo::labeled(egui::Role::ComboBox, true, "Kurve Fade-Out")
+                            egui::WidgetInfo::labeled(
+                                egui::Role::ComboBox,
+                                true,
+                                tr("Kurve Fade-Out"),
+                            )
                         });
                     egui::ComboBox::from_id_salt("xfade-in")
-                        .selected_text(in_curve.label())
+                        .selected_text(tr(in_curve.label()))
                         .show_ui(ui, |ui| {
                             for c in FadeCurve::ALL {
-                                ui.selectable_value(&mut in_curve, c, c.label());
+                                ui.selectable_value(&mut in_curve, c, tr(c.label()));
                             }
                         })
                         .response
                         .widget_info(|| {
-                            egui::WidgetInfo::labeled(egui::Role::ComboBox, true, "Kurve Fade-In")
+                            egui::WidgetInfo::labeled(
+                                egui::Role::ComboBox,
+                                true,
+                                tr("Kurve Fade-In"),
+                            )
                         });
                 });
             });
@@ -183,7 +195,7 @@ impl crate::ProjectWindow {
         };
         let mut open = true;
         let mut new = ev.clone();
-        egui::Window::new("Fade")
+        egui::Window::new(tr("Fade"))
             .open(&mut open)
             .resizable(false)
             .collapsible(false)
@@ -194,27 +206,27 @@ impl crate::ProjectWindow {
                 };
                 for side in sides {
                     let (title, curve, len) = match side {
-                        Side::In => ("Fade-In", &mut new.fade_in_curve, &mut new.fade_in),
-                        Side::Out => ("Fade-Out", &mut new.fade_out_curve, &mut new.fade_out),
+                        Side::In => (tr("Fade-In"), &mut new.fade_in_curve, &mut new.fade_in),
+                        Side::Out => (tr("Fade-Out"), &mut new.fade_out_curve, &mut new.fade_out),
                     };
                     ui.strong(title);
                     ui.horizontal(|ui| {
                         preview(ui, *curve, side == Side::In);
                         ui.vertical(|ui| {
                             for c in FadeCurve::ALL {
-                                ui.radio_value(curve, c, c.label())
-                                    .on_hover_text(format!("{title}: {}", c.label()));
+                                ui.radio_value(curve, c, tr(c.label()))
+                                    .on_hover_text(format!("{title}: {}", tr(c.label())));
                             }
                         });
                     });
                     ui.horizontal(|ui| {
-                        let l = ui.label("Länge (Ticks)");
+                        let l = ui.label(tr("Länge (Ticks)"));
                         ui.add(egui::DragValue::new(len).range(0..=ev.length).speed(10.0))
                             .labelled_by(l.id);
                     });
                     ui.separator();
                 }
-                let gl = ui.label("Lautstärke (dB)");
+                let gl = ui.label(tr("Lautstärke (dB)"));
                 ui.add(
                     egui::DragValue::new(&mut new.gain_db)
                         .range(studiocraft_project::MIN_DB..=studiocraft_project::EVENT_MAX_DB)

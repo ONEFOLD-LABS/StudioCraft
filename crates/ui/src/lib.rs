@@ -1352,7 +1352,7 @@ impl ProjectWindow {
         let kind_rect = painter.text(
             head.right_center() - egui::vec2(8.0, 0.0),
             egui::Align2::RIGHT_CENTER,
-            track.kind.label(),
+            tr(track.kind.label()),
             egui::FontId::proportional(11.0),
             on_color,
         );
@@ -1464,13 +1464,13 @@ impl ProjectWindow {
                 let l = ui.label(tr("Pan-Modus"));
                 let before = track.pan_mode;
                 egui::ComboBox::from_id_salt(("pan-modus", idx))
-                    .selected_text(track.pan_mode.label())
+                    .selected_text(tr(track.pan_mode.label()))
                     .show_ui(ui, |ui| {
                         for m in [
                             studiocraft_project::PanMode::Balance,
                             studiocraft_project::PanMode::Combined,
                         ] {
-                            ui.selectable_value(&mut track.pan_mode, m, m.label());
+                            ui.selectable_value(&mut track.pan_mode, m, tr(m.label()));
                         }
                     })
                     .response

@@ -11,6 +11,7 @@
 //! - **Über bestehenden Events:** der neue Take liegt obenauf und klingt dort;
 //!   die alten bleiben darunter erhalten.
 
+use crate::i18n::tr;
 use std::path::{Path, PathBuf};
 
 use studiocraft_engine::{AudioClip, Command, PreparedInput, Recording, export, input};
@@ -102,7 +103,10 @@ impl ProjectWindow {
             // Nur einmal pro Sitzung; ist die Queue gerade voll, bleibt Monitor stumm.
             t.send(Command::SetMonitorInput(Box::new(monitor)));
         }
-        self.input_status = format!("{} · {} Kanäle", input.info.device, input.info.channels);
+        self.input_status = crate::i18n::trf(
+            "{device} · {n} Kanäle",
+            &[("device", &input.info.device), ("n", &input.info.channels)],
+        );
         self.input = Some(input);
         self.recorder = Some(recorder);
         Ok(())
@@ -172,12 +176,12 @@ impl ProjectWindow {
     /// Öffnet alle MIDI-Eingänge (Keyboard). Ohne Engine nichts zu tun.
     pub fn open_midi_inputs(&mut self) {
         if !self.midi_inputs_on {
-            self.midi_status = "MIDI: aus".into();
+            self.midi_status = tr("MIDI: aus").into();
             return;
         }
         let Some(t) = &self.transport else { return };
         match studiocraft_engine::midi::MidiInputs::open_all(&t.midi) {
-            Ok(m) if m.ports.is_empty() => self.midi_status = "MIDI: kein Eingang".into(),
+            Ok(m) if m.ports.is_empty() => self.midi_status = tr("MIDI: kein Eingang").into(),
             Ok(m) => {
                 self.midi_status = format!("MIDI: {}", m.ports.join(", "));
                 self.midi_inputs = Some(m);
@@ -210,16 +214,16 @@ impl ProjectWindow {
 
     /// Untermenü „MIDI-Aufnahme“: Modus ohne und mit Cycle (Projekteinstellung, Undo).
     pub(crate) fn record_mode_menu(&mut self, ui: &mut egui::Ui) {
-        ui.menu_button("MIDI-Aufnahme", |ui| {
+        ui.menu_button(tr("MIDI-Aufnahme"), |ui| {
             let mut r = self.project.record;
-            ui.label(egui::RichText::new("Über bestehenden Parts").weak());
+            ui.label(egui::RichText::new(tr("Über bestehenden Parts")).weak());
             for m in studiocraft_project::MidiRecordMode::ALL {
-                ui.radio_value(&mut r.midi, m, m.label());
+                ui.radio_value(&mut r.midi, m, tr(m.label()));
             }
             ui.separator();
-            ui.label(egui::RichText::new("Im Cycle").weak());
+            ui.label(egui::RichText::new(tr("Im Cycle")).weak());
             for m in studiocraft_project::CycleRecordMode::ALL {
-                ui.radio_value(&mut r.cycle_midi, m, m.label());
+                ui.radio_value(&mut r.cycle_midi, m, tr(m.label()));
             }
             if r != self.project.record {
                 let before = self.project.clone();
@@ -236,11 +240,11 @@ impl ProjectWindow {
     pub(crate) fn retrospective_record(&mut self) {
         self.sync_midi();
         let Some(track) = self.midi_target() else {
-            self.message = Some("Nachträgliche Aufnahme: keine Instrument-Spur gewählt".into());
+            self.message = Some(tr("Nachträgliche Aufnahme: keine Instrument-Spur gewählt").into());
             return;
         };
         let Some(last) = self.retro.back().copied() else {
-            self.message = Some("Nachträgliche Aufnahme: nichts gespielt".into());
+            self.message = Some(tr("Nachträgliche Aufnahme: nichts gespielt").into());
             return;
         };
         let n = self
@@ -278,7 +282,7 @@ impl ProjectWindow {
             self.retro.clear();
             self.message = None;
         } else {
-            self.message = Some("Nachträgliche Aufnahme: keine vollständige Note".into());
+            self.message = Some(tr("Nachträgliche Aufnahme: keine vollständige Note").into());
         }
     }
 
@@ -290,13 +294,16 @@ impl ProjectWindow {
         let audio = self.armed_tracks();
         let midi = self.armed_instruments();
         if audio.is_empty() && midi.is_empty() {
-            self.message = Some("Keine Spur aufnahmebereit (R im Spurkopf)".into());
+            self.message = Some(tr("Keine Spur aufnahmebereit (R im Spurkopf)").into());
             return;
         }
         self.audio_recording = false;
         if !audio.is_empty() {
             if let Err(e) = self.ensure_input() {
-                self.message = Some(format!("Aufnahme nicht möglich: {e}"));
+                self.message = Some(crate::i18n::trf(
+                    "Aufnahme nicht möglich: {e}",
+                    &[("e", &e)],
+                ));
                 return;
             }
             let dir = self.recording_dir();
@@ -374,7 +381,7 @@ impl ProjectWindow {
                     let _ = std::fs::remove_file(&r.path);
                 }
             }
-            self.message = Some("Aufnahme im Vorzähler abgebrochen".into());
+            self.message = Some(tr("Aufnahme im Vorzähler abgebrochen").into());
             return;
         }
 
@@ -415,12 +422,13 @@ impl ProjectWindow {
             self.place_recording(&r, start, skip)
         }) {
             Ok(n) if overruns > 0 => {
-                self.message = Some(format!(
-                    "{n} Take(s) aufgenommen, aber {overruns} Samples verloren (Puffer voll)"
+                self.message = Some(crate::i18n::trf(
+                    "{n} Take(s) aufgenommen, aber {overruns} Samples verloren (Puffer voll)",
+                    &[("n", &n), ("overruns", &overruns)],
                 ))
             }
             Ok(_) => {}
-            Err(e) => self.message = Some(format!("Aufnahme: {e}")),
+            Err(e) => self.message = Some(crate::i18n::trf("Aufnahme: {e}", &[("e", &e)])),
         }
     }
 
@@ -711,16 +719,20 @@ impl ProjectWindow {
     /// Untermenü „Metronom“: Vorzähler, Lautstärke, Betonung und Klang (Projekteinstellung,
     /// rückgängig machbar).
     pub(crate) fn click_menu(&mut self, ui: &mut egui::Ui) {
-        ui.menu_button("Metronom", |ui| {
+        ui.menu_button(tr("Metronom"), |ui| {
             let mut c = self.project.click;
-            ui.menu_button("Vorzähler", |ui| {
-                for (bars, label) in [(0u32, "Aus"), (1, "1 Takt"), (2, "2 Takte"), (4, "4 Takte")]
-                {
+            ui.menu_button(tr("Vorzähler"), |ui| {
+                for (bars, label) in [
+                    (0u32, tr("Aus")),
+                    (1, tr("1 Takt")),
+                    (2, tr("2 Takte")),
+                    (4, tr("4 Takte")),
+                ] {
                     ui.radio_value(&mut c.precount_bars, bars, label);
                 }
             });
             ui.horizontal(|ui| {
-                let l = ui.label("Lautstärke");
+                let l = ui.label(tr("Lautstärke"));
                 ui.add(
                     egui::Slider::new(
                         &mut c.level_db,
@@ -730,10 +742,10 @@ impl ProjectWindow {
                 )
                 .labelled_by(l.id);
             });
-            ui.checkbox(&mut c.accent, "Takt-Eins betonen");
-            ui.menu_button("Klang", |ui| {
+            ui.checkbox(&mut c.accent, tr("Takt-Eins betonen"));
+            ui.menu_button(tr("Klang"), |ui| {
                 for s in studiocraft_project::ClickSound::ALL {
-                    ui.radio_value(&mut c.sound, s, s.label());
+                    ui.radio_value(&mut c.sound, s, tr(s.label()));
                 }
             });
             if c != self.project.click {

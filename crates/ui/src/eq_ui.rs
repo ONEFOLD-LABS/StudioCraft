@@ -100,11 +100,11 @@ impl ProjectWindow {
                     .on_hover_text(tr("Band ein/aus"));
                 let l = ui.weak(tr("Form"));
                 egui::ComboBox::from_id_salt(("eq-form", idx, i))
-                    .selected_text(band.kind.label())
+                    .selected_text(tr(band.kind.label()))
                     .width(90.0)
                     .show_ui(ui, |ui| {
                         for k in BandKind::ALL {
-                            ui.selectable_value(&mut band.kind, k, k.label());
+                            ui.selectable_value(&mut band.kind, k, tr(k.label()));
                         }
                     })
                     .response

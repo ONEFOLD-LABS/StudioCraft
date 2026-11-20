@@ -729,7 +729,7 @@ impl Strip<'_> {
                                 studiocraft_project::PanMode::Balance,
                                 studiocraft_project::PanMode::Combined,
                             ] {
-                                if ui.radio(*mode == m, m.label()).clicked() {
+                                if ui.radio(*mode == m, tr(m.label())).clicked() {
                                     *mode = m;
                                     changed = true;
                                     ui.close();
