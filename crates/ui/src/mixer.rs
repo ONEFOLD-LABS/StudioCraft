@@ -298,6 +298,7 @@ pub(crate) fn show(w: &mut ProjectWindow, ui: &mut Ui) {
                                 meter,
                                 hold,
                                 clipped: w.clipped.get_mut(i),
+                                link_group: Some(&mut t.link_group),
                             };
                             let out = ui
                                 .scope_builder(egui::UiBuilder::new().max_rect(rect), |ui| {
@@ -346,6 +347,7 @@ pub(crate) fn show(w: &mut ProjectWindow, ui: &mut Ui) {
             meter: w.master_meter,
             hold: hold_of(&w.meter_hold, n),
             clipped: w.clipped.get_mut(n),
+            link_group: None,
         };
         changed |= master.show(ui, height).changed;
     });
@@ -401,6 +403,7 @@ fn io_strips(w: &mut ProjectWindow, ui: &mut Ui, height: f32, outputs: bool) -> 
             meter,
             hold: meter,
             clipped: None,
+            link_group: None,
         };
         changed |= strip.show(ui, height).changed;
     }
@@ -607,6 +610,7 @@ pub(crate) fn channel_column(w: &mut ProjectWindow, ui: &mut Ui) {
         meter,
         hold: hold_of(&w.meter_hold, i),
         clipped: w.clipped.get_mut(i),
+        link_group: Some(&mut track.link_group),
     };
     let out = ui
         .push_id("kanalzug-spalte", |ui| strip.show(ui, height))
@@ -674,6 +678,8 @@ struct Strip<'a> {
     hold: [f32; 2],
     /// Übersteuert seit dem letzten Zurücksetzen.
     clipped: Option<&'a mut bool>,
+    /// Link-Gruppe (Spuren; Rechtsklick auf das Namensfeld).
+    link_group: Option<&'a mut Option<u8>>,
 }
 
 /// Ergebnis eines Kanalzugs.
@@ -690,6 +696,7 @@ impl Strip<'_> {
     fn show(self, ui: &mut Ui, height: f32) -> StripOut {
         let mut changed = false;
         let mut exclusive_solo = false;
+        let mut clicked = false;
         // Klickfläche des ganzen Kanalzugs (Kanal wählen) zuerst anlegen: Was danach kommt,
         // liegt obenauf, so erreichen Klicks M, S, Pan und Fader und nur der Rest wählt.
         let area = egui::Rect::from_min_size(ui.cursor().min, vec2(self.width, height));
@@ -834,22 +841,78 @@ impl Strip<'_> {
                     fader_h,
                 )
                 .changed();
-                let (rect, _) =
-                    ui.allocate_exact_size(vec2(self.width - 8.0, 18.0), Sense::hover());
+                let (rect, plate) =
+                    ui.allocate_exact_size(vec2(self.width - 8.0, 18.0), Sense::click());
                 ui.painter().rect_filled(rect, 2.0, self.color);
-                ui.painter().with_clip_rect(rect).text(
-                    rect.center(),
+                let painter = ui.painter().with_clip_rect(rect);
+                // Mit Gruppenkennzeichen bekommt der Name nur den Platz links davon.
+                let linked = self.link_group.as_deref().is_some_and(Option::is_some);
+                let name_rect = if linked {
+                    Rect::from_min_max(rect.min, rect.max - vec2(18.0, 0.0))
+                } else {
+                    rect
+                };
+                painter.with_clip_rect(name_rect).text(
+                    name_rect.center(),
                     Align2::CENTER_CENTER,
                     self.name,
                     FontId::proportional(11.0),
                     Color32::from_gray(15),
                 );
+                if let Some(link) = self.link_group {
+                    if let Some(g) = *link {
+                        // Kennzeichen der Gruppe rechts im Namensfeld.
+                        let t = crate::theme::tokens(ui.ctx());
+                        let badge = Rect::from_min_size(
+                            rect.right_top() - vec2(16.0, -2.0),
+                            vec2(14.0, rect.height() - 4.0),
+                        );
+                        painter.rect_filled(badge, 2.0, t.button);
+                        painter.text(
+                            badge.center(),
+                            Align2::CENTER_CENTER,
+                            g.to_string(),
+                            FontId::proportional(10.0),
+                            t.text,
+                        );
+                    }
+                    let plate = plate.on_hover_text(match *link {
+                        Some(g) => crate::i18n::trf(
+                            "Link-Gruppe {nr} – Rechtsklick: ändern",
+                            &[("nr", &g)],
+                        ),
+                        None => tr("Rechtsklick: Link-Gruppe").to_owned(),
+                    });
+                    let label = crate::i18n::trf("Link-Gruppe von {name}", &[("name", &self.name)]);
+                    plate.widget_info(|| {
+                        egui::WidgetInfo::labeled(egui::Role::Button, true, label.clone())
+                    });
+                    clicked |= plate.clicked();
+                    plate.context_menu(|ui| {
+                        ui.label(RichText::new(tr("Link-Gruppe")).strong());
+                        if ui.radio(link.is_none(), tr("Keine")).clicked() {
+                            *link = None;
+                            changed = true;
+                            ui.close();
+                        }
+                        for g in 1..=studiocraft_project::MAX_LINK_GROUPS {
+                            let label = crate::i18n::trf("Gruppe {nr}", &[("nr", &g)]);
+                            if ui.radio(*link == Some(g), label).clicked() {
+                                *link = Some(g);
+                                changed = true;
+                                ui.close();
+                            }
+                        }
+                    });
+                } else {
+                    clicked |= plate.clicked();
+                }
             });
         });
         let _ = resp;
         StripOut {
             changed,
-            clicked: select.clicked(),
+            clicked: clicked || select.clicked(),
             exclusive_solo,
         }
     }

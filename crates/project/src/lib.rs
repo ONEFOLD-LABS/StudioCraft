@@ -25,6 +25,7 @@ pub mod file;
 pub mod folders;
 pub mod io;
 pub mod layout;
+pub mod links;
 pub mod markers;
 pub mod model;
 pub mod quantize;
@@ -38,6 +39,7 @@ pub use controllers::{CtrlKind, CtrlPoint};
 pub use eq::{BandKind, ChannelEq, EQ_FREQ, EQ_GAIN, EQ_Q, EqBand};
 pub use io::{AudioIo, IoBus, MAIN_OUT, MAX_IO_BUSES};
 pub use layout::{NamedLayout, WindowLayout};
+pub use links::{LinkState, MAX_LINK_GROUPS};
 pub use markers::{FIRST_MARKER_ID, Marker};
 pub use model::{
     ClipId, EVENT_MAX_DB, Event, EventId, FadeCurve, Frozen, InsertSlot, MAX_DB, MAX_MIXER_VIEWS,

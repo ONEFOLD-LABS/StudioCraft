@@ -945,6 +945,8 @@ impl ProjectWindow {
             self.theme_installed = true;
         }
         self.panel_edit_start(ui.ctx());
+        // Link-Gruppen: Stand vor allen Bedienelementen dieses Bildes (project/links.rs).
+        let links_before = self.project.link_snapshot();
         self.sync_from_engine();
         if let Some(t) = &mut self.transport {
             t.collect_garbage();
@@ -1099,6 +1101,11 @@ impl ProjectWindow {
         self.crossfade_editor_dialog(ui.ctx());
         self.device_dialog(ui.ctx());
         self.show_windows(ui.ctx());
+        // Hat sich ein verknüpfter Kanal bewegt, folgt seine Gruppe (vor dem Undo-Schritt und
+        // dem Schreiben der Automation, damit beides die ganze Gruppe erfasst).
+        if !links_before.is_empty() && self.project.propagate_links(&links_before) {
+            self.dirty = true;
+        }
         self.panel_edit_end(ui.ctx());
 
         self.sync_tempo();
@@ -5615,6 +5622,72 @@ mod tests {
             w.meter_hold = vec![[(0.5, 0.0), (0.7, 0.0)]; n + 1];
             w.clipped = vec![false; n + 1];
             w.clipped[0] = true;
+        });
+    }
+
+    #[test]
+    fn linked_channels_move_together_in_one_undo_step() {
+        let (mut w, _) = one_event_window();
+        w.project.add_track(TrackKind::Audio, String::from("Zwei"));
+        w.project.add_track(TrackKind::Audio, String::from("Drei"));
+        w.project.tracks[1].volume_db = -6.0;
+        w.show_lower = true;
+        w.lower = LowerZone::Mixer;
+        w.show_inspector = false;
+        let first = w.project.tracks[0].name.clone();
+        let mut h = window_harness(w);
+        h.run_steps(3);
+        // Link the first two channels through the name plate's context menu.
+        for name in [first.as_str(), "Zwei"] {
+            h.get_by_label(&format!("Link-Gruppe von {name}"))
+                .click_secondary();
+            h.run_steps(2);
+            h.get_by_label("Gruppe 1").click();
+            h.run_steps(3);
+        }
+        let tr = &h.state().project.tracks;
+        assert_eq!(
+            (tr[0].link_group, tr[1].link_group, tr[2].link_group),
+            (Some(1), Some(1), None)
+        );
+        let steps = h.state().undo.len();
+        // A fader drag on the first channel moves the second by the same amount.
+        let fader = h.get_by_label(&format!("Lautstärke {first}")).rect();
+        let (a, b) = (fader.center(), fader.center() + egui::vec2(0.0, 60.0));
+        drag_with(&mut h, a, b, egui::Modifiers::NONE, egui::Modifiers::NONE);
+        h.run_steps(2);
+        let tr = &h.state().project.tracks;
+        let delta = tr[0].volume_db;
+        assert!(delta < -1.0, "fader moved: {delta}");
+        assert!((tr[1].volume_db - (-6.0 + delta)).abs() < 1e-3);
+        assert_eq!(tr[2].volume_db, 0.0, "unlinked channel stays");
+        assert_eq!(h.state().undo.len(), steps + 1, "one drag, one step");
+        h.state_mut().undo();
+        let tr = &h.state().project.tracks;
+        assert_eq!((tr[0].volume_db, tr[1].volume_db), (0.0, -6.0));
+        // Mute on the second channel mutes the first as well.
+        h.run_steps(2);
+        let mut m: Vec<egui::Rect> = h.query_all_by_label("M").map(|n| n.rect()).collect();
+        m.sort_by(|a, b| a.left().total_cmp(&b.left()));
+        click_with(
+            &mut h,
+            m[1].center(),
+            egui::Modifiers::NONE,
+            egui::PointerButton::Primary,
+        );
+        h.run_steps(3);
+        let tr = &h.state().project.tracks;
+        assert!(tr[0].mute && tr[1].mute && !tr[2].mute);
+    }
+
+    #[test]
+    fn renders_mixer_link_groups() {
+        shot("mixer-link-groups", |w| {
+            w.show_lower = true;
+            w.lower = LowerZone::Mixer;
+            for (i, g) in [(0, 1), (1, 1), (2, 2), (3, 2)] {
+                w.project.set_link_group(i, Some(g));
+            }
         });
     }
 
