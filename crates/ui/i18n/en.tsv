@@ -638,3 +638,8 @@ Zu Marker 8	Go to Marker 8
 Zu Marker 9	Go to Marker 9
 {key} gehört schon zu „{name}“.	{key} already belongs to “{name}”.
 Öffnen	Open
+Link-Gruppe	Link group
+Gruppe {nr}	Group {nr}
+Rechtsklick: Link-Gruppe	Right-click: link group
+Link-Gruppe {nr} – Rechtsklick: ändern	Link group {nr} – right-click: change
+Link-Gruppe von {name}	Link group of {name}
