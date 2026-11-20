@@ -1,6 +1,7 @@
 //! Menüleiste, Datei-Befehle mit Dialogen und Rückfrage bei ungesicherten Änderungen.
 
 use crate::file_dialog::FileDialog;
+use crate::i18n::tr;
 use std::path::PathBuf;
 
 use egui::{Key, Ui, ViewportCommand};
@@ -31,16 +32,16 @@ impl Action {
 impl ProjectWindow {
     pub(crate) fn menu_bar(&mut self, ui: &mut Ui) {
         egui::MenuBar::new().ui(ui, |ui| {
-            ui.menu_button("Datei", |ui| {
+            ui.menu_button(tr("Datei"), |ui| {
                 let items = [
-                    ("Neu", Action::New),
-                    ("Öffnen …", Action::Open),
-                    ("Speichern", Action::Save),
-                    ("Speichern unter …", Action::SaveAs),
-                    ("Neue Version speichern", Action::SaveVersion),
-                    ("Audiodatei importieren …", Action::ImportAudio),
-                    ("Audio-Mixdown exportieren …", Action::ExportMixdown),
-                    ("Beenden", Action::Quit),
+                    (tr("Neu"), Action::New),
+                    (tr("Öffnen …"), Action::Open),
+                    (tr("Speichern"), Action::Save),
+                    (tr("Speichern unter …"), Action::SaveAs),
+                    (tr("Neue Version speichern"), Action::SaveVersion),
+                    (tr("Audiodatei importieren …"), Action::ImportAudio),
+                    (tr("Audio-Mixdown exportieren …"), Action::ExportMixdown),
+                    (tr("Beenden"), Action::Quit),
                 ];
                 for (i, (label, action)) in items.into_iter().enumerate() {
                     if i == 5 {
@@ -56,20 +57,21 @@ impl ProjectWindow {
                     if ui.add(b).clicked() {
                         self.request(ui, action);
                     }
-                    if action == Action::ExportMixdown && ui.button("Stems exportieren …").clicked()
+                    if action == Action::ExportMixdown
+                        && ui.button(tr("Stems exportieren …")).clicked()
                     {
                         self.open_stem_dialog();
                         ui.close();
                     }
                 }
             });
-            ui.menu_button("Bearbeiten", |ui| {
-                let undo = egui::Button::new("Rückgängig")
+            ui.menu_button(tr("Bearbeiten"), |ui| {
+                let undo = egui::Button::new(tr("Rückgängig"))
                     .shortcut_text(self.key_label(ui.ctx(), Cmd::Undo));
                 if ui.add_enabled(!self.undo.is_empty(), undo).clicked() {
                     self.undo();
                 }
-                let redo = egui::Button::new("Wiederherstellen")
+                let redo = egui::Button::new(tr("Wiederherstellen"))
                     .shortcut_text(self.key_label(ui.ctx(), Cmd::Redo));
                 if ui.add_enabled(!self.redo.is_empty(), redo).clicked() {
                     self.redo();
@@ -78,15 +80,15 @@ impl ProjectWindow {
                 use crate::shortcuts::EditCommand as E;
                 let has_sel = !self.selection.is_empty();
                 let items = [
-                    ("Ausschneiden", E::Cut, has_sel),
-                    ("Kopieren", E::Copy, has_sel),
-                    ("Einfügen", E::Paste, true),
-                    ("Duplizieren", E::Duplicate, has_sel),
-                    ("Wiederholen …", E::Repeat, has_sel),
-                    ("Am Cursor teilen", E::SplitAtCursor, true),
-                    ("Alles auswählen", E::SelectAll, true),
-                    ("Quantisieren", E::Quantize, true),
-                    ("Crossfade", E::Crossfade, has_sel),
+                    (tr("Ausschneiden"), E::Cut, has_sel),
+                    (tr("Kopieren"), E::Copy, has_sel),
+                    (tr("Einfügen"), E::Paste, true),
+                    (tr("Duplizieren"), E::Duplicate, has_sel),
+                    (tr("Wiederholen …"), E::Repeat, has_sel),
+                    (tr("Am Cursor teilen"), E::SplitAtCursor, true),
+                    (tr("Alles auswählen"), E::SelectAll, true),
+                    (tr("Quantisieren"), E::Quantize, true),
+                    (tr("Crossfade"), E::Crossfade, has_sel),
                 ];
                 for (label, cmd, enabled) in items {
                     let keys = self.key_label(ui.ctx(), Cmd::Edit(cmd));
@@ -99,56 +101,58 @@ impl ProjectWindow {
                 self.render_menu(ui);
                 self.freeze_menu(ui);
                 self.event_color_menu(ui);
-                if ui.button("Quantisierungs-Panel …").clicked() {
+                if ui.button(tr("Quantisierungs-Panel …")).clicked() {
                     self.show_quantize = true;
                     ui.close();
                 }
-                let del = egui::Button::new("Löschen")
+                let del = egui::Button::new(tr("Löschen"))
                     .shortcut_text(self.key_label(ui.ctx(), Cmd::Delete));
                 if ui.add_enabled(has_sel, del).clicked() {
                     self.delete_selection();
                 }
                 ui.separator();
                 self.macros_menu(ui);
-                if ui.button("Tastaturbefehle …").clicked() {
+                if ui.button(tr("Tastaturbefehle …")).clicked() {
                     self.key_dialog.open = true;
                     ui.close();
                 }
             });
-            ui.menu_button("Projekt", |ui| {
-                let audio = egui::Button::new("Audio-Spur hinzufügen")
+            ui.menu_button(tr("Projekt"), |ui| {
+                let audio = egui::Button::new(tr("Audio-Spur hinzufügen"))
                     .shortcut_text(self.key_label(ui.ctx(), Cmd::AddAudioTrack));
                 if ui.add(audio).clicked() {
                     self.add_audio_track();
                 }
-                if ui.button("Gruppen-Spur hinzufügen").clicked() {
+                if ui.button(tr("Gruppen-Spur hinzufügen")).clicked() {
                     self.add_bus_track(studiocraft_project::TrackKind::Group);
                 }
-                if ui.button("FX-Kanal hinzufügen").clicked() {
+                if ui.button(tr("FX-Kanal hinzufügen")).clicked() {
                     self.add_bus_track(studiocraft_project::TrackKind::Fx);
                 }
                 if ui
-                    .button("Ordner-Spur hinzufügen")
-                    .on_hover_text("Die gewählte Spur kommt gleich in den neuen Ordner")
+                    .button(tr("Ordner-Spur hinzufügen"))
+                    .on_hover_text(tr("Die gewählte Spur kommt gleich in den neuen Ordner"))
                     .clicked()
                 {
                     self.add_folder_track();
                 }
                 if ui
-                    .button("Plugins neu prüfen")
-                    .on_hover_text("Sperrliste leeren und alle Plugin-Dateien neu prüfen")
+                    .button(tr("Plugins neu prüfen"))
+                    .on_hover_text(tr("Sperrliste leeren und alle Plugin-Dateien neu prüfen"))
                     .clicked()
                 {
                     self.rescan_plugins();
                     ui.close();
                 }
-                ui.menu_button("Inserts vor dem Fader", |ui| {
+                ui.menu_button(tr("Inserts vor dem Fader"), |ui| {
                     for n in 0..=8u8 {
-                        let text = format!("Slots 1–{n} vor, {}–8 nach dem Fader", n + 1);
                         let text = match n {
-                            0 => "alle nach dem Fader".to_owned(),
-                            8 => "alle vor dem Fader".to_owned(),
-                            _ => text,
+                            0 => tr("alle nach dem Fader").to_owned(),
+                            8 => tr("alle vor dem Fader").to_owned(),
+                            _ => crate::i18n::trf(
+                                "Slots 1–{n} vor, {m}–8 nach dem Fader",
+                                &[("n", &n), ("m", &(n + 1))],
+                            ),
                         };
                         if ui
                             .radio(self.project.pre_fader_inserts == n, text)
@@ -161,51 +165,54 @@ impl ProjectWindow {
                         }
                     }
                 });
-                if ui.button("Marker-Spur hinzufügen").clicked() {
+                if ui.button(tr("Marker-Spur hinzufügen")).clicked() {
                     let before = self.project.clone();
                     self.add_marker_track();
                     self.checkpoint(before);
                 }
-                if ui.button("Tempospur hinzufügen").clicked() {
+                if ui.button(tr("Tempospur hinzufügen")).clicked() {
                     ui.close();
                     self.add_tempo_track();
                 }
-                let insert = egui::Button::new("Marker einfügen")
+                let insert = egui::Button::new(tr("Marker einfügen"))
                     .shortcut_text(self.key_label(ui.ctx(), Cmd::InsertMarker));
                 if ui.add(insert).clicked() {
                     self.insert_marker();
                 }
-                let cycle = egui::Button::new("Cycle-Marker aus Locatoren")
+                let cycle = egui::Button::new(tr("Cycle-Marker aus Locatoren"))
                     .shortcut_text(self.key_label(ui.ctx(), Cmd::CycleMarkerFromLocators));
                 if ui.add(cycle).clicked() {
                     self.cycle_marker_from_locators();
                 }
-                ui.menu_button("Instrument-Spur hinzufügen", |ui| {
+                ui.menu_button(tr("Instrument-Spur hinzufügen"), |ui| {
                     if let Some(info) = self.instrument_menu(ui) {
                         self.add_instrument_track(info);
                     }
                 });
             });
-            ui.menu_button("Transport", |ui| self.transport_menu(ui));
-            ui.menu_button("Ansicht", |ui| {
-                ui.checkbox(&mut self.show_inspector, "Linke Zone (Alt+L)");
+            ui.menu_button(tr("Transport"), |ui| self.transport_menu(ui));
+            ui.menu_button(tr("Ansicht"), |ui| {
+                ui.checkbox(&mut self.show_inspector, tr("Linke Zone (Alt+L)"));
                 ui.add_enabled(
                     self.show_inspector,
-                    egui::Checkbox::new(&mut self.show_inspector_column, "Inspector (Alt+I)"),
+                    egui::Checkbox::new(&mut self.show_inspector_column, tr("Inspector (Alt+I)")),
                 );
-                ui.checkbox(&mut self.show_info, "Info-Zeile");
-                ui.checkbox(&mut self.show_transport, "Transportleiste (F2)");
-                ui.checkbox(&mut self.show_status, "Statuszeile");
-                ui.checkbox(&mut self.show_right, "Rechte Zone (Alt+R)");
-                ui.menu_button("Layouts", |ui| self.layouts_menu(ui));
+                ui.checkbox(&mut self.show_info, tr("Info-Zeile"));
+                ui.checkbox(&mut self.show_transport, tr("Transportleiste (F2)"));
+                ui.checkbox(&mut self.show_status, tr("Statuszeile"));
+                ui.checkbox(&mut self.show_right, tr("Rechte Zone (Alt+R)"));
+                ui.menu_button(tr("Layouts"), |ui| self.layouts_menu(ui));
                 if ui
-                    .selectable_label(self.windows.mixer, "Mixer-Fenster (F3)")
+                    .selectable_label(self.windows.mixer, tr("Mixer-Fenster (F3)"))
                     .clicked()
                 {
                     self.toggle_mixer_window();
                     ui.close();
                 }
-                if ui.button("Editor im eigenen Fenster (Strg+E)").clicked() {
+                if ui
+                    .button(tr("Editor im eigenen Fenster (Strg+E)"))
+                    .clicked()
+                {
                     self.open_editor_window();
                     ui.close();
                 }
@@ -213,7 +220,7 @@ impl ProjectWindow {
                 if ui
                     .selectable_label(
                         self.show_lower && self.lower == crate::LowerZone::Mixer,
-                        "Mixer (untere Zone)",
+                        tr("Mixer (untere Zone)"),
                     )
                     .clicked()
                 {
@@ -223,16 +230,16 @@ impl ProjectWindow {
                 if ui
                     .selectable_label(
                         self.show_lower && self.lower == crate::LowerZone::Editor,
-                        "Key-Editor",
+                        tr("Key-Editor"),
                     )
                     .clicked()
                 {
                     self.show_lower = true;
                     self.lower = crate::LowerZone::Editor;
                 }
-                ui.checkbox(&mut self.show_lower, "Untere Zone");
+                ui.checkbox(&mut self.show_lower, tr("Untere Zone"));
                 ui.separator();
-                ui.menu_button("Erscheinungsbild", |ui| {
+                ui.menu_button(tr("Erscheinungsbild"), |ui| {
                     for pref in [
                         egui::ThemePreference::Dark,
                         egui::ThemePreference::Light,
@@ -243,6 +250,18 @@ impl ProjectWindow {
                             .clicked()
                         {
                             self.set_theme(ui.ctx(), pref);
+                            ui.close();
+                        }
+                    }
+                });
+                ui.menu_button(tr("Sprache"), |ui| {
+                    for lang in crate::i18n::Language::ALL {
+                        if ui
+                            .selectable_label(crate::i18n::language() == lang, lang.label())
+                            .clicked()
+                        {
+                            crate::i18n::set_language(lang);
+                            self.save_settings();
                             ui.close();
                         }
                     }
@@ -308,11 +327,11 @@ impl ProjectWindow {
         let default = self
             .project_path()
             .and_then(|p| p.file_name())
-            .map_or(format!("Unbenannt.{EXTENSION}"), |n| {
+            .map_or(format!("{}.{EXTENSION}", tr("Unbenannt")), |n| {
                 n.to_string_lossy().into_owned()
             });
         let Some(chosen) = dialog()
-            .add_filter("StudioCraft-Projekt", &[EXTENSION])
+            .add_filter(tr("StudioCraft-Projekt"), &[EXTENSION])
             .set_file_name(default)
             .save_file()
         else {
@@ -324,7 +343,10 @@ impl ProjectWindow {
 
     pub(crate) fn import_dialog(&mut self) {
         let Some(files) = dialog()
-            .add_filter("Audiodateien", studiocraft_engine::AudioClip::extensions())
+            .add_filter(
+                tr("Audiodateien"),
+                studiocraft_engine::AudioClip::extensions(),
+            )
             .pick_files()
         else {
             return;
@@ -346,9 +368,9 @@ impl ProjectWindow {
             .and_then(|p| p.file_stem())
             .map_or("Mixdown".into(), |n| n.to_string_lossy().into_owned());
         match dialog()
-            .add_filter("WAV (24 Bit)", &["wav"])
-            .add_filter("FLAC (24 Bit, verlustfrei komprimiert)", &["flac"])
-            .add_filter("AIFF (24 Bit)", &["aif", "aiff"])
+            .add_filter(tr("WAV (24 Bit)"), &["wav"])
+            .add_filter(tr("FLAC (24 Bit, verlustfrei komprimiert)"), &["flac"])
+            .add_filter(tr("AIFF (24 Bit)"), &["aif", "aiff"])
             .set_file_name(format!("{name}.wav"))
             .save_file()
         {
@@ -367,17 +389,20 @@ impl ProjectWindow {
         let Some(action) = self.pending else { return };
         let mut choice = None;
         egui::Modal::new(egui::Id::unique("ungesichert")).show(ui.ctx(), |ui| {
-            ui.heading("Ungesicherte Änderungen");
-            ui.label("Sollen die Änderungen am Projekt vorher gespeichert werden?");
+            ui.heading(tr("Ungesicherte Änderungen"));
+            ui.label(tr(
+                "Sollen die Änderungen am Projekt vorher gespeichert werden?",
+            ));
             ui.add_space(8.0);
             ui.horizontal(|ui| {
-                if ui.button("Speichern").clicked() {
+                if ui.button(tr("Speichern")).clicked() {
                     choice = Some(true);
                 }
-                if ui.button("Nicht speichern").clicked() {
+                if ui.button(tr("Nicht speichern")).clicked() {
                     choice = Some(false);
                 }
-                if ui.button("Abbrechen").clicked() || ui.input(|i| i.key_pressed(Key::Escape)) {
+                if ui.button(tr("Abbrechen")).clicked() || ui.input(|i| i.key_pressed(Key::Escape))
+                {
                     self.pending = None;
                 }
             });
@@ -418,7 +443,7 @@ fn dialog() -> FileDialog {
 
 fn pick_project() -> Option<PathBuf> {
     dialog()
-        .add_filter("StudioCraft-Projekt", &[EXTENSION])
+        .add_filter(tr("StudioCraft-Projekt"), &[EXTENSION])
         .pick_file()
 }
 
@@ -441,46 +466,54 @@ impl ProjectWindow {
             ui.add(egui::Button::new(label).shortcut_text(w.key_label(ui.ctx(), cmd)))
                 .clicked()
         };
-        if item(self, ui, "Start/Stopp", Cmd::PlayStop) {
+        if item(self, ui, tr("Start/Stopp"), Cmd::PlayStop) {
             self.toggle_play();
             ui.close();
         }
-        if ui.button("Stopp").clicked() {
+        if ui.button(tr("Stopp")).clicked() {
             self.stop();
             ui.close();
         }
-        if item(self, ui, "Zum Anfang", Cmd::ToStart) {
+        if item(self, ui, tr("Zum Anfang"), Cmd::ToStart) {
             self.locate(0);
             ui.close();
         }
-        if item(self, ui, "Cycle an/aus", Cmd::ToggleCycle) {
+        if item(self, ui, tr("Cycle an/aus"), Cmd::ToggleCycle) {
             self.toggle_cycle();
             ui.close();
         }
-        if item(self, ui, "Nachträgliche Aufnahme", Cmd::RetrospectiveRecord) {
+        if item(
+            self,
+            ui,
+            tr("Nachträgliche Aufnahme"),
+            Cmd::RetrospectiveRecord,
+        ) {
             self.retrospective_record();
             ui.close();
         }
         self.record_mode_menu(ui);
-        if item(self, ui, "Metronom an/aus", Cmd::Metronome) {
+        if item(self, ui, tr("Metronom an/aus"), Cmd::Metronome) {
             self.toggle_metronome();
             ui.close();
         }
         self.click_menu(ui);
         ui.separator();
         let mut changed = ui
-            .checkbox(&mut self.return_on_stop, "Beim Stoppen zur Startposition")
+            .checkbox(
+                &mut self.return_on_stop,
+                tr("Beim Stoppen zur Startposition"),
+            )
             .changed();
-        ui.menu_button("Zweimal Stopp springt zu", |ui| {
+        ui.menu_button(tr("Zweimal Stopp springt zu"), |ui| {
             use crate::settings::StopTarget;
             changed |= ui
-                .radio_value(&mut self.stop_twice, StopTarget::Start, "Anfang")
+                .radio_value(&mut self.stop_twice, StopTarget::Start, tr("Anfang"))
                 .changed();
             changed |= ui
                 .radio_value(
                     &mut self.stop_twice,
                     StopTarget::LeftLocator,
-                    "Linker Locator",
+                    tr("Linker Locator"),
                 )
                 .changed();
         });
@@ -490,10 +523,10 @@ impl ProjectWindow {
         ui.separator();
         let mut constrain = self.latency.constrain;
         if ui
-            .checkbox(&mut constrain, "Latenzausgleich begrenzen")
-            .on_hover_text(
+            .checkbox(&mut constrain, tr("Latenzausgleich begrenzen"))
+            .on_hover_text(tr(
                 "Bei Aufnahme und Mithören: Plugins mit hoher Latenz auf diesen Spuren umgehen",
-            )
+            ))
             .changed()
         {
             self.latency.constrain = constrain;
@@ -502,17 +535,21 @@ impl ProjectWindow {
         let total = self.latency.sent.total;
         if total > 0 {
             ui.label(
-                egui::RichText::new(format!("Ausgleich: {}", self.latency_text(total))).weak(),
+                egui::RichText::new(crate::i18n::trf(
+                    "Ausgleich: {zeit}",
+                    &[("zeit", &self.latency_text(total))],
+                ))
+                .weak(),
             );
         }
         ui.separator();
-        let io = egui::Button::new("Audio-Anschlüsse …")
+        let io = egui::Button::new(tr("Audio-Anschlüsse …"))
             .shortcut_text(self.key_label(ui.ctx(), Cmd::AudioConnections));
         if ui.add(io).clicked() {
             self.io_dialog = true;
             ui.close();
         }
-        if ui.button("Audio- und MIDI-Geräte …").clicked() {
+        if ui.button(tr("Audio- und MIDI-Geräte …")).clicked() {
             self.open_device_dialog();
             ui.close();
         }

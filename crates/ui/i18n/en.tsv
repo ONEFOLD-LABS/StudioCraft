@@ -1,0 +1,87 @@
+# Englische Texte der Oberfläche: deutsch<TAB>englisch (Issue #99).
+Abbrechen	Cancel
+AIFF (24 Bit)	AIFF (24-bit)
+alle nach dem Fader	all post-fader
+alle vor dem Fader	all pre-fader
+Alles auswählen	Select All
+Am Cursor teilen	Split at Cursor
+Anfang	Start
+Ansicht	View
+Audio- und MIDI-Geräte …	Audio and MIDI Devices…
+Audio-Anschlüsse …	Audio Inputs and Outputs…
+Audio-Mixdown exportieren …	Export Audio Mixdown…
+Audio-Spur hinzufügen	Add Audio Track
+Audiodatei importieren …	Import Audio File…
+Audiodateien	Audio files
+Ausgleich: {zeit}	Compensation: {zeit}
+Ausschneiden	Cut
+Bearbeiten	Edit
+Beenden	Quit
+Bei Aufnahme und Mithören: Plugins mit hoher Latenz auf diesen Spuren umgehen	While recording and monitoring: bypass high-latency plugins on those tracks
+Beim Stoppen zur Startposition	Return to Start Position on Stop
+Crossfade	Crossfade
+Cycle an/aus	Loop On/Off
+Cycle-Marker aus Locatoren	Loop Marker from Locators
+Datei	File
+Die gewählte Spur kommt gleich in den neuen Ordner	The selected track goes straight into the new folder
+Dunkel	Dark
+Duplizieren	Duplicate
+Editor im eigenen Fenster (Strg+E)	Editor in Its Own Window (Ctrl+E)
+Einfügen	Paste
+Erscheinungsbild	Appearance
+FLAC (24 Bit, verlustfrei komprimiert)	FLAC (24-bit, lossless)
+FX-Kanal hinzufügen	Add FX Channel
+Gruppen-Spur hinzufügen	Add Group Track
+Hell	Light
+Info-Zeile	Event Info Bar
+Inserts vor dem Fader	Pre-Fader Inserts
+Inspector (Alt+I)	Inspector (Alt+I)
+Instrument-Spur hinzufügen	Add Instrument Track
+Key-Editor	Piano Roll
+Kopieren	Copy
+Latenzausgleich begrenzen	Constrain Latency Compensation
+Layouts	Layouts
+Linke Zone (Alt+L)	Left Panel (Alt+L)
+Linker Locator	Left Locator
+Löschen	Delete
+Marker einfügen	Insert Marker
+Marker-Spur hinzufügen	Add Marker Track
+Metronom an/aus	Metronome On/Off
+Mixer (untere Zone)	Mixer (Bottom Panel)
+Mixer-Fenster (F3)	Mixer Window (F3)
+Nachträgliche Aufnahme	Retrospective Recording
+Neu	New
+Neue Version speichern	Save New Version
+Nicht speichern	Don't Save
+Ordner-Spur hinzufügen	Add Folder Track
+Plugins neu prüfen	Rescan Plugins
+Projekt	Project
+Quantisieren	Quantize
+Quantisierungs-Panel …	Quantize Panel…
+Rechte Zone (Alt+R)	Right Panel (Alt+R)
+Rückgängig	Undo
+Slots 1–{n} vor, {m}–8 nach dem Fader	Slots 1–{n} pre-fader, {m}–8 post-fader
+Sollen die Änderungen am Projekt vorher gespeichert werden?	Save the changes to the project first?
+Speichern	Save
+Speichern unter …	Save As…
+Sperrliste leeren und alle Plugin-Dateien neu prüfen	Clear the block list and check every plugin file again
+Sprache	Language
+Start/Stopp	Start/Stop
+Statuszeile	Status Bar
+Stems exportieren …	Export Stems…
+Stopp	Stop
+StudioCraft-Projekt	StudioCraft project
+Tastaturbefehle …	Keyboard Shortcuts…
+Tempospur hinzufügen	Add Tempo Track
+Transport	Transport
+Transportleiste (F2)	Transport Bar (F2)
+Unbenannt	Untitled
+Ungesicherte Änderungen	Unsaved Changes
+Untere Zone	Bottom Panel
+WAV (24 Bit)	WAV (24-bit)
+Wie das System	Same as System
+Wiederherstellen	Redo
+Wiederholen …	Repeat…
+Zum Anfang	Go to Start
+Zweimal Stopp springt zu	Pressing Stop Twice Goes To
+Öffnen …	Open…
