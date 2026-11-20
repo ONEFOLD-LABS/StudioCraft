@@ -1,6 +1,7 @@
 //! Mixer in der unteren Zone (Spec-Abschnitt „Mixer“): ein Kanalzug je Spur
 //! mit Kanal, rechts der Ausgangsbus. F3 blendet ihn ein und aus.
 
+use crate::i18n::tr;
 use egui::{
     Align, Align2, Color32, FontId, Layout, Rect, Response, RichText, Sense, Stroke, StrokeKind,
     Ui, WidgetInfo, pos2, vec2,
@@ -324,7 +325,7 @@ pub(crate) fn show(w: &mut ProjectWindow, ui: &mut Ui) {
             .io
             .outputs
             .first()
-            .map_or_else(|| "Ausgang".to_owned(), |b| b.name.clone());
+            .map_or_else(|| tr("Ausgang").to_owned(), |b| b.name.clone());
         let master = Strip {
             id: usize::MAX,
             name: &main_name,
@@ -410,14 +411,14 @@ fn io_strips(w: &mut ProjectWindow, ui: &mut Ui, height: f32, outputs: bool) -> 
 fn header(w: &mut ProjectWindow, ui: &mut Ui) -> bool {
     let mut changed = false;
     ui.horizontal(|ui| {
-        ui.toggle_value(&mut w.mixer_list, "Kanalliste")
-            .on_hover_text("Liste aller Kanäle mit Sichtbarkeit");
-        ui.toggle_value(&mut w.mixer_rack, "Rack")
-            .on_hover_text("Inserts, EQ und Sends über den Fadern");
-        ui.toggle_value(&mut w.mixer_io, "Ein-/Ausgänge")
-            .on_hover_text("Eingangskanäle links, Ausgangsbusse rechts");
+        ui.toggle_value(&mut w.mixer_list, tr("Kanalliste"))
+            .on_hover_text(tr("Liste aller Kanäle mit Sichtbarkeit"));
+        ui.toggle_value(&mut w.mixer_rack, tr("Rack"))
+            .on_hover_text(tr("Inserts, EQ und Sends über den Fadern"));
+        ui.toggle_value(&mut w.mixer_io, tr("Ein-/Ausgänge"))
+            .on_hover_text(tr("Eingangskanäle links, Ausgangsbusse rechts"));
         ui.separator();
-        for (label, narrow) in [("Alle breit", false), ("Alle schmal", true)] {
+        for (label, narrow) in [(tr("Alle breit"), false), (tr("Alle schmal"), true)] {
             if ui.button(label).clicked() {
                 for t in &mut w.project.tracks {
                     t.mixer_narrow = narrow;
@@ -426,17 +427,17 @@ fn header(w: &mut ProjectWindow, ui: &mut Ui) -> bool {
             }
         }
         ui.separator();
-        ui.menu_button("Ansichten", |ui| {
+        ui.menu_button(tr("Ansichten"), |ui| {
             ui.horizontal(|ui| {
-                let l = ui.label("Name");
+                let l = ui.label(tr("Name"));
                 ui.add(egui::TextEdit::singleline(&mut w.mixer_view_name).desired_width(120.0))
                     .labelled_by(l.id);
-                if ui.button("Speichern").clicked() {
+                if ui.button(tr("Speichern")).clicked() {
                     let name = std::mem::take(&mut w.mixer_view_name);
                     if !w.project.save_mixer_view(&name) {
-                        w.message = Some(format!(
-                            "Ansicht nicht gespeichert (Name leer oder schon {} Ansichten)",
-                            studiocraft_project::MAX_MIXER_VIEWS
+                        w.message = Some(crate::i18n::trf(
+                            "Ansicht nicht gespeichert (Name leer oder schon {max} Ansichten)",
+                            &[("max", &studiocraft_project::MAX_MIXER_VIEWS)],
                         ));
                     }
                 }
@@ -449,8 +450,11 @@ fn header(w: &mut ProjectWindow, ui: &mut Ui) -> bool {
                         apply = Some(k);
                     }
                     if ui
-                        .small_button("x")
-                        .on_hover_text(format!("Ansicht „{}“ entfernen", v.name))
+                        .small_button(tr("x"))
+                        .on_hover_text(crate::i18n::trf(
+                            "Ansicht „{name}“ entfernen",
+                            &[("name", &v.name)],
+                        ))
                         .clicked()
                     {
                         remove = Some(k);
@@ -487,8 +491,11 @@ fn channel_list(w: &mut ProjectWindow, ui: &mut Ui, height: f32) -> bool {
                         }
                         let mut narrow = t.mixer_narrow;
                         if ui
-                            .toggle_value(&mut narrow, "schmal")
-                            .on_hover_text(format!("„{}“ schmal anzeigen", t.name))
+                            .toggle_value(&mut narrow, tr("schmal"))
+                            .on_hover_text(crate::i18n::trf(
+                                "„{name}“ schmal anzeigen",
+                                &[("name", &t.name)],
+                            ))
                             .changed()
                         {
                             t.mixer_narrow = narrow;
@@ -513,7 +520,7 @@ pub(crate) fn channel_column(w: &mut ProjectWindow, ui: &mut Ui) {
         .selected_track
         .filter(|&i| w.project.tracks.get(i).is_some_and(|t| has_channel(t.kind)))
     else {
-        ui.weak("Kein Kanal");
+        ui.weak(tr("Kein Kanal"));
         return;
     };
     let sends: Vec<(String, bool)> = w.project.tracks[i]
@@ -541,8 +548,8 @@ pub(crate) fn channel_column(w: &mut ProjectWindow, ui: &mut Ui) {
         .iter()
         .map(|s| (s.name.clone(), !s.bypass))
         .collect();
-    slot_list(ui, "Inserts", &inserts);
-    slot_list(ui, "Sends", &sends);
+    slot_list(ui, tr("Inserts"), &inserts);
+    slot_list(ui, tr("Sends"), &sends);
     ui.add_space(2.0);
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 2.0;
@@ -552,7 +559,7 @@ pub(crate) fn channel_column(w: &mut ProjectWindow, ui: &mut Ui) {
                 crate::icons::Icon::Record,
                 track.record,
                 Some(t.rec),
-                "Aufnahme bereit",
+                tr("Aufnahme bereit"),
             )
             .clicked()
         {
@@ -564,7 +571,7 @@ pub(crate) fn channel_column(w: &mut ProjectWindow, ui: &mut Ui) {
                 crate::icons::Icon::Play,
                 track.monitor,
                 Some(t.monitor),
-                "Monitor",
+                tr("Monitor"),
             )
             .clicked()
         {
@@ -575,9 +582,9 @@ pub(crate) fn channel_column(w: &mut ProjectWindow, ui: &mut Ui) {
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 2.0;
         crate::icons::state_toggle(ui, &mut track.read, "R", t.monitor)
-            .on_hover_text("Automation lesen");
+            .on_hover_text(tr("Automation lesen"));
         crate::icons::state_toggle(ui, &mut track.write, "W", t.rec)
-            .on_hover_text("Automation schreiben");
+            .on_hover_text(tr("Automation schreiben"));
     });
     let height = ui.available_height().max(160.0);
     let strip = Strip {
@@ -619,7 +626,7 @@ fn slot_list(ui: &mut Ui, title: &str, slots: &[(String, bool)]) {
     let color = crate::theme::tokens(ui.ctx()).text;
     ui.label(RichText::new(title).size(10.0).strong().color(color));
     if slots.is_empty() {
-        ui.weak(RichText::new("leer").size(10.0));
+        ui.weak(RichText::new(tr("leer")).size(10.0));
     }
     for (name, active) in slots {
         let text = RichText::new(name).size(10.0);
@@ -743,10 +750,10 @@ impl Strip<'_> {
                         changed |= crate::icons::state_toggle(
                             ui,
                             m,
-                            "M",
+                            tr("M"),
                             crate::theme::tokens(ui.ctx()).mute,
                         )
-                        .on_hover_text("Mute")
+                        .on_hover_text(tr("Mute"))
                         .changed();
                     }
                     if let Some(s) = self.solo {
@@ -786,7 +793,7 @@ impl Strip<'_> {
                                 crate::icons::Icon::Record,
                                 *r,
                                 Some(t.rec),
-                                "Aufnahme bereit",
+                                tr("Aufnahme bereit"),
                             )
                             .clicked()
                         {
@@ -799,7 +806,7 @@ impl Strip<'_> {
                                 crate::icons::Icon::Play,
                                 *m,
                                 Some(t.monitor),
-                                "Monitor",
+                                tr("Monitor"),
                             )
                             .clicked()
                         {
@@ -875,7 +882,7 @@ fn rack_ui(ui: &mut Ui, rack: Rack, id: usize, width: f32) -> bool {
         ui.set_max_height(RACK_H);
         ui.spacing_mut().item_spacing.y = 1.0;
         let small = |s: &str| RichText::new(s).size(10.0);
-        ui.weak(small("Inserts"));
+        ui.weak(small(tr("Inserts")));
         if rack.inserts.is_empty() {
             ui.weak(small("–"));
         }
@@ -883,10 +890,9 @@ fn rack_ui(ui: &mut Ui, rack: Rack, id: usize, width: f32) -> bool {
             let mut on = !slot.bypass;
             if ui
                 .toggle_value(&mut on, small(&short_name(&slot.name)))
-                .on_hover_text(format!(
-                    "Insert {}: {} – Klick: an/umgehen",
-                    k + 1,
-                    slot.name
+                .on_hover_text(crate::i18n::trf(
+                    "Insert {nr}: {name} – Klick: an/umgehen",
+                    &[("nr", &(k + 1)), ("name", &slot.name)],
                 ))
                 .changed()
             {
@@ -895,10 +901,10 @@ fn rack_ui(ui: &mut Ui, rack: Rack, id: usize, width: f32) -> bool {
             }
         }
         changed |= ui
-            .toggle_value(rack.eq_on, small("EQ"))
-            .on_hover_text("Kanal-EQ an/aus")
+            .toggle_value(rack.eq_on, small(tr("EQ")))
+            .on_hover_text(tr("Kanal-EQ an/aus"))
             .changed();
-        ui.weak(small("Sends"));
+        ui.weak(small(tr("Sends")));
         if rack.sends.is_empty() {
             ui.weak(small("–"));
         }
@@ -907,7 +913,10 @@ fn rack_ui(ui: &mut Ui, rack: Rack, id: usize, width: f32) -> bool {
                 ui.spacing_mut().item_spacing.x = 2.0;
                 let l = ui
                     .toggle_value(&mut s.on, small(&short_name(name)))
-                    .on_hover_text(format!("Send {} an {name}: an/aus", k + 1));
+                    .on_hover_text(crate::i18n::trf(
+                        "Send {nr} an {name}: an/aus",
+                        &[("nr", &(k + 1)), ("name", &name)],
+                    ));
                 changed |= l.changed();
                 changed |= ui
                     .add(
@@ -937,12 +946,12 @@ fn solo_button(ui: &mut Ui, on: bool, defeat: bool) -> Response {
     };
     // Rahmen immer gleich breit (ohne Defeat unsichtbar), damit der Knopf gleich groß bleibt.
     let frame = if defeat { t.solo } else { Color32::TRANSPARENT };
-    let b = egui::Button::new(RichText::new("S").color(text_color))
+    let b = egui::Button::new(RichText::new(tr("S")).color(text_color))
         .fill(if on { t.solo } else { t.button })
         .stroke(Stroke::new(1.5, frame))
         .min_size(vec2(20.0, 18.0));
     ui.add(b)
-        .on_hover_text("Solo – Alt+Klick: exklusiv, Strg+Klick: Solo-Defeat")
+        .on_hover_text(tr("Solo – Alt+Klick: exklusiv, Strg+Klick: Solo-Defeat"))
 }
 
 /// Pegelanzeige eines Faders: Pegel, Peak-Hold und Übersteuerung.
@@ -954,7 +963,7 @@ struct Meter<'a> {
 
 fn pan_control(ui: &mut Ui, id: usize, pan: &mut f32) -> (bool, Response) {
     let (rect, resp) = ui.allocate_exact_size(vec2(STRIP_W - 12.0, 16.0), Sense::click_and_drag());
-    let resp = resp.on_hover_text("Panorama – Strg + Klick: Mitte, Rechtsklick: Pan-Modus");
+    let resp = resp.on_hover_text(tr("Panorama – Strg + Klick: Mitte, Rechtsklick: Pan-Modus"));
     let mut changed = false;
     let command = ui.input(|i| i.modifiers.command);
     if resp.clicked() && command {
@@ -987,7 +996,13 @@ fn pan_control(ui: &mut Ui, id: usize, pan: &mut f32) -> (bool, Response) {
         ui.visuals().text_color(),
     );
     let value = f64::from(*pan);
-    resp.widget_info(|| WidgetInfo::slider(true, value, format!("Panorama Kanal {id}")));
+    resp.widget_info(|| {
+        WidgetInfo::slider(
+            true,
+            value,
+            crate::i18n::trf("Panorama Kanal {id}", &[("id", &id)]),
+        )
+    });
     (changed, resp)
 }
 
@@ -1044,7 +1059,7 @@ fn fader(ui: &mut Ui, name: &str, width: f32, db: &mut f32, meter: Meter, height
         let id = ui.make_persistent_id(("uebersteuerung", name));
         let hit = ui.interact(r.expand(2.0), id, Sense::click());
         hit.widget_info(|| {
-            WidgetInfo::labeled(egui::Role::Button, true, "Übersteuerung zurücksetzen")
+            WidgetInfo::labeled(egui::Role::Button, true, tr("Übersteuerung zurücksetzen"))
         });
         if hit.clicked() {
             *clipped = false;
@@ -1114,9 +1129,9 @@ fn fader(ui: &mut Ui, name: &str, width: f32, db: &mut f32, meter: Meter, height
     );
 
     let value = f64::from(*db);
-    let label = format!("Lautstärke {name}");
+    let label = crate::i18n::trf("Lautstärke {name}", &[("name", &name)]);
     resp.widget_info(|| WidgetInfo::slider(true, value, &label));
-    resp.on_hover_text("Fader – Strg + Klick: 0 dB, Umschalt + Ziehen: fein")
+    resp.on_hover_text(tr("Fader – Strg + Klick: 0 dB, Umschalt + Ziehen: fein"))
 }
 
 #[cfg(test)]

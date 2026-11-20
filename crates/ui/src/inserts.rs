@@ -5,6 +5,7 @@
 //! geänderte Ketten werden neu erzeugt, sonst nur Bypass und Parameter gesendet.
 //! So stimmen Engine und Projekt auch nach Undo und beim Öffnen überein.
 
+use crate::i18n::tr;
 use std::collections::HashMap;
 
 use base64::Engine as _;
@@ -89,11 +90,15 @@ impl ProjectWindow {
             };
             let mut notes = Vec::new();
             if !errors.is_empty() {
-                notes.push(format!("{} Plugin-Datei(en) nicht ladbar", errors.len()));
+                notes.push(crate::i18n::trf(
+                    "{n} Plugin-Datei(en) nicht ladbar",
+                    &[("n", &errors.len())],
+                ));
             }
             if blocked > 0 {
-                notes.push(format!(
-                    "{blocked} Plugin-Datei(en) gesperrt (Absturz beim Scan; Menü Projekt: Plugins neu prüfen)"
+                notes.push(crate::i18n::trf(
+                    "{blocked} Plugin-Datei(en) gesperrt (Absturz beim Scan; Menü Projekt: Plugins neu prüfen)",
+                    &[("blocked", &blocked)],
                 ));
             }
             if !notes.is_empty() {
@@ -109,13 +114,16 @@ impl ProjectWindow {
         if let Some(cache) = crate::settings::config_dir().map(|d| d.join(SCAN_CACHE))
             && let Err(e) = studiocraft_plugin_host::clear_scan_cache(&cache)
         {
-            self.message = Some(format!("Plugin-Cache nicht gelöscht: {e}"));
+            self.message = Some(crate::i18n::trf(
+                "Plugin-Cache nicht gelöscht: {e}",
+                &[("e", &e)],
+            ));
             return;
         }
         self.plugins.list = None;
         let n = self.plugin_list().len();
         if self.message.is_none() {
-            self.message = Some(format!("{n} Plugins gefunden"));
+            self.message = Some(crate::i18n::trf("{n} Plugins gefunden", &[("n", &n)]));
         }
     }
 
@@ -152,16 +160,16 @@ impl ProjectWindow {
     }
 
     pub(crate) fn instantiate(&mut self, slot: &InsertSlot) -> Result<PluginInstance, String> {
-        let info = self
-            .find_plugin(&slot.plugin_id)
-            .ok_or_else(|| format!("{}: nicht installiert", slot.name))?;
+        let info = self.find_plugin(&slot.plugin_id).ok_or_else(|| {
+            crate::i18n::trf("{name}: nicht installiert", &[("name", &slot.name)])
+        })?;
         let mut inst = PluginInstance::new(&info, self.sample_rate, MAX_BLOCK)?;
         if let Some(state) = slot.state.as_deref().and_then(|s| B64.decode(s).ok())
             && !inst.handle().load_state(&state)
         {
-            self.message = Some(format!(
-                "{}: gespeicherter Zustand ließ sich nicht laden",
-                slot.name
+            self.message = Some(crate::i18n::trf(
+                "{name}: gespeicherter Zustand ließ sich nicht laden",
+                &[("name", &slot.name)],
             ));
         }
         for &(id, v) in &slot.params {
@@ -371,7 +379,10 @@ impl ProjectWindow {
             self.dirty = true;
         }
         if !missing.is_empty() {
-            self.message = Some(format!("Plugins: {}", missing.join("; ")));
+            self.message = Some(crate::i18n::trf(
+                "Plugins: {liste}",
+                &[("liste", &missing.join("; "))],
+            ));
         }
     }
 
@@ -385,11 +396,11 @@ impl ProjectWindow {
             .cloned()
             .collect();
         let mut chosen = None;
-        if ui.button("Ohne Instrument").clicked() {
+        if ui.button(tr("Ohne Instrument")).clicked() {
             chosen = Some(None);
         }
         if instruments.is_empty() {
-            ui.weak(none_found("Keine Instrumente installiert"));
+            ui.weak(none_found(tr("Keine Instrumente installiert")));
         }
         ui.separator();
         egui::ScrollArea::vertical()
@@ -432,7 +443,7 @@ impl ProjectWindow {
         let before = self.project.clone();
         let name = info
             .as_ref()
-            .map_or("Instrument".to_owned(), |p| p.name.clone());
+            .map_or(tr("Instrument").to_owned(), |p| p.name.clone());
         let t = self
             .project
             .add_track(studiocraft_project::TrackKind::Instrument, name);
@@ -478,7 +489,7 @@ impl ProjectWindow {
                     let mut on = !slot.bypass;
                     if ui
                         .checkbox(&mut on, slot.name.clone())
-                        .on_hover_text("Ein/Aus")
+                        .on_hover_text(tr("Ein/Aus"))
                         .changed()
                     {
                         let before = self.project.clone();
@@ -489,7 +500,7 @@ impl ProjectWindow {
                     }
                 });
                 self.window_button(ui, track, INSTRUMENT, &slot.name);
-                ui.menu_button("Instrument wechseln", |ui| {
+                ui.menu_button(tr("Instrument wechseln"), |ui| {
                     if let Some(choice) = self.instrument_menu(ui) {
                         self.set_instrument(track, choice);
                     }
@@ -497,7 +508,7 @@ impl ProjectWindow {
                 self.params_ui(ui, track, INSTRUMENT);
             }
             None => {
-                ui.menu_button("Instrument wählen", |ui| {
+                ui.menu_button(tr("Instrument wählen"), |ui| {
                     if let Some(choice) = self.instrument_menu(ui) {
                         self.set_instrument(track, choice);
                     }
@@ -538,8 +549,8 @@ impl ProjectWindow {
         }
         let open = h.gui_open();
         if ui
-            .selectable_label(open, "Fenster")
-            .on_hover_text("Eigenes Fenster des Plugins")
+            .selectable_label(open, tr("Fenster"))
+            .on_hover_text(tr("Eigenes Fenster des Plugins"))
             .clicked()
         {
             if open {
@@ -617,8 +628,8 @@ impl ProjectWindow {
     pub(crate) fn inserts_ui(&mut self, ui: &mut Ui, track: usize) {
         // Eingefroren: Plugins entladen, Inserts gesperrt.
         if self.project.tracks[track].frozen.is_some() {
-            ui.weak("Eingefroren – Plugins entladen");
-            if ui.button("Einfrieren aufheben").clicked() {
+            ui.weak(tr("Eingefroren – Plugins entladen"));
+            if ui.button(tr("Einfrieren aufheben")).clicked() {
                 self.unfreeze_track(track);
             }
             return;
@@ -626,7 +637,13 @@ impl ProjectWindow {
         // Latenz der Spur durch Plugins (Latenzausgleich, Issue #51).
         let lat = self.track_latency(track);
         if lat > 0 {
-            ui.label(egui::RichText::new(format!("Latenz: {}", self.latency_text(lat))).weak());
+            ui.label(
+                egui::RichText::new(crate::i18n::trf(
+                    "Latenz: {zeit}",
+                    &[("zeit", &self.latency_text(lat))],
+                ))
+                .weak(),
+            );
         }
         let count = self.project.tracks[track].inserts.len();
         let pre = usize::from(self.project.pre_fader_inserts);
@@ -634,14 +651,14 @@ impl ProjectWindow {
         for k in 0..count {
             // Grenze Pre/Post-Fader (Projekt-Voreinstellung, Menü Projekt).
             if k == pre {
-                ui.weak("nach dem Fader");
+                ui.weak(tr("nach dem Fader"));
             }
             let slot = self.project.tracks[track].inserts[k].clone();
             ui.horizontal(|ui| {
                 let mut on = !slot.bypass;
                 if ui
                     .checkbox(&mut on, format!("{}", k + 1))
-                    .on_hover_text("Ein/Aus (Bypass)")
+                    .on_hover_text(tr("Ein/Aus (Bypass)"))
                     .changed()
                 {
                     let before = self.project.clone();
@@ -651,8 +668,8 @@ impl ProjectWindow {
                 ui.label(&slot.name);
                 self.window_button(ui, track, k, &slot.name);
                 if ui
-                    .small_button("x")
-                    .on_hover_text("Insert entfernen")
+                    .small_button(tr("x"))
+                    .on_hover_text(tr("Insert entfernen"))
                     .clicked()
                 {
                     remove = Some(k);
@@ -666,7 +683,7 @@ impl ProjectWindow {
             self.checkpoint(before);
         }
         if count < MAX_INSERTS {
-            ui.menu_button("+ Insert hinzufügen", |ui| self.plugin_menu(ui, track));
+            ui.menu_button(tr("+ Insert hinzufügen"), |ui| self.plugin_menu(ui, track));
         }
     }
 
@@ -694,13 +711,13 @@ impl ProjectWindow {
             .cloned()
             .collect();
         if effects.is_empty() {
-            ui.label(none_found("Keine Effekte gefunden"));
+            ui.label(none_found(tr("Keine Effekte gefunden")));
             return;
         }
         let mut by_vendor: Vec<(String, Vec<PluginInfo>)> = Vec::new();
         for p in effects {
             let vendor = if p.vendor.is_empty() {
-                "Ohne Hersteller".to_owned()
+                tr("Ohne Hersteller").to_owned()
             } else {
                 p.vendor.clone()
             };
@@ -781,11 +798,11 @@ impl ProjectWindow {
         let last_id = ui.make_persistent_id(("insert-preset-last", track, k, id.as_str()));
         let last: Option<String> = ui.data(|d| d.get_temp(last_id));
         ui.horizontal(|ui| {
-            let l = ui.label("Preset");
+            let l = ui.label(tr("Preset"));
             let shown = presets
                 .iter()
                 .find(|p| last.as_deref() == Some(p.uri.as_str()))
-                .map_or("wählen …", |p| p.name.as_str());
+                .map_or(tr("wählen …"), |p| p.name.as_str());
             // Viele Presets (Synthesizer bringen tausende mit): Suchfeld, höchstens
             // MAX_SHOWN Treffer im Menü.
             const MAX_SHOWN: usize = 300;
@@ -801,7 +818,7 @@ impl ProjectWindow {
                     let mut n = 0;
                     for p in hits {
                         if n == MAX_SHOWN {
-                            ui.weak("… weitere: Suche verfeinern");
+                            ui.weak(tr("… weitere: Suche verfeinern"));
                             break;
                         }
                         n += 1;
@@ -811,7 +828,7 @@ impl ProjectWindow {
                         }
                     }
                     if n == 0 {
-                        ui.weak("Kein Preset passt");
+                        ui.weak(tr("Kein Preset passt"));
                     }
                 })
                 .response
@@ -820,12 +837,12 @@ impl ProjectWindow {
                 let r = ui
                     .add(
                         egui::TextEdit::singleline(&mut filter)
-                            .hint_text("Suche")
+                            .hint_text(tr("Suche"))
                             .desired_width(110.0),
                     )
-                    .on_hover_text(format!("{} Presets", presets.len()));
+                    .on_hover_text(crate::i18n::trf("{n} Presets", &[("n", &presets.len())]));
                 r.widget_info(|| {
-                    egui::WidgetInfo::labeled(egui::Role::TextInput, true, "Preset-Suche")
+                    egui::WidgetInfo::labeled(egui::Role::TextInput, true, tr("Preset-Suche"))
                 });
                 if r.changed() {
                     ui.data_mut(|d| d.insert_temp(filter_id, filter.clone()));
@@ -862,12 +879,12 @@ impl ProjectWindow {
             Some(h) => h
                 .load_preset(uri)
                 .map(|()| (h.param_values(), h.save_state())),
-            None => Err("Plugin läuft nicht".into()),
+            None => Err(tr("Plugin läuft nicht").into()),
         };
         let (values, state) = match loaded {
             Ok(x) => x,
             Err(e) => {
-                self.message = Some(format!("Preset: {e}"));
+                self.message = Some(crate::i18n::trf("Preset: {e}", &[("e", &e)]));
                 return;
             }
         };
@@ -906,14 +923,14 @@ impl ProjectWindow {
             return;
         };
         self.presets_ui(ui, track, k);
-        egui::CollapsingHeader::new(format!("Parameter ({})", infos.len()))
+        egui::CollapsingHeader::new(crate::i18n::trf("Parameter ({n})", &[("n", &infos.len())]))
             .id_salt(("insert-params", track, k))
             .show(ui, |ui| {
                 // Suchfeld; bei großen Plugins (Sampler: tausende Parameter) unverzichtbar.
                 let filter_id = egui::Id::unique(("param-filter", track, k));
                 let mut filter: String = ui.data(|d| d.get_temp(filter_id)).unwrap_or_default();
                 ui.horizontal(|ui| {
-                    let l = ui.label("Suche");
+                    let l = ui.label(tr("Suche"));
                     if ui
                         .text_edit_singleline(&mut filter)
                         .labelled_by(l.id)
@@ -960,7 +977,7 @@ impl ProjectWindow {
 /// keine Plugins laden; das sagt der Hinweis dort statt `native`.
 fn none_found(native: &str) -> &str {
     if cfg!(target_arch = "wasm32") {
-        "Plugins sind im Browser nicht verfügbar"
+        tr("Plugins sind im Browser nicht verfügbar")
     } else {
         native
     }

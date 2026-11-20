@@ -85,3 +85,179 @@ Wiederholen …	Repeat…
 Zum Anfang	Go to Start
 Zweimal Stopp springt zu	Pressing Stop Twice Goes To
 Öffnen …	Open…
++ Insert hinzufügen	+ Add Insert
++ Mono-Ausgang	+ Mono Output
++ Mono-Eingang	+ Mono Input
++ Parameter	+ Parameter
++ Send hinzufügen	+ Add Send
++ Stereo-Ausgang	+ Stereo Output
++ Stereo-Eingang	+ Stereo Input
+Alle breit	All Wide
+Alle schmal	All Narrow
+Ansicht nicht gespeichert (Name leer oder schon {max} Ansichten)	View not saved (name empty or already {max} views)
+Ansicht „{name}“ entfernen	Remove view “{name}”
+Ansichten	Views
+Art	Type
+Art von {name}	Type of {name}
+Audio-Anschlüsse	Audio Inputs and Outputs
+Aufnahme bereit	Record enable
+Ausdünnen	Thin out
+Ausgang	Output
+Ausgänge	Outputs
+Ausgänge neu einlesen	Rescan Outputs
+Automation lesen	Read automation
+Automation schreiben	Write automation
+Automationsspur stumm	Mute automation lane
+Band ein/aus	Band on/off
+Bus entfernen	Remove bus
+dB	dB
+Der Hauptmix bleibt	The main mix stays
+Eigenes Fenster des Plugins	Plugin's own window
+Ein-/Ausgänge	Inputs/Outputs
+Ein/Aus	On/Off
+Ein/Aus (Bypass)	On/Off (bypass)
+Einfrieren aufheben	Unfreeze
+Eingang	Input
+Eingangskanäle links, Ausgangsbusse rechts	Input channels on the left, output buses on the right
+Eingefroren – Plugins entladen	Frozen – plugins unloaded
+Eingänge	Inputs
+Entfernen	Remove
+EQ	EQ
+EQ an	EQ on
+Fader – Strg + Klick: 0 dB, Umschalt + Ziehen: fein	Fader – Ctrl + click: 0 dB, Shift + drag: fine
+Fenster	Window
+Form	Shape
+Gain	Gain
+Gerät: {in_ch} Eingangs-, {out_ch} Ausgangskanäle	Device: {in_ch} input, {out_ch} output channels
+Hochpass	High-pass
+Hz	Hz
+In der Event-Anzeige zeigen	Show in the event display
+Insert entfernen	Remove insert
+Insert {nr}: {name} – Klick: an/umgehen	Insert {nr}: {name} – click: on/bypass
+Inserts	Inserts
+Inserts, EQ und Sends über den Fadern	Inserts, EQ and sends above the faders
+Instrument	Instrument
+Instrument wechseln	Change Instrument
+Instrument wählen	Choose Instrument
+Kanal	Channel
+Kanal-EQ an/aus	Channel EQ on/off
+Kanalliste	Channel List
+Kanäle	Channels
+Kanäle von {name}	Channels of {name}
+Kein Ausgang	No output
+Kein FX-Kanal oder Gruppe vorhanden (Menü Projekt)	No FX channel or group yet (Project menu)
+Kein Kanal	No channel
+Kein Preset passt	No preset matches
+Keine Effekte gefunden	No effects found
+Keine Instrumente installiert	No instruments installed
+Latenz: {zeit}	Latency: {zeit}
+Lautstärke {name}	Volume {name}
+leer	empty
+Liste aller Kanäle mit Sichtbarkeit	List of all channels with visibility
+M	M
+MIDI-Ausgänge des Systems neu einlesen	Rescan the system's MIDI outputs
+Monitor	Monitor
+Mono	Mono
+Mute	Mute
+nach dem Fader	post-fader
+Name	Name
+Name von {ports}	Name of {ports}
+Nr.	No.
+Ohne Hersteller	No vendor
+Ohne Instrument	No Instrument
+Panorama Kanal {id}	Pan channel {id}
+Panorama – Strg + Klick: Mitte, Rechtsklick: Pan-Modus	Pan – Ctrl + click: center, right-click: pan mode
+Parameter ({n})	Parameters ({n})
+Phase umkehren	Invert phase
+Plugin läuft nicht	Plugin is not running
+Plugin-Cache nicht gelöscht: {e}	Plugin cache not cleared: {e}
+Plugins sind im Browser nicht verfügbar	Plugins are not available in the browser
+Plugins: {liste}	Plugins: {liste}
+Pre	Pre
+Preset	Preset
+Preset-Suche	Preset search
+Preset: {e}	Preset: {e}
+Programm	Program
+Q	Q
+R ist aus: Kurven werden nicht abgespielt.	R is off: curves are not played back.
+Rack	Rack
+S	S
+schmal	narrow
+Send ein/aus	Send on/off
+Send entfernen	Remove send
+Send {nr}	Send {nr}
+Send {nr} an {name}: an/aus	Send {nr} to {name}: on/off
+Sends	Sends
+Solo – Alt+Klick: exklusiv, Strg+Klick: Solo-Defeat	Solo – Alt+click: exclusive, Ctrl+click: solo defeat
+Stereo	Stereo
+Suche	Search
+Summe	Main mix
+Tiefpass	Low-pass
+Vor dem Fader abgreifen	Tap before the fader
+Wie stark geschriebene Punkte beim Stopp ausgedünnt werden	How much written points are thinned out on stop
+wählen …	choose…
+x	x
+Ziel des Sends	Send target
+Zurücksetzen	Reset
+{blocked} Plugin-Datei(en) gesperrt (Absturz beim Scan; Menü Projekt: Plugins neu prüfen)	{blocked} plugin file(s) blocked (crashed while scanning; Project menu: Rescan Plugins)
+{name}: gespeicherter Zustand ließ sich nicht laden	{name}: the saved state could not be loaded
+{name}: nicht installiert	{name}: not installed
+{n} Plugin-Datei(en) nicht ladbar	{n} plugin file(s) could not be loaded
+{n} Plugins gefunden	{n} plugins found
+{n} Presets	{n} presets
+{p} (fehlt)	{p} (missing)
+Übersteuerung zurücksetzen	Reset clip indicator
+„{name}“ schmal anzeigen	Show “{name}” narrow
+… weitere: Suche verfeinern	… more: refine the search
+Audio-Last: Rechenzeit pro Block gegen seine Dauer	Audio load: processing time per block against its length
+Aufnahme (*)	Record (*)
+Auto	Auto
+Automation	Automation
+Automation lesen (alle Kanäle)	Read automation (all channels)
+Automation schreiben aus (alle Kanäle)	Write automation off (all channels)
+Automation schreiben bei W: Touch oder Auto-Latch	Writing automation with W: Touch or Auto-Latch
+Cycle (/)	Loop (/)
+Eingang: {status}	Input: {status}
+Einstellung nicht gespeichert: {e}	Setting not saved: {e}
+Keine Spur ausgewählt	No track selected
+Kommt später	Coming later
+Lanes	Lanes
+Last {pct} %	Load {pct} %
+Last –	Load –
+Linear	Linear
+Linker Locator (Strg+Klick ins Lineal)	Left locator (Ctrl+click in the ruler)
+Marker	Markers
+Metronom (C)	Metronome (C)
+MIDI-Ausgang	MIDI Output
+Mixer	Mixer
+Musikalisch	Musical
+Notizen	Notes
+Pan	Pan
+Pan-Modus	Pan mode
+Punch-In (I)	Punch In (I)
+Punch-Out (O)	Punch Out (O)
+R	R
+Rechter Locator (Alt+Klick ins Lineal)	Right locator (Alt+click in the ruler)
+Routing	Routing
+Sample-Editor	Sample Editor
+Snap an/aus (J)	Snap on/off (J)
+Spur	Track
+Spurfarbe	Track color
+Start (Leertaste)	Start (Space)
+Takt	Time signature
+Tempo	Tempo
+Tempo am Cursor (aus der Tempospur)	Tempo at the cursor (from the tempo track)
+Tempo in BPM (ziehen oder eintippen)	Tempo in BPM (drag or type)
+Tempospur an/aus (aus: festes Tempo)	Tempo track on/off (off: fixed tempo)
+Vorspulen um einen Takt	Forward one bar
+Vorzähler {beats}	Count-in {beats}
+W	W
+Zeit pro Bild der Oberfläche	UI time per frame
+Zeitbasis	Time base
+Ziehen am Rand	Drag the edge
+Zum Anfang (Pos1)	Go to start (Home)
+Zum Anfang (Pos1, Komma)	Go to start (Home, comma)
+Zurückspulen um einen Takt	Back one bar
+{name} · {n} Noten	{name} · {n} notes
+{name}: Event konnte nicht angelegt werden	{name}: the event could not be created
+{n} Events	{n} events

@@ -1,6 +1,7 @@
 //! Dialog „Audio-Anschlüsse“ (F4, Issue #23): Ein- und Ausgangsbusse anlegen, benennen und
 //! auf Hardware-Kanäle legen. Spuren wählen im Inspector Busse statt roher Kanalpaare.
 
+use crate::i18n::tr;
 use egui::Ui;
 use studiocraft_project::{IoBus, MAIN_OUT};
 
@@ -20,9 +21,9 @@ fn bus_table(
         .num_columns(4)
         .striped(true)
         .show(ui, |ui| {
-            ui.strong("Name");
-            ui.strong("Art");
-            ui.strong("Kanäle");
+            ui.strong(tr("Name"));
+            ui.strong(tr("Art"));
+            ui.strong(tr("Kanäle"));
             ui.label("");
             ui.end_row();
             for b in &mut list {
@@ -31,23 +32,24 @@ fn bus_table(
                         .desired_width(140.0)
                         .char_limit(64),
                 );
-                let name_label = format!("Name von {}", b.ports_label());
+                let name_label =
+                    crate::i18n::trf("Name von {ports}", &[("ports", &b.ports_label())]);
                 r.widget_info(|| {
                     egui::WidgetInfo::labeled(egui::Role::TextInput, true, name_label.as_str())
                 });
                 egui::ComboBox::from_id_salt((id, b.id, "art"))
-                    .selected_text(if b.stereo { "Stereo" } else { "Mono" })
+                    .selected_text(if b.stereo { tr("Stereo") } else { tr("Mono") })
                     .width(70.0)
                     .show_ui(ui, |ui| {
-                        ui.selectable_value(&mut b.stereo, true, "Stereo");
-                        ui.selectable_value(&mut b.stereo, false, "Mono");
+                        ui.selectable_value(&mut b.stereo, true, tr("Stereo"));
+                        ui.selectable_value(&mut b.stereo, false, tr("Mono"));
                     })
                     .response
                     .widget_info(|| {
                         egui::WidgetInfo::labeled(
                             egui::Role::ComboBox,
                             true,
-                            format!("Art von {}", b.name),
+                            crate::i18n::trf("Art von {name}", &[("name", &b.name)]),
                         )
                     });
                 let width = if b.stereo { 2 } else { 1 };
@@ -68,16 +70,16 @@ fn bus_table(
                         egui::WidgetInfo::labeled(
                             egui::Role::ComboBox,
                             true,
-                            format!("Kanäle von {}", b.name),
+                            crate::i18n::trf("Kanäle von {name}", &[("name", &b.name)]),
                         )
                     });
                 let removable = !(output && b.id == MAIN_OUT);
                 if ui
-                    .add_enabled(removable, egui::Button::new("Entfernen").small())
+                    .add_enabled(removable, egui::Button::new(tr("Entfernen")).small())
                     .on_hover_text(if removable {
-                        "Bus entfernen"
+                        tr("Bus entfernen")
                     } else {
-                        "Der Hauptmix bleibt"
+                        tr("Der Hauptmix bleibt")
                     })
                     .clicked()
                 {
@@ -104,43 +106,44 @@ impl ProjectWindow {
         let (in_ch, out_ch) = (self.input_channels(), self.output_channels);
         let mut new_io = io.clone();
         let mut removal: Option<(bool, u32)> = None;
-        egui::Window::new("Audio-Anschlüsse")
+        egui::Window::new(tr("Audio-Anschlüsse"))
             .open(&mut open)
             .resizable(false)
             .collapsible(false)
             .show(ctx, |ui| {
-                ui.strong("Eingänge");
+                ui.strong(tr("Eingänge"));
                 let (list, rm) = bus_table(ui, "io-eingang", &io.inputs, in_ch, false);
                 new_io.inputs = list;
                 if let Some(id) = rm {
                     removal = Some((false, id));
                 }
                 ui.horizontal(|ui| {
-                    if ui.button("+ Mono-Eingang").clicked() {
+                    if ui.button(tr("+ Mono-Eingang")).clicked() {
                         new_io.add(false, false);
                     }
-                    if ui.button("+ Stereo-Eingang").clicked() {
+                    if ui.button(tr("+ Stereo-Eingang")).clicked() {
                         new_io.add(false, true);
                     }
                 });
                 ui.separator();
-                ui.strong("Ausgänge");
+                ui.strong(tr("Ausgänge"));
                 let (list, rm) = bus_table(ui, "io-ausgang", &io.outputs, out_ch, true);
                 new_io.outputs = list;
                 if let Some(id) = rm {
                     removal = Some((true, id));
                 }
                 ui.horizontal(|ui| {
-                    if ui.button("+ Mono-Ausgang").clicked() {
+                    if ui.button(tr("+ Mono-Ausgang")).clicked() {
                         new_io.add(true, false);
                     }
-                    if ui.button("+ Stereo-Ausgang").clicked() {
+                    if ui.button(tr("+ Stereo-Ausgang")).clicked() {
                         new_io.add(true, true);
                     }
                 });
                 ui.label(
-                    egui::RichText::new(format!(
-                        "Gerät: {in_ch} Eingangs-, {out_ch} Ausgangskanäle"
+                    egui::RichText::new(crate::i18n::trf(
+                        "Gerät: {in_ch} Eingangs-, {out_ch} Ausgangskanäle",
+                        &[("in_ch", &in_ch), ("out_ch", &out_ch)],
                     ))
                     .weak(),
                 );

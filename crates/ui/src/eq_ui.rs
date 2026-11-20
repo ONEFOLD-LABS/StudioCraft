@@ -1,6 +1,7 @@
 //! Abschnitt „EQ“ im Inspector (Spec „Mixer“ → Signalfluss, Punkt 4; Issue #20): Kurve des
 //! Frequenzgangs und vier Bänder mit Form, Frequenz, Gain und Güte, je ein- und abschaltbar.
 
+use crate::i18n::tr;
 use egui::{Align2, Color32, DragValue, FontId, Sense, Stroke, Ui, pos2, vec2};
 use studiocraft_engine::eq::response_db;
 use studiocraft_project::{BandKind, ChannelEq, EQ_FREQ, EQ_GAIN, EQ_Q};
@@ -87,8 +88,8 @@ impl ProjectWindow {
         };
         let mut eq = track.eq;
         ui.horizontal(|ui| {
-            ui.checkbox(&mut eq.on, "EQ an");
-            if ui.small_button("Zurücksetzen").clicked() {
+            ui.checkbox(&mut eq.on, tr("EQ an"));
+            if ui.small_button(tr("Zurücksetzen")).clicked() {
                 eq = ChannelEq::default();
             }
         });
@@ -96,8 +97,8 @@ impl ProjectWindow {
         for (i, band) in eq.bands.iter_mut().enumerate() {
             ui.horizontal(|ui| {
                 ui.checkbox(&mut band.on, format!("{}", i + 1))
-                    .on_hover_text("Band ein/aus");
-                let l = ui.weak("Form");
+                    .on_hover_text(tr("Band ein/aus"));
+                let l = ui.weak(tr("Form"));
                 egui::ComboBox::from_id_salt(("eq-form", idx, i))
                     .selected_text(band.kind.label())
                     .width(90.0)
@@ -112,7 +113,7 @@ impl ProjectWindow {
             ui.horizontal(|ui| {
                 ui.add_space(22.0);
                 let speed = f64::from(band.freq) * 0.01;
-                let l = ui.weak("Hz");
+                let l = ui.weak(tr("Hz"));
                 ui.add(
                     DragValue::new(&mut band.freq)
                         .range(EQ_FREQ.0..=EQ_FREQ.1)
@@ -120,7 +121,7 @@ impl ProjectWindow {
                         .max_decimals(0),
                 )
                 .labelled_by(l.id);
-                let l = ui.weak("dB");
+                let l = ui.weak(tr("dB"));
                 ui.add_enabled(
                     band.kind.uses_gain(),
                     DragValue::new(&mut band.gain)
@@ -129,7 +130,7 @@ impl ProjectWindow {
                         .max_decimals(1),
                 )
                 .labelled_by(l.id);
-                let l = ui.weak("Q");
+                let l = ui.weak(tr("Q"));
                 ui.add(
                     DragValue::new(&mut band.q)
                         .range(EQ_Q.0..=EQ_Q.1)
