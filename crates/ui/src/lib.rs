@@ -326,7 +326,11 @@ impl ProjectWindow {
         let bar = project.tempo.signature.bar_ticks();
         let sample_rate = transport.as_ref().map_or(48_000, |t| t.sample_rate);
         let prefs = settings::Settings::load();
-        i18n::set_language(prefs.language);
+        // Tests laufen immer auf Deutsch (ihre Texte sind deutsch); gespeicherte Einstellungen
+        // eines anderen Tests dürfen das nicht umstellen.
+        if !cfg!(test) {
+            i18n::set_language(prefs.language);
+        }
         let mut w = Self {
             project,
             transport,
