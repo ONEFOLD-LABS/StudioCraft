@@ -5299,6 +5299,61 @@ mod tests {
     }
 
     #[test]
+    fn sample_editor_finds_hitpoints_slices_and_detects_the_tempo() {
+        // The test clip has a decaying note on every beat at 120 BPM for 8 s.
+        let (mut w, id) = one_event_window();
+        w.project.set_tempo(100.0);
+        w.open_sample_editor(id);
+        w.clear_history();
+        let mut h = window_harness(w);
+        h.run_steps(2);
+        h.get_by_label("Hitpoints erkennen").click();
+        h.run_steps(2);
+        let hits = h.state().sample_editor.hitpoints.clone();
+        assert!((14..=16).contains(&hits.len()), "{hits:?}");
+        for w in hits.windows(2) {
+            let gap = w[1] - w[0];
+            assert!(
+                (23_000..=25_000).contains(&gap),
+                "half a second apart: {gap}"
+            );
+        }
+        // Slice: one event per beat in one undo step.
+        h.get_by_label("In Slices teilen").click();
+        h.run_steps(2);
+        let events = h.state().project.tracks[0].events.len();
+        assert!(events >= 15, "{events}");
+        h.state_mut().undo();
+        assert_eq!(h.state().project.tracks[0].events.len(), 1);
+        // An event that follows the tempo (file at 120 BPM, project at 100): slices land on
+        // the project's beats, one quarter apart.
+        assert!(h.state_mut().project.set_musical(id, Some(120.0)));
+        h.run_steps(1);
+        h.state_mut().slice_at_hitpoints(id);
+        let mut starts: Vec<u64> = h.state().project.tracks[0]
+            .events
+            .iter()
+            .map(|e| e.start.0)
+            .collect();
+        starts.sort_unstable();
+        for w in starts.windows(2) {
+            let gap = w[1] - w[0];
+            assert!(gap.abs_diff(TPQ as u64) <= 20, "a quarter apart: {gap}");
+        }
+        h.state_mut().undo();
+        assert_eq!(h.state().project.tracks[0].events.len(), 1);
+        // Tempo: about 120 BPM, taken over as project tempo.
+        h.get_by_label("Tempo erkennen").click();
+        h.run_steps(2);
+        let bpm = h.state().sample_editor.tempo.flatten().unwrap();
+        assert!((bpm - 120.0).abs() < 1.5, "{bpm}");
+        h.get_by_label("Als Projekttempo").click();
+        h.run_steps(2);
+        let now = h.state().project.tempo.bpm_at(0);
+        assert!((now - bpm).abs() < 0.01, "{now}");
+    }
+
+    #[test]
     fn sample_editor_processes_non_destructively_and_trims_to_the_selection() {
         let (mut w, id) = one_event_window();
         let old_clip = w.project.event(id).and_then(|e| e.clip).unwrap();
@@ -5375,6 +5430,8 @@ mod tests {
                 .unwrap();
             w.open_sample_editor(id);
             w.sample_editor.selection = Some((48_000, 96_000));
+            w.detect_hitpoints(id);
+            w.detect_tempo(id);
         });
     }
 
