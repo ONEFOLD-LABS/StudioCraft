@@ -25,14 +25,14 @@ use crate::{
 // ---------------------------------------------------------------------------
 // Grundtypen.
 
-type Tresult = i32;
-const RESULT_OK: Tresult = 0;
-type Tuid = [u8; 16];
-type Obj = *mut c_void;
+pub(crate) type Tresult = i32;
+pub(crate) const RESULT_OK: Tresult = 0;
+pub(crate) type Tuid = [u8; 16];
+pub(crate) type Obj = *mut c_void;
 
 /// Kennung aus vier 32-Bit-Teilen wie in der Formatbeschreibung. Unter Windows im
 /// COM-Layout (erste drei Felder little-endian), sonst durchgehend big-endian.
-const fn uid(a: u32, b: u32, c: u32, d: u32) -> Tuid {
+pub(crate) const fn uid(a: u32, b: u32, c: u32, d: u32) -> Tuid {
     let (a, b, c, d) = (
         a.to_be_bytes(),
         b.to_be_bytes(),
@@ -120,10 +120,10 @@ fn unhex(s: &str) -> Option<Tuid> {
 // Vtabellen (Reihenfolge der Methoden wie in der Formatbeschreibung).
 
 #[repr(C)]
-struct UnknownVt {
-    query_interface: unsafe extern "system" fn(Obj, *const Tuid, *mut Obj) -> Tresult,
-    add_ref: unsafe extern "system" fn(Obj) -> u32,
-    release: unsafe extern "system" fn(Obj) -> u32,
+pub(crate) struct UnknownVt {
+    pub(crate) query_interface: unsafe extern "system" fn(Obj, *const Tuid, *mut Obj) -> Tresult,
+    pub(crate) add_ref: unsafe extern "system" fn(Obj) -> u32,
+    pub(crate) release: unsafe extern "system" fn(Obj) -> u32,
 }
 
 #[repr(C)]
@@ -246,7 +246,7 @@ struct ParameterInfo {
 }
 
 #[repr(C)]
-struct EditControllerVt {
+pub(crate) struct EditControllerVt {
     base: PluginBaseVt,
     set_component_state: unsafe extern "system" fn(Obj, Obj) -> Tresult,
     set_state: unsafe extern "system" fn(Obj, Obj) -> Tresult,
@@ -260,7 +260,7 @@ struct EditControllerVt {
     get_param_normalized: unsafe extern "system" fn(Obj, u32) -> f64,
     set_param_normalized: unsafe extern "system" fn(Obj, u32, f64) -> Tresult,
     set_component_handler: unsafe extern "system" fn(Obj, Obj) -> Tresult,
-    create_view: unsafe extern "system" fn(Obj, *const c_char) -> Obj,
+    pub(crate) create_view: unsafe extern "system" fn(Obj, *const c_char) -> Obj,
 }
 
 #[repr(C)]
@@ -275,7 +275,7 @@ struct ConnectionPointVt {
 ///
 /// # Safety
 /// `obj` muss ein lebendes Objekt mit einer Vtabelle vom Typ `T` sein.
-unsafe fn vt<'a, T>(obj: Obj) -> &'a T {
+pub(crate) unsafe fn vt<'a, T>(obj: Obj) -> &'a T {
     // SAFETY: laut Vertrag zeigt das erste Feld des Objekts auf die Vtabelle.
     unsafe { &**(obj as *const *const T) }
 }
@@ -284,7 +284,7 @@ unsafe fn vt<'a, T>(obj: Obj) -> &'a T {
 ///
 /// # Safety
 /// `obj` muss ein lebendes Objekt sein.
-unsafe fn query(obj: Obj, iid: &Tuid) -> Option<Obj> {
+pub(crate) unsafe fn query(obj: Obj, iid: &Tuid) -> Option<Obj> {
     let mut out: Obj = ptr::null_mut();
     // SAFETY: laut Vertrag; Ausgabezeiger gültig.
     let r = unsafe { (vt::<UnknownVt>(obj).query_interface)(obj, iid, &mut out) };
@@ -293,7 +293,7 @@ unsafe fn query(obj: Obj, iid: &Tuid) -> Option<Obj> {
 
 /// # Safety
 /// `obj` muss ein lebendes Objekt sein, dessen Referenz wir halten.
-unsafe fn release(obj: Obj) {
+pub(crate) unsafe fn release(obj: Obj) {
     if !obj.is_null() {
         // SAFETY: laut Vertrag.
         unsafe { (vt::<UnknownVt>(obj).release)(obj) };
@@ -304,11 +304,11 @@ unsafe fn release(obj: Obj) {
 // Host-Objekte. Sie gehören dem Host und leben länger als jede Nutzung durch das Plugin;
 // addRef/release zählen deshalb nicht wirklich.
 
-unsafe extern "system" fn host_add_ref(_: Obj) -> u32 {
+pub(crate) unsafe extern "system" fn host_add_ref(_: Obj) -> u32 {
     1
 }
 
-unsafe extern "system" fn host_release(_: Obj) -> u32 {
+pub(crate) unsafe extern "system" fn host_release(_: Obj) -> u32 {
     1
 }
 
@@ -316,7 +316,7 @@ unsafe extern "system" fn host_release(_: Obj) -> u32 {
 ///
 /// # Safety
 /// `iid` und `out` müssen gültig sein (Vertrag von queryInterface).
-unsafe fn host_query(this: Obj, iid: *const Tuid, out: *mut Obj, own: &Tuid) -> Tresult {
+pub(crate) unsafe fn host_query(this: Obj, iid: *const Tuid, out: *mut Obj, own: &Tuid) -> Tresult {
     if iid.is_null() || out.is_null() {
         return -1;
     }
@@ -363,16 +363,374 @@ unsafe extern "system" fn app_get_name(_: Obj, name: *mut [u16; 128]) -> Tresult
 
 unsafe extern "system" fn app_create_instance(
     _: Obj,
-    _: *const Tuid,
-    _: *const Tuid,
+    cid: *const Tuid,
+    iid: *const Tuid,
     out: *mut Obj,
 ) -> Tresult {
-    if !out.is_null() {
-        // SAFETY: Ausgabezeiger laut Vertrag gültig.
-        unsafe { *out = ptr::null_mut() };
+    if out.is_null() {
+        return -1;
+    }
+    // SAFETY: Zeiger laut Vertrag gültig oder null.
+    unsafe {
+        *out = ptr::null_mut();
+        let wants = |id: &Tuid| (!cid.is_null() && *cid == *id) || (!iid.is_null() && *iid == *id);
+        if wants(&IID_MESSAGE) {
+            *out = Message::create();
+            return RESULT_OK;
+        }
+        if wants(&IID_ATTRIBUTE_LIST) {
+            *out = AttrList::create();
+            return RESULT_OK;
+        }
     }
     -1
 }
+
+// Nachrichten zwischen Controller und Komponente (manche Plugins verlangen sie vom Host).
+// Echte Referenzzählung: das Plugin gibt sie frei, wenn es sie nicht mehr braucht.
+
+const IID_MESSAGE: Tuid = uid(0x936F_033B, 0xC6C0_47DB, 0xBB08_82F8, 0x13C1_E613);
+const IID_ATTRIBUTE_LIST: Tuid = uid(0x1E5F_0AEB, 0xCC7F_4533, 0xA254_4011, 0x38AD_5EE4);
+
+#[repr(C)]
+struct MessageVt {
+    unknown: UnknownVt,
+    get_message_id: unsafe extern "system" fn(Obj) -> *const c_char,
+    set_message_id: unsafe extern "system" fn(Obj, *const c_char),
+    get_attributes: unsafe extern "system" fn(Obj) -> Obj,
+}
+
+#[repr(C)]
+struct Message {
+    vt: *const MessageVt,
+    refs: AtomicU32,
+    id: std::ffi::CString,
+    attrs: Obj,
+}
+
+impl Message {
+    fn create() -> Obj {
+        Box::into_raw(Box::new(Self {
+            vt: &MESSAGE_VT,
+            refs: AtomicU32::new(1),
+            id: std::ffi::CString::default(),
+            attrs: AttrList::create(),
+        }))
+        .cast()
+    }
+}
+
+unsafe extern "system" fn msg_query(this: Obj, iid: *const Tuid, out: *mut Obj) -> Tresult {
+    // SAFETY: Aufruf durch das Plugin mit gültigen Zeigern; Treffer zählen als neue Referenz.
+    let r = unsafe { host_query(this, iid, out, &IID_MESSAGE) };
+    if r == RESULT_OK {
+        // SAFETY: `this` ist eine unserer Nachrichten.
+        unsafe { msg_add_ref(this) };
+    }
+    r
+}
+
+unsafe extern "system" fn msg_add_ref(this: Obj) -> u32 {
+    // SAFETY: `this` ist eine unserer Nachrichten.
+    unsafe {
+        (*(this as *const Message))
+            .refs
+            .fetch_add(1, Ordering::AcqRel)
+            + 1
+    }
+}
+
+unsafe extern "system" fn msg_release(this: Obj) -> u32 {
+    // SAFETY: `this` ist eine unserer Nachrichten; bei 0 gibt es keine Nutzer mehr.
+    unsafe {
+        let n = (*(this as *const Message))
+            .refs
+            .fetch_sub(1, Ordering::AcqRel)
+            - 1;
+        if n == 0 {
+            let m = Box::from_raw(this as *mut Message);
+            release(m.attrs);
+        }
+        n
+    }
+}
+
+unsafe extern "system" fn msg_get_id(this: Obj) -> *const c_char {
+    // SAFETY: `this` ist eine unserer Nachrichten; die Kennung lebt mit ihr.
+    unsafe { (*(this as *const Message)).id.as_ptr() }
+}
+
+unsafe extern "system" fn msg_set_id(this: Obj, id: *const c_char) {
+    // SAFETY: wie oben; `id` nullterminiert oder null.
+    unsafe {
+        let m = &mut *(this as *mut Message);
+        m.id = if id.is_null() {
+            std::ffi::CString::default()
+        } else {
+            std::ffi::CStr::from_ptr(id).to_owned()
+        };
+    }
+}
+
+unsafe extern "system" fn msg_attributes(this: Obj) -> Obj {
+    // SAFETY: wie oben. Laut Formatbeschreibung ohne zusätzliche Referenz.
+    unsafe { (*(this as *const Message)).attrs }
+}
+
+static MESSAGE_VT: MessageVt = MessageVt {
+    unknown: UnknownVt {
+        query_interface: msg_query,
+        add_ref: msg_add_ref,
+        release: msg_release,
+    },
+    get_message_id: msg_get_id,
+    set_message_id: msg_set_id,
+    get_attributes: msg_attributes,
+};
+
+#[repr(C)]
+struct AttrListVt {
+    unknown: UnknownVt,
+    set_int: unsafe extern "system" fn(Obj, *const c_char, i64) -> Tresult,
+    get_int: unsafe extern "system" fn(Obj, *const c_char, *mut i64) -> Tresult,
+    set_float: unsafe extern "system" fn(Obj, *const c_char, f64) -> Tresult,
+    get_float: unsafe extern "system" fn(Obj, *const c_char, *mut f64) -> Tresult,
+    set_string: unsafe extern "system" fn(Obj, *const c_char, *const u16) -> Tresult,
+    get_string: unsafe extern "system" fn(Obj, *const c_char, *mut u16, u32) -> Tresult,
+    set_binary: unsafe extern "system" fn(Obj, *const c_char, *const c_void, u32) -> Tresult,
+    get_binary:
+        unsafe extern "system" fn(Obj, *const c_char, *mut *const c_void, *mut u32) -> Tresult,
+}
+
+enum Attr {
+    Int(i64),
+    Float(f64),
+    Str(Vec<u16>),
+    Bin(Vec<u8>),
+}
+
+#[repr(C)]
+struct AttrList {
+    vt: *const AttrListVt,
+    refs: AtomicU32,
+    map: Mutex<HashMap<String, Attr>>,
+}
+
+impl AttrList {
+    fn create() -> Obj {
+        Box::into_raw(Box::new(Self {
+            vt: &ATTR_VT,
+            refs: AtomicU32::new(1),
+            map: Mutex::new(HashMap::new()),
+        }))
+        .cast()
+    }
+}
+
+/// # Safety
+/// `this` muss eine unserer Attributlisten sein, `key` nullterminiert oder null.
+unsafe fn attr_access<R>(
+    this: Obj,
+    key: *const c_char,
+    f: impl FnOnce(&mut HashMap<String, Attr>, String) -> R,
+) -> Option<R> {
+    if this.is_null() || key.is_null() {
+        return None;
+    }
+    // SAFETY: laut Vertrag.
+    let (list, key) = unsafe {
+        (
+            &*(this as *const AttrList),
+            std::ffi::CStr::from_ptr(key).to_string_lossy().into_owned(),
+        )
+    };
+    let mut map = list.map.lock().ok()?;
+    Some(f(&mut map, key))
+}
+
+unsafe extern "system" fn attr_query(this: Obj, iid: *const Tuid, out: *mut Obj) -> Tresult {
+    // SAFETY: Aufruf durch das Plugin mit gültigen Zeigern; Treffer zählen als neue Referenz.
+    let r = unsafe { host_query(this, iid, out, &IID_ATTRIBUTE_LIST) };
+    if r == RESULT_OK {
+        // SAFETY: `this` ist eine unserer Listen.
+        unsafe { attr_add_ref(this) };
+    }
+    r
+}
+
+unsafe extern "system" fn attr_add_ref(this: Obj) -> u32 {
+    // SAFETY: `this` ist eine unserer Listen.
+    unsafe {
+        (*(this as *const AttrList))
+            .refs
+            .fetch_add(1, Ordering::AcqRel)
+            + 1
+    }
+}
+
+unsafe extern "system" fn attr_release(this: Obj) -> u32 {
+    // SAFETY: `this` ist eine unserer Listen; bei 0 gibt es keine Nutzer mehr.
+    unsafe {
+        let n = (*(this as *const AttrList))
+            .refs
+            .fetch_sub(1, Ordering::AcqRel)
+            - 1;
+        if n == 0 {
+            drop(Box::from_raw(this as *mut AttrList));
+        }
+        n
+    }
+}
+
+unsafe extern "system" fn attr_set_int(this: Obj, key: *const c_char, v: i64) -> Tresult {
+    // SAFETY: Aufruf durch das Plugin.
+    unsafe { attr_access(this, key, |m, k| m.insert(k, Attr::Int(v))) }.map_or(-1, |_| RESULT_OK)
+}
+
+unsafe extern "system" fn attr_get_int(this: Obj, key: *const c_char, out: *mut i64) -> Tresult {
+    // SAFETY: Aufruf durch das Plugin; `out` gültig oder null.
+    unsafe {
+        match attr_access(this, key, |m, k| match m.get(&k) {
+            Some(Attr::Int(v)) => Some(*v),
+            _ => None,
+        })
+        .flatten()
+        {
+            Some(v) if !out.is_null() => {
+                *out = v;
+                RESULT_OK
+            }
+            _ => -1,
+        }
+    }
+}
+
+unsafe extern "system" fn attr_set_float(this: Obj, key: *const c_char, v: f64) -> Tresult {
+    // SAFETY: Aufruf durch das Plugin.
+    unsafe { attr_access(this, key, |m, k| m.insert(k, Attr::Float(v))) }.map_or(-1, |_| RESULT_OK)
+}
+
+unsafe extern "system" fn attr_get_float(this: Obj, key: *const c_char, out: *mut f64) -> Tresult {
+    // SAFETY: Aufruf durch das Plugin; `out` gültig oder null.
+    unsafe {
+        match attr_access(this, key, |m, k| match m.get(&k) {
+            Some(Attr::Float(v)) => Some(*v),
+            _ => None,
+        })
+        .flatten()
+        {
+            Some(v) if !out.is_null() => {
+                *out = v;
+                RESULT_OK
+            }
+            _ => -1,
+        }
+    }
+}
+
+unsafe extern "system" fn attr_set_string(this: Obj, key: *const c_char, s: *const u16) -> Tresult {
+    if s.is_null() {
+        return -1;
+    }
+    // SAFETY: `s` ist laut Vertrag nullterminiert; höchstens 64 Ki Zeichen gelesen.
+    let text: Vec<u16> = unsafe {
+        let mut v = Vec::new();
+        let mut i = 0;
+        while i < 65_536 && *s.add(i) != 0 {
+            v.push(*s.add(i));
+            i += 1;
+        }
+        v
+    };
+    // SAFETY: Aufruf durch das Plugin.
+    unsafe { attr_access(this, key, |m, k| m.insert(k, Attr::Str(text))) }.map_or(-1, |_| RESULT_OK)
+}
+
+unsafe extern "system" fn attr_get_string(
+    this: Obj,
+    key: *const c_char,
+    out: *mut u16,
+    size_bytes: u32,
+) -> Tresult {
+    let cap = (size_bytes / 2) as usize;
+    if out.is_null() || cap == 0 {
+        return -1;
+    }
+    // SAFETY: `out` hat laut Vertrag `size_bytes` Bytes Platz.
+    unsafe {
+        attr_access(this, key, |m, k| match m.get(&k) {
+            Some(Attr::Str(t)) => {
+                let n = t.len().min(cap - 1);
+                ptr::copy_nonoverlapping(t.as_ptr(), out, n);
+                *out.add(n) = 0;
+                RESULT_OK
+            }
+            _ => -1,
+        })
+        .unwrap_or(-1)
+    }
+}
+
+unsafe extern "system" fn attr_set_binary(
+    this: Obj,
+    key: *const c_char,
+    data: *const c_void,
+    size: u32,
+) -> Tresult {
+    if (data.is_null() && size > 0) || size as usize > MAX_STATE {
+        return -1;
+    }
+    // SAFETY: `data` hat laut Vertrag `size` Bytes.
+    let bytes = unsafe {
+        if size == 0 {
+            Vec::new()
+        } else {
+            std::slice::from_raw_parts(data.cast::<u8>(), size as usize).to_vec()
+        }
+    };
+    // SAFETY: Aufruf durch das Plugin.
+    unsafe { attr_access(this, key, |m, k| m.insert(k, Attr::Bin(bytes))) }
+        .map_or(-1, |_| RESULT_OK)
+}
+
+unsafe extern "system" fn attr_get_binary(
+    this: Obj,
+    key: *const c_char,
+    data: *mut *const c_void,
+    size: *mut u32,
+) -> Tresult {
+    if data.is_null() || size.is_null() {
+        return -1;
+    }
+    // SAFETY: Ausgabezeiger gültig; der Zeiger zeigt in die Liste und lebt mit ihr.
+    unsafe {
+        attr_access(this, key, |m, k| match m.get(&k) {
+            Some(Attr::Bin(b)) => {
+                *data = b.as_ptr().cast();
+                *size = b.len() as u32;
+                RESULT_OK
+            }
+            _ => -1,
+        })
+        .unwrap_or(-1)
+    }
+}
+
+static ATTR_VT: AttrListVt = AttrListVt {
+    unknown: UnknownVt {
+        query_interface: attr_query,
+        add_ref: attr_add_ref,
+        release: attr_release,
+    },
+    set_int: attr_set_int,
+    get_int: attr_get_int,
+    set_float: attr_set_float,
+    get_float: attr_get_float,
+    set_string: attr_set_string,
+    get_string: attr_get_string,
+    set_binary: attr_set_binary,
+    get_binary: attr_get_binary,
+};
 
 static HOST_APP_VT: HostAppVt = HostAppVt {
     unknown: UnknownVt {
@@ -421,7 +779,17 @@ unsafe extern "system" fn handler_edit(_: Obj, _: u32) -> Tresult {
     RESULT_OK
 }
 
-unsafe extern "system" fn handler_perform(_: Obj, _: u32, _: f64) -> Tresult {
+unsafe extern "system" fn handler_perform(this: Obj, id: u32, value: f64) -> Tresult {
+    if this.is_null() || !value.is_finite() {
+        return -1;
+    }
+    // SAFETY: `this` ist unser ComponentHandler (lebt mit der Instanz).
+    let h = unsafe { &*(this as *const ComponentHandler) };
+    if let Ok(mut e) = h.shared.edits.lock() {
+        // Nur den letzten Wert je Parameter behalten (Ziehen erzeugt viele Schritte).
+        e.retain(|&(i, _)| i != id);
+        e.push((id, value.clamp(0.0, 1.0)));
+    }
     RESULT_OK
 }
 
@@ -1078,6 +1446,8 @@ struct Shared {
     latency: AtomicU32,
     /// 1, wenn das Plugin eine geänderte Latenz gemeldet hat (noch abzuholen).
     latency_dirty: AtomicU32,
+    /// Bearbeitungen im Plugin-Fenster (Id, normierter Wert), noch abzuholen.
+    edits: Mutex<Vec<(u32, f64)>>,
 }
 
 /// Puffer eines Audio-Busses: Kanäle und die Zeigertabelle, auf die das Plugin schaut.
@@ -1107,7 +1477,7 @@ pub struct Vst3Instance {
     pub info: PluginInfo,
     pub params: Vec<ParamInfo>,
     /// Stufen je Parameter (0 = stufenlos); Werte werden in Stufen angezeigt.
-    steps: HashMap<u32, u32>,
+    steps: Arc<HashMap<u32, u32>>,
     ins: Vec<Bus>,
     outs: Vec<Bus>,
     in_bufs: Box<[AudioBusBuffers]>,
@@ -1142,7 +1512,7 @@ impl Vst3Instance {
             connections: None,
             info: info.clone(),
             params: Vec::new(),
-            steps: HashMap::new(),
+            steps: Arc::default(),
             ins: Vec::new(),
             outs: Vec::new(),
             in_bufs: Box::new([]),
@@ -1258,7 +1628,7 @@ impl Vst3Instance {
                     0.0
                 };
                 let scale = if steps > 0 { f64::from(steps) } else { 1.0 };
-                self.steps.insert(p.id, steps);
+                Arc::make_mut(&mut self.steps).insert(p.id, steps);
                 self.params.push(ParamInfo {
                     id: p.id,
                     name: utf16(&p.title),
@@ -1366,6 +1736,9 @@ impl Vst3Instance {
                 ptr::null_mut()
             },
             any_controller: self.controller,
+            steps: self.steps.clone(),
+            gui_supported: OnceLock::new(),
+            gui: None,
         }
     }
 
@@ -1551,6 +1924,16 @@ pub struct Vst3Handle {
     controller: Obj,
     /// Controller überhaupt (eigener oder die Komponente), für setComponentState.
     any_controller: Obj,
+    steps: Arc<HashMap<u32, u32>>,
+    gui_supported: OnceLock<bool>,
+    gui: Option<Box<crate::vst3_gui::Vst3Gui>>,
+}
+
+impl Drop for Vst3Handle {
+    fn drop(&mut self) {
+        // Fenster vor der Instanz schließen (Vertrag: Griff stirbt zuerst).
+        self.close_gui();
+    }
 }
 
 // SAFETY: Zustand und Latenz sind laut Formatbeschreibung Aufrufe aus dem UI-Thread, parallel zur
@@ -1558,6 +1941,90 @@ pub struct Vst3Handle {
 unsafe impl Send for Vst3Handle {}
 
 impl Vst3Handle {
+    /// Ob das Plugin ein Fenster hat, das sich einbetten lässt (einmal geprüft).
+    pub fn has_gui(&self) -> bool {
+        *self.gui_supported.get_or_init(|| {
+            let _main = main_thread_lock();
+            crate::vst3_gui::Vst3Gui::supported(self.any_controller)
+        })
+    }
+
+    pub fn gui_open(&self) -> bool {
+        self.gui.is_some()
+    }
+
+    /// Öffnet das Plugin-Fenster. Nur im Hauptthread; danach Werte mit
+    /// [`Self::set_ui_value`] übergeben.
+    pub fn open_gui(&mut self, title: &str) -> Result<(), String> {
+        if self.gui.is_some() {
+            return Ok(());
+        }
+        if !crate::host::on_main_thread() {
+            return Err("Plugin-Fenster nur im Hauptthread".into());
+        }
+        let _main = main_thread_lock();
+        let gui = crate::vst3_gui::Vst3Gui::open(self.any_controller, title)?;
+        self.gui = Some(Box::new(gui));
+        Ok(())
+    }
+
+    pub fn close_gui(&mut self) {
+        if let Some(g) = self.gui.take() {
+            let _main = main_thread_lock();
+            g.close();
+        }
+    }
+
+    /// Im UI-Takt; `true`, solange das Fenster offen ist.
+    pub fn idle(&mut self) -> bool {
+        let Some(g) = self.gui.as_mut() else {
+            return false;
+        };
+        if g.idle() {
+            return true;
+        }
+        self.close_gui();
+        false
+    }
+
+    /// Bearbeitungen im Plugin-Fenster seit dem letzten Aufruf: (Id, Wert in Anzeige-Einheiten,
+    /// also Stufen bei gestuften Parametern).
+    pub fn take_param_changes(&self) -> Vec<(u32, f64)> {
+        let edits = self
+            .shared
+            .edits
+            .lock()
+            .map(|mut e| std::mem::take(&mut *e))
+            .unwrap_or_default();
+        edits
+            .into_iter()
+            .map(|(id, v)| match self.steps.get(&id) {
+                Some(&s) if s > 0 => (id, (v * f64::from(s)).round()),
+                _ => (id, v),
+            })
+            .collect()
+    }
+
+    /// Parameterwert (Anzeige-Einheiten) an den Controller geben, damit ein offenes Fenster ihn
+    /// zeigt. Hauptthread.
+    pub fn set_ui_value(&self, id: u32, value: f64) {
+        if self.any_controller.is_null() || !value.is_finite() {
+            return;
+        }
+        let v = match self.steps.get(&id) {
+            Some(&s) if s > 0 => value / f64::from(s),
+            _ => value,
+        };
+        // SAFETY: Controller lebt (Vertrag des Griffs); Hauptthread.
+        unsafe {
+            (vt::<EditControllerVt>(self.any_controller).set_param_normalized)(
+                self.any_controller,
+                id,
+                v.clamp(0.0, 1.0),
+            );
+        }
+    }
+
     pub fn latency(&self) -> u32 {
         self.shared.latency.load(Ordering::Acquire)
     }
@@ -1772,6 +2239,115 @@ mod tests {
             "same state after loading"
         );
         assert!(!b.handle().load_state(b"kein Zustand"));
+    }
+
+    #[test]
+    fn host_creates_messages_with_attributes() {
+        let mut m: Obj = ptr::null_mut();
+        // SAFETY: Test ruft die Host-Objekte wie ein Plugin auf.
+        unsafe {
+            assert_eq!(
+                app_create_instance(host_app(), &IID_MESSAGE, &IID_MESSAGE, &mut m),
+                RESULT_OK
+            );
+            let mv = vt::<MessageVt>(m);
+            (mv.set_message_id)(m, c"state".as_ptr());
+            assert_eq!(cstr_of((mv.get_message_id)(m)), "state");
+            let a = (mv.get_attributes)(m);
+            let av = vt::<AttrListVt>(a);
+            assert_eq!((av.set_int)(a, c"n".as_ptr(), 7), RESULT_OK);
+            let mut n = 0i64;
+            assert_eq!((av.get_int)(a, c"n".as_ptr(), &mut n), RESULT_OK);
+            assert_eq!(n, 7);
+            assert_eq!((av.get_float)(a, c"n".as_ptr(), &mut 0.0), -1, "wrong type");
+            let text: Vec<u16> = "Hallo\0".encode_utf16().collect();
+            assert_eq!((av.set_string)(a, c"t".as_ptr(), text.as_ptr()), RESULT_OK);
+            let mut buf = [0u16; 4];
+            assert_eq!(
+                (av.get_string)(a, c"t".as_ptr(), buf.as_mut_ptr(), 8),
+                RESULT_OK
+            );
+            assert_eq!(utf16(&buf), "Hal", "cut to the buffer");
+            let bytes = [1u8, 2, 3];
+            (av.set_binary)(a, c"b".as_ptr(), bytes.as_ptr().cast(), 3);
+            let (mut dp, mut len): (*const c_void, u32) = (ptr::null(), 0);
+            assert_eq!(
+                (av.get_binary)(a, c"b".as_ptr(), &mut dp, &mut len),
+                RESULT_OK
+            );
+            assert_eq!(
+                std::slice::from_raw_parts(dp.cast::<u8>(), len as usize),
+                &bytes
+            );
+            // Zusätzliche Referenz, dann beide freigeben (die Nachricht gibt ihre Liste frei).
+            assert_eq!((vt::<UnknownVt>(m).add_ref)(m), 2);
+            assert_eq!((vt::<UnknownVt>(m).release)(m), 1);
+            assert_eq!((vt::<UnknownVt>(m).release)(m), 0);
+        }
+    }
+
+    fn cstr_of(p: *const c_char) -> String {
+        // SAFETY: Test: nullterminierte Zeichenkette aus einer Nachricht.
+        unsafe { std::ffi::CStr::from_ptr(p) }
+            .to_string_lossy()
+            .into_owned()
+    }
+
+    #[test]
+    fn window_edits_reach_the_host_in_display_units() {
+        let shared = Arc::new(Shared::default());
+        let mut handler = ComponentHandler {
+            vt: &HANDLER_VT,
+            shared: shared.clone(),
+        };
+        let h: Obj = (&mut handler as *mut ComponentHandler).cast();
+        // SAFETY: Test ruft den Handler wie ein Plugin auf.
+        unsafe {
+            handler_perform(h, 1, 0.25);
+            handler_perform(h, 2, 0.5);
+            handler_perform(h, 1, 0.75);
+            assert_eq!(handler_perform(h, 3, f64::NAN), -1);
+        }
+        let handle = Vst3Handle {
+            shared,
+            component: ptr::null_mut(),
+            processor: ptr::null_mut(),
+            controller: ptr::null_mut(),
+            any_controller: ptr::null_mut(),
+            steps: Arc::new(HashMap::from([(2, 4)])),
+            gui_supported: OnceLock::new(),
+            gui: None,
+        };
+        let mut edits = handle.take_param_changes();
+        edits.sort_by_key(|e| e.0);
+        assert_eq!(
+            edits,
+            vec![(1, 0.75), (2, 2.0)],
+            "last value, steps for stepped"
+        );
+        assert!(handle.take_param_changes().is_empty());
+    }
+
+    #[test]
+    fn host_values_reach_the_controller() {
+        let Some(info) = installed().into_iter().find(|p| p.name == "ZamComp") else {
+            return;
+        };
+        let inst = Vst3Instance::new(&info, 48_000, 256);
+        assert!(inst.is_ok());
+        let Ok(inst) = inst else { return };
+        let p = inst.params[0].clone();
+        let h = inst.handle();
+        h.set_ui_value(p.id, p.max);
+        // SAFETY: Controller lebt; Abruf im Hauptthread (Test).
+        let v = unsafe {
+            (vt::<EditControllerVt>(h.any_controller).get_param_normalized)(h.any_controller, p.id)
+        };
+        assert!(
+            (v - 1.0).abs() < 1e-6,
+            "controller shows the host value: {v}"
+        );
+        assert!(h.has_gui(), "ZamComp has an embeddable editor");
     }
 
     #[test]
