@@ -1,29 +1,27 @@
 # StudioCraft-App-Icon
 
-**Welle:** eine Audio-Wellenform aus isometrischen Blöcken, die um eine Mittellinie schwingt. Jeder
-Block hat drei sichtbare Flächen (oben, links, rechts), jede mit einem Zwei-Farb-Verlauf aus der
-Weinrot-Rampe; die Fugen zwischen den Flächen sind offen (transparent). Kein Hintergrund und keine
-Kachel, das Zeichen steht frei.
+**Ausklang:** eine Scheibe im Weinrot-Verlauf, aus der eine ausklingende Welle ausgespart ist –
+ein angeschlagener Ton, der kurz ansteigt und dann in immer kleineren Schwingungen verklingt. Die
+Welle ist ein echtes Loch in der Scheibe (berechnete Geometrie, keine SVG-Maske), der Hintergrund
+scheint durch. Kein weiterer Hintergrund und keine Kachel.
 
-Das Prinzip (isometrischer Körper, Flächenverläufe, offene Fugen) folgt SolidCraft. Die Form ist
-eigenständig gezeichnet; SolidCraft-Marke und -Icon stehen unter deren Brand-Lizenz und wurden weder
-nachgezeichnet noch verwendet.
+Dasselbe Zeichen zeichnet die App in ihrer eigenen Titelleiste (Vektor, `crates/ui/src/icons.rs`,
+`app_mark`).
 
 ## Farben
 
-| Fläche | Von | Nach |
+| Verlauf | Von (oben links) | Nach (unten rechts) |
 |---|---|---|
-| Oben | `#d9587a` | `#b8324f` |
-| Links | `#b52e50` | `#8e1f3c` |
-| Rechts | `#8a1f3a` | `#5c1126` |
+| Scheibe | `#d9587a` | `#8e1f3c` |
 
 App-Farbe (Akzent im UI, siehe `crates/ui/src/theme.rs`): Weinrot `#9e2343`.
 
 ## Geometrie
 
-512 × 512 viewBox, transparenter Hintergrund. `icon.svg` hat fünf Blöcke und 11 px Fugen und gilt ab
-48 px; `icon-small.svg` hat drei Blöcke und 30 px Fugen, damit das Zeichen bei 16–32 px nicht
-zuläuft. Die macOS-Dateien setzen das Zeichen auf Apples Raster (824/1024 Körper, Rand transparent).
+512 × 512 viewBox, transparenter Hintergrund, Scheibe mit Radius 226. `icon.svg` hat 2,5
+Schwingungen und eine 30 px breite Aussparung und gilt ab 48 px; `icon-small.svg` hat 1,8
+Schwingungen und 44 px, damit die Welle bei 16–32 px offen bleibt. Die macOS-Dateien setzen das
+Zeichen auf Apples Raster (824/1024 Körper, Rand transparent).
 
 ## Herkunft und Lizenz
 
