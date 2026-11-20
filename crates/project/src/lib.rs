@@ -35,6 +35,7 @@ pub mod sanitize;
 pub mod shapes;
 pub mod smf;
 pub mod time;
+pub mod warp;
 
 pub use automation::{AutoParam, AutoPoint, AutomationLane};
 pub use click::{CLICK_DB, ClickSettings, ClickSound, MAX_PRECOUNT_BARS};
@@ -57,3 +58,4 @@ pub use shapes::DrawShape;
 pub use time::{
     BPM_RANGE, Position, SignatureEvent, TICKS_PER_QUARTER, TempoEvent, TempoMap, TimeSignature,
 };
+pub use warp::{ContentMap, WarpPoint};

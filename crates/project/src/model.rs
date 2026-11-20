@@ -101,6 +101,10 @@ pub struct Event {
     /// Art des Time-Stretch für solche Events (Korngröße: Klangcharakter gegen Rechenzeit).
     #[serde(default, skip_serializing_if = "StretchMode::is_standard")]
     pub stretch_mode: StretchMode,
+    /// Warp-Marker solcher Events (siehe `warp.rs`): Stellen im Clip, die auf eine
+    /// musikalische Stelle gehören.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub warp: Vec<crate::WarpPoint>,
 }
 
 /// Art des Time-Stretch eines Audio-Events, das dem Tempo folgt.
@@ -1055,6 +1059,7 @@ impl Project {
                         shared: None,
                         musical: None,
                         stretch_mode: StretchMode::Standard,
+                        warp: Vec::new(),
                         gain_db: 0.0,
                         fade_in_curve: FadeCurve::Linear,
                         fade_out_curve: FadeCurve::Linear,
@@ -1122,8 +1127,11 @@ impl Project {
         let mut right = ev.clone();
         right.id = new_id;
         if let Some(c) = ev.clip.and_then(|c| self.pool.get(c as usize)) {
-            right.offset =
-                ev.offset + content_frames(&self.tempo, ev.musical, at - ev.start.0, c.sample_rate);
+            right.offset = ev.shifted_offset(
+                &self.tempo,
+                c.sample_rate,
+                i64::try_from(at - ev.start.0).unwrap_or(i64::MAX),
+            );
         }
         right.start = Position(at);
         right.length = ev.end() - at;
@@ -1268,6 +1276,7 @@ impl Project {
                 shared: None,
                 musical: None,
                 stretch_mode: StretchMode::Standard,
+                warp: Vec::new(),
                 gain_db: 0.0,
                 fade_in_curve: FadeCurve::Linear,
                 fade_out_curve: FadeCurve::Linear,
@@ -1280,8 +1289,8 @@ impl Project {
     /// insgesamt reichen darf, in Ticks: begrenzt durch den Clip.
     fn clip_bounds(&self, ev: &Event) -> Option<(u64, u64)> {
         let c = self.pool.get(ev.clip? as usize)?;
-        let before = content_ticks(&self.tempo, ev.musical, ev.offset, c.sample_rate);
-        let total = content_ticks(&self.tempo, ev.musical, c.frames, c.sample_rate);
+        let before = ev.content_span_ticks(&self.tempo, c.sample_rate, 0, ev.offset);
+        let total = ev.content_span_ticks(&self.tempo, c.sample_rate, 0, c.frames);
         Some((before, total))
     }
 
@@ -1451,14 +1460,8 @@ impl Project {
             return false;
         };
         if let Some(rate) = rate {
-            let m = ev.musical;
-            if start >= old_start {
-                ev.offset += content_frames(&tempo, m, start - old_start, rate);
-            } else {
-                ev.offset =
-                    ev.offset
-                        .saturating_sub(content_frames(&tempo, m, old_start - start, rate));
-            }
+            let delta = start as i64 - old_start as i64;
+            ev.offset = ev.shifted_offset(&tempo, rate, delta);
         }
         // Noten und Controller bleiben an ihrer Stelle im Projekt.
         let shift = start as i64 - ev.start.0 as i64;
@@ -1520,14 +1523,8 @@ impl Project {
             return false;
         };
         if let Some(rate) = rate {
-            let m = ev.musical;
-            if end >= old_end {
-                ev.offset =
-                    ev.offset
-                        .saturating_sub(content_frames(&tempo, m, end - old_end, rate));
-            } else {
-                ev.offset += content_frames(&tempo, m, old_end - end, rate);
-            }
+            let delta = old_end as i64 - end as i64;
+            ev.offset = ev.shifted_offset(&tempo, rate, delta);
         }
         let shift = end as i64 - old_end as i64;
         for n in &mut ev.notes {
@@ -1686,6 +1683,7 @@ impl Project {
                 shared: None,
                 musical: None,
                 stretch_mode: StretchMode::Standard,
+                warp: Vec::new(),
                 gain_db: 0.0,
                 fade_in_curve: FadeCurve::Linear,
                 fade_out_curve: FadeCurve::Linear,
@@ -1710,8 +1708,17 @@ impl Project {
             return false;
         };
         let rate = c.sample_rate;
-        let frames = content_frames(&self.tempo, ev.musical, ev.length, rate);
-        let length = content_ticks(&self.tempo, bpm, frames, rate).max(1);
+        // Hörbarer Ausschnitt des Clips bleibt: seine Länge in Ticks nach der neuen Abbildung.
+        let end = ev.shifted_offset(
+            &self.tempo,
+            rate,
+            i64::try_from(ev.length).unwrap_or(i64::MAX),
+        );
+        let mut changed = ev.clone();
+        changed.musical = bpm;
+        let length = changed
+            .content_span_ticks(&self.tempo, rate, ev.offset, end)
+            .max(1);
         let Some(ev) = self.event_mut(id) else {
             return false;
         };
@@ -1777,6 +1784,7 @@ impl Project {
             shared: None,
             musical: None,
             stretch_mode: StretchMode::Standard,
+            warp: Vec::new(),
             gain_db: 0.0,
             fade_in_curve: FadeCurve::Linear,
             fade_out_curve: FadeCurve::Linear,
@@ -1818,7 +1826,13 @@ impl Project {
             let seamless = a.clip == b.clip
                 && b.start.0 == a.end()
                 && a.musical == b.musical
-                && b.offset == a.offset + content_frames(&self.tempo, a.musical, a.length, rate);
+                && a.warp == b.warp
+                && b.offset
+                    == a.shifted_offset(
+                        &self.tempo,
+                        rate,
+                        i64::try_from(a.length).unwrap_or(i64::MAX),
+                    );
             if !seamless {
                 return Err("Audio lässt sich nur kleben, wenn das Material direkt anschließt");
             }

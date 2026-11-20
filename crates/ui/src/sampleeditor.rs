@@ -39,6 +39,8 @@ pub(crate) struct SampleEditor {
     pub sensitivity: f32,
     /// Erkanntes Tempo in BPM (`Some(None)`: kein Puls gefunden).
     pub tempo: Option<Option<f64>>,
+    /// Gezogener Warp-Marker (Index im Event).
+    warp_drag: Option<usize>,
 }
 
 impl Default for SampleEditor {
@@ -54,6 +56,7 @@ impl Default for SampleEditor {
             hit_clip: None,
             sensitivity: 0.5,
             tempo: None,
+            warp_drag: None,
         }
     }
 }
@@ -100,19 +103,15 @@ impl ProjectWindow {
     fn event_frames(&self, id: EventId) -> Option<(u64, u64)> {
         let ev = self.project.event(id)?;
         let rate = self.project.pool.get(ev.clip? as usize)?.sample_rate;
-        // Folgt das Event dem Tempo, zählt das Tempo der Datei.
-        let len = match ev.musical {
-            Some(_) => studiocraft_project::content_frames(
-                &self.project.tempo,
-                ev.musical,
-                ev.length,
-                rate,
-            ),
-            None => self
-                .project
-                .tempo
-                .duration_frames(ev.start.0, ev.length, rate),
-        };
+        // Folgt das Event dem Tempo, zählt seine Abbildung (Tempo der Datei, Warp-Marker).
+        if ev.musical.is_some() {
+            let len = i64::try_from(ev.length).unwrap_or(i64::MAX);
+            return Some((ev.offset, ev.shifted_offset(&self.project.tempo, rate, len)));
+        }
+        let len = self
+            .project
+            .tempo
+            .duration_frames(ev.start.0, ev.length, rate);
         Some((ev.offset, ev.offset.saturating_add(len)))
     }
 
@@ -189,13 +188,13 @@ impl ProjectWindow {
         let ev = self.project.event(id)?;
         let rate = self.project.pool.get(ev.clip? as usize)?.sample_rate;
         let tempo = &self.project.tempo;
-        // Folgt das Event dem Tempo, gilt das Tempo der Datei ab dem Event-Anfang.
-        if ev.musical.is_some() {
-            let ticks = |d: u64| studiocraft_project::content_ticks(tempo, ev.musical, d, rate);
-            return Some(if f >= ev.offset {
-                ev.start.0.saturating_add(ticks(f - ev.offset))
+        // Folgt das Event dem Tempo, gilt seine Abbildung ab dem Event-Anfang.
+        if let Some(m) = ev.content_map(rate) {
+            let t = ev.start.0 as f64 + m.tick_at(f as f64) - m.tick_at(ev.offset as f64);
+            return Some(if t.is_finite() && t > 0.0 {
+                t.round() as u64
             } else {
-                ev.start.0.saturating_sub(ticks(ev.offset - f))
+                0
             });
         }
         // Über die Zeitachse in Frames, damit Tempowechsel stimmen.
@@ -264,6 +263,19 @@ impl ProjectWindow {
         slices
     }
 
+    /// Setzt an jedem Hitpoint im Event einen Warp-Marker (ein Rückgängig-Schritt): jeder
+    /// Anschlag rückt auf die nächste Sechzehntel. Gibt die Zahl der neuen Marker zurück.
+    pub(crate) fn warp_at_hitpoints(&mut self, id: EventId) -> usize {
+        let hits = self.hitpoints_in_event(id);
+        let before = self.project.clone();
+        let added = hits
+            .into_iter()
+            .filter(|&h| self.project.add_warp(id, h).is_some())
+            .count();
+        self.checkpoint(before);
+        added
+    }
+
     /// Schätzt das Tempo der Auswahl bzw. des vom Event genutzten Teils.
     pub(crate) fn detect_tempo(&mut self, id: EventId) {
         let range = self.target_range(id);
@@ -326,6 +338,10 @@ pub(crate) fn show(w: &mut ProjectWindow, ui: &mut Ui) {
     let mut slice = false;
     let mut find_tempo = false;
     let mut use_tempo: Option<f64> = None;
+    let (mut warp_hits, mut warp_clear) = (false, false);
+    let mut warp_add: Option<u64> = None;
+    let mut warp_move: Option<(usize, u64)> = None;
+    let mut warp_remove: Option<usize> = None;
     let mut play = false;
     let mut stop = false;
     ui.horizontal_wrapped(|ui| {
@@ -435,11 +451,44 @@ pub(crate) fn show(w: &mut ProjectWindow, ui: &mut Ui) {
             }
             None => {}
         }
+        // Warp-Marker (nur für Audio, das dem Tempo folgt; Issue #55).
+        let warps = w.project.event(id).map_or(0, |e| e.warp.len());
+        if w.project.event(id).is_some_and(|e| e.musical.is_some()) {
+            ui.separator();
+            if ui
+                .add_enabled(in_event > 0, egui::Button::new(tr("Warp an Hitpoints")))
+                .on_hover_text(tr("Jeder Anschlag rückt auf die nächste Sechzehntel"))
+                .clicked()
+            {
+                warp_hits = true;
+            }
+            if ui
+                .add_enabled(warps > 0, egui::Button::new(tr("Warp löschen")))
+                .clicked()
+            {
+                warp_clear = true;
+            }
+            ui.weak(crate::i18n::trf("{n} Warp-Marker", &[("n", &warps)]))
+                .on_hover_text(tr(
+                    "Doppelklick in die Markerleiste setzt einen Marker, Ziehen verschiebt ihn, Rechtsklick löscht ihn",
+                ));
+        }
     });
     let (rect, resp) = ui.allocate_exact_size(
         vec2(ui.available_width(), ui.available_height().max(80.0)),
         Sense::click_and_drag(),
     );
+    // Markerleiste oben, nur für Audio, das dem Tempo folgt.
+    let warps: Vec<u64> = w
+        .project
+        .event(id)
+        .filter(|e| e.musical.is_some())
+        .map(|e| e.warp.iter().map(|p| p.frame).collect())
+        .unwrap_or_default();
+    let musical = w.project.event(id).is_some_and(|e| e.musical.is_some());
+    let strip = musical
+        .then(|| Rect::from_min_max(rect.min, egui::pos2(rect.right(), rect.top() + WARP_H)));
+    let in_strip = |p: egui::Pos2| strip.is_some_and(|s| s.contains(p));
     let ed = &mut w.sample_editor;
     if ed.per_px <= 0.0 {
         ed.per_px = (total / f64::from(rect.width().max(1.0))).max(0.01);
@@ -471,22 +520,58 @@ pub(crate) fn show(w: &mut ProjectWindow, ui: &mut Ui) {
     let frame_at = |x: f32, ed: &SampleEditor| -> u64 {
         (ed.scroll + f64::from(x - rect.left()) * ed.per_px).clamp(0.0, total) as u64
     };
+    // Marker unter der Maus (in der Leiste, höchstens 6 Pixel daneben).
+    let marker_at = |p: egui::Pos2, ed: &SampleEditor| -> Option<usize> {
+        if !in_strip(p) {
+            return None;
+        }
+        warps
+            .iter()
+            .enumerate()
+            .map(|(i, &f)| {
+                (
+                    i,
+                    (rect.left() + ((f as f64 - ed.scroll) / ed.per_px) as f32 - p.x).abs(),
+                )
+            })
+            .filter(|(_, d)| *d <= 6.0)
+            .min_by(|a, b| a.1.total_cmp(&b.1))
+            .map(|(i, _)| i)
+    };
     if resp.drag_started()
         && let Some(p) = resp.interact_pointer_pos()
     {
-        ed.drag_from = Some(frame_at(p.x, ed));
+        ed.warp_drag = marker_at(p, ed);
+        if ed.warp_drag.is_none() {
+            ed.drag_from = Some(frame_at(p.x, ed));
+        }
     }
     if resp.dragged()
-        && let (Some(from), Some(p)) = (ed.drag_from, resp.interact_pointer_pos())
+        && let Some(p) = resp.interact_pointer_pos()
     {
-        let to = frame_at(p.x, ed);
-        ed.selection = Some((from.min(to), from.max(to)));
+        if let Some(i) = ed.warp_drag {
+            warp_move = Some((i, frame_at(p.x, ed)));
+        } else if let Some(from) = ed.drag_from {
+            let to = frame_at(p.x, ed);
+            ed.selection = Some((from.min(to), from.max(to)));
+        }
     }
     if resp.drag_stopped() {
         ed.drag_from = None;
+        ed.warp_drag = None;
     }
-    if resp.clicked() {
+    let pointer = resp.interact_pointer_pos();
+    if resp.double_clicked()
+        && let Some(p) = pointer.filter(|p| in_strip(*p))
+    {
+        warp_add = Some(frame_at(p.x, ed));
+    } else if resp.clicked() && !pointer.is_some_and(in_strip) {
         ed.selection = None;
+    }
+    if resp.secondary_clicked()
+        && let Some(p) = pointer
+    {
+        warp_remove = marker_at(p, ed);
     }
     paint(w, ui, rect, id, clip_id);
     if play {
@@ -506,6 +591,28 @@ pub(crate) fn show(w: &mut ProjectWindow, ui: &mut Ui) {
     }
     if find_tempo {
         w.detect_tempo(id);
+    }
+    if warp_hits {
+        w.warp_at_hitpoints(id);
+    }
+    if warp_clear || warp_add.is_some() || warp_remove.is_some() {
+        let before = w.project.clone();
+        if warp_clear && let Some(ev) = w.project.event_mut(id) {
+            ev.warp.clear();
+        }
+        if let Some(f) = warp_add {
+            w.project.add_warp(id, f);
+        }
+        if let Some(i) = warp_remove {
+            w.project.remove_warp(id, i);
+        }
+        w.checkpoint(before);
+    }
+    // Ziehen ist ein Schritt über das Panel-Undo der unteren Zone.
+    if let Some((i, f)) = warp_move
+        && w.project.move_warp(id, i, f)
+    {
+        w.dirty = true;
     }
     if let Some(bpm) = use_tempo {
         let before = w.project.clone();
@@ -559,6 +666,7 @@ fn paint(w: &ProjectWindow, ui: &Ui, rect: Rect, id: EventId, clip_id: u32) {
             }
         }
     }
+    paint_warp(w, &p, rect, id, &x_of);
     let mid = rect.center().y;
     let half = rect.height() * 0.45;
     p.hline(rect.x_range(), mid, Stroke::new(1.0, t.lane_alt));
@@ -574,5 +682,62 @@ fn paint(w: &ProjectWindow, ui: &Ui, rect: Rect, id: EventId, clip_id: u32) {
             );
             x += 1.0;
         }
+    }
+}
+
+/// Höhe der Leiste mit den Warp-Markern.
+const WARP_H: f32 = 16.0;
+
+/// Warp-Marker: Leiste oben, je Marker ein Dreieck mit Linie und der Taktposition.
+fn paint_warp(
+    w: &ProjectWindow,
+    p: &egui::Painter,
+    rect: Rect,
+    id: EventId,
+    x_of: &dyn Fn(u64) -> f32,
+) {
+    let Some(ev) = w.project.event(id).filter(|e| e.musical.is_some()) else {
+        return;
+    };
+    let t = crate::theme::tokens(p.ctx());
+    let strip = Rect::from_min_max(rect.min, egui::pos2(rect.right(), rect.top() + WARP_H));
+    p.rect_filled(strip, 0.0, t.lane_alt);
+    let rate = ev
+        .clip
+        .and_then(|c| w.project.pool.get(c as usize))
+        .map_or(48_000, |c| c.sample_rate);
+    let Some(m) = ev.content_map(rate) else {
+        return;
+    };
+    let origin = m.tick_at(ev.offset as f64) - ev.start.0 as f64;
+    let font = egui::FontId::proportional(10.0);
+    for wp in &ev.warp {
+        let x = x_of(wp.frame);
+        if !rect.x_range().contains(x) {
+            continue;
+        }
+        p.vline(x, rect.y_range(), Stroke::new(1.0, t.accent));
+        let tip = egui::pos2(x, strip.bottom());
+        p.add(egui::Shape::convex_polygon(
+            vec![
+                egui::pos2(x - 5.0, strip.top() + 2.0),
+                egui::pos2(x + 5.0, strip.top() + 2.0),
+                tip,
+            ],
+            t.accent,
+            Stroke::NONE,
+        ));
+        let at = (wp.tick as f64 - origin).max(0.0) as u64;
+        let label = w
+            .project
+            .tempo
+            .format_position(studiocraft_project::Position(at));
+        p.text(
+            egui::pos2(x + 7.0, strip.center().y),
+            egui::Align2::LEFT_CENTER,
+            label,
+            font.clone(),
+            t.text,
+        );
     }
 }
