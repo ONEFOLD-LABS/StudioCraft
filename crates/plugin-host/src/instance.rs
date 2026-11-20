@@ -214,7 +214,7 @@ impl PluginHandle {
             Self::Clap(h) => h.has_gui(),
             Self::Lv2(h) => h.has_gui(),
             Self::Vst3(h) => h.has_gui(),
-            Self::Au(_) => false,
+            Self::Au(h) => h.has_gui(),
         }
     }
 
@@ -223,7 +223,7 @@ impl PluginHandle {
             Self::Clap(h) => h.gui_open(),
             Self::Lv2(h) => h.gui_open(),
             Self::Vst3(h) => h.gui_open(),
-            Self::Au(_) => false,
+            Self::Au(h) => h.gui_open(),
         }
     }
 
@@ -242,7 +242,7 @@ impl PluginHandle {
             Self::Clap(h) => h.open_gui(title),
             Self::Lv2(h) => h.open_gui(title),
             Self::Vst3(h) => h.open_gui(title),
-            Self::Au(_) => Err("Audio-Unit-Fenster folgen".into()),
+            Self::Au(h) => h.open_gui(title),
         }
     }
 
@@ -251,7 +251,7 @@ impl PluginHandle {
             Self::Clap(h) => h.close_gui(),
             Self::Lv2(h) => h.close_gui(),
             Self::Vst3(h) => h.close_gui(),
-            Self::Au(_) => {}
+            Self::Au(h) => h.close_gui(),
         }
     }
 
@@ -261,7 +261,7 @@ impl PluginHandle {
             Self::Clap(h) => h.idle(),
             Self::Lv2(h) => h.idle(),
             Self::Vst3(h) => h.idle(),
-            Self::Au(_) => false,
+            Self::Au(h) => h.idle(),
         }
     }
 

@@ -36,8 +36,10 @@ objc2-app-kit = { version = "0.3", default-features = false, features = [
 ] }
 objc2-foundation = { version = "0.3", default-features = false, features = [
     "std",
+    "NSBundle",
     "NSGeometry",
     "NSString",
+    "NSURL",
 ] }
 
 [[test]]
@@ -50,4 +52,8 @@ harness = false
 
 [[test]]
 name = "scan_child"
+harness = false
+
+[[test]]
+name = "au_window_main_thread"
 harness = false
