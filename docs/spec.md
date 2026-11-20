@@ -122,7 +122,7 @@ Genau ein Werkzeug ist aktiv; es gilt in der Event-Anzeige und in den Editoren. 
 | 7 | Stummschalten | Event stumm/laut | über Events streichen | – |
 | 8 | Zeichnen | leeren Part oder Note anlegen | Länge aufziehen | – |
 | 9 | Wiedergabe | Event ab Position anhören | Scrubben | – |
-| 0 | Zeitkorrektur | – | Taktposition an Audio-Position ziehen (Tempo-Map anpassen) | später |
+| 0 | Zeitkorrektur | – | Eine Stelle packen (z. B. einen Schlag im Audio) und auf eine Zählzeit ziehen: die Tempo-Map passt sich seit dem letzten Tempowechsel an, Audio auf linearen Spuren behält seine Zeit | Alt: ohne Snap |
 
 **Varianten pro Werkzeug:** Objektauswahl hat drei Modi für das Ziehen am Rand: normal (Länge), Inhalt mitziehen (Time-Stretch) und Größe mit Verschieben des Inhalts. Der Modus wird über ein Untermenü am Werkzeugknopf gewählt.
 
