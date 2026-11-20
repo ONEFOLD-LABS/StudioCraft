@@ -6,7 +6,7 @@
 # AppImage, deb and rpm. The binaries link glibc, libasound and libpipewire-0.3 and load X11,
 # Wayland, xkbcommon and Vulkan/GL at run time; the freedesktop runtime has all of them, the GPU
 # driver comes from its GL extension. Layout adapted from SoundCraft (Apache-2.0), see NOTICE.
-id: io.github.xxcrusaderxx.studiocraft
+id: io.github.onefold_labs.studiocraft
 runtime: org.freedesktop.Platform
 runtime-version: '25.08'
 sdk: org.freedesktop.Sdk
@@ -55,10 +55,10 @@ modules:
     build-commands:
       - install -Dm755 bin/studiocraft /app/bin/studiocraft
       - install -Dm755 bin/studiocraft-cli /app/bin/studiocraft-cli
-      - install -Dm644 share/applications/io.github.xxcrusaderxx.studiocraft.desktop /app/share/applications/io.github.xxcrusaderxx.studiocraft.desktop
-      - install -Dm644 share/mime/packages/io.github.xxcrusaderxx.studiocraft.xml /app/share/mime/packages/io.github.xxcrusaderxx.studiocraft.xml
+      - install -Dm644 share/applications/io.github.onefold_labs.studiocraft.desktop /app/share/applications/io.github.onefold_labs.studiocraft.desktop
+      - install -Dm644 share/mime/packages/io.github.onefold_labs.studiocraft.xml /app/share/mime/packages/io.github.onefold_labs.studiocraft.xml
       # package.sh has already substituted version and date.
-      - install -Dm644 share/metainfo/io.github.xxcrusaderxx.studiocraft.metainfo.xml /app/share/metainfo/io.github.xxcrusaderxx.studiocraft.metainfo.xml
+      - install -Dm644 share/metainfo/io.github.onefold_labs.studiocraft.metainfo.xml /app/share/metainfo/io.github.onefold_labs.studiocraft.metainfo.xml
       - mkdir -p /app/share/icons /app/share/doc && cp -R share/icons/hicolor /app/share/icons/ && cp -R share/doc/studiocraft /app/share/doc/
       # Mount point for the plugin extensions.
       - install -d /app/extensions/Plugins

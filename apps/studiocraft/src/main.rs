@@ -43,7 +43,7 @@ Aufruf: studiocraft [projekt.studiocraft | datei.wav …] [--tracks <n>] [--audi
 Weitere Dateien lassen sich ins Projektfenster ziehen.";
 
 /// Reverse-DNS id: Wayland app id, X11 WM class and desktop file name.
-const APP_ID: &str = "io.github.xxcrusaderxx.studiocraft";
+const APP_ID: &str = "io.github.onefold_labs.studiocraft";
 
 /// Fenster-Icon „Welle“; macOS bekommt die eigene Variante mit Rand.
 fn app_icon() -> egui::IconData {
@@ -328,7 +328,7 @@ fn main() -> ExitCode {
     let options = eframe::NativeOptions {
         viewport: builder
             // Wayland finds the window icon through the app id and the installed desktop file
-            // of the same name (packaging/linux/io.github.xxcrusaderxx.studiocraft.desktop).
+            // of the same name (packaging/linux/io.github.onefold_labs.studiocraft.desktop).
             .with_app_id(APP_ID)
             .with_inner_size([1400.0, 860.0])
             .with_icon(app_icon())
