@@ -208,8 +208,24 @@ mod tests {
     /// sieht sie nicht).
     #[test]
     fn model_labels_have_english_entries() {
+        use studiocraft_project::ProcessKind as K;
+        let processes = [
+            K::Normalize { target_db: 0.0 },
+            K::Gain { db: 0.0 },
+            K::Silence,
+            K::Reverse,
+            K::InvertPhase,
+            K::FadeIn,
+            K::FadeOut,
+            K::RemoveDc,
+        ]
+        .map(|k| k.label());
         let labels = studiocraft_project::DrawShape::ALL.map(|s| s.label());
-        let missing: Vec<&str> = labels.into_iter().filter(|k| !EN.contains_key(k)).collect();
+        let missing: Vec<&str> = labels
+            .into_iter()
+            .chain(processes)
+            .filter(|k| !EN.contains_key(k))
+            .collect();
         assert!(missing.is_empty(), "fehlt in i18n/en.tsv: {missing:?}");
     }
 

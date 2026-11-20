@@ -855,6 +855,9 @@ pub struct Project {
     pub tracks: Vec<Track>,
     pub tempo: TempoMap,
     pub pool: Vec<PoolClip>,
+    /// Bearbeitete Clips: woraus und wie sie entstanden (`processing.rs`).
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub derived: std::collections::BTreeMap<ClipId, crate::processing::Derived>,
     /// Fader des Ausgangsbusses in dB.
     pub master_db: f32,
     next_id: EventId,
@@ -907,6 +910,7 @@ impl Default for Project {
         Self {
             tracks: Vec::new(),
             pool: Vec::new(),
+            derived: std::collections::BTreeMap::new(),
             master_db: 0.0,
             tempo: TempoMap::default(),
             next_id: 1,

@@ -283,6 +283,7 @@ impl Project {
                 }
             }
         }
+        fixed += usize::from(self.sanitize_derived());
         fixed += self.fix_ids();
         fixed
     }

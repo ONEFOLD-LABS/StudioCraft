@@ -86,6 +86,74 @@ pub fn fade_out(samples: &mut [f32], range: Range<u64>) {
     }
 }
 
+/// Setzt den Bereich auf Stille.
+pub fn silence(samples: &mut [f32], range: Range<u64>) {
+    let r = frames(samples, range);
+    samples[r.start * 2..r.end * 2].fill(0.0);
+}
+
+/// Dreht die Phase im Bereich (Vorzeichen).
+pub fn invert(samples: &mut [f32], range: Range<u64>) {
+    let r = frames(samples, range);
+    for v in &mut samples[r.start * 2..r.end * 2] {
+        *v = -*v;
+    }
+}
+
+/// Zieht den Gleichanteil je Kanal ab (Mittelwert im Bereich).
+pub fn remove_dc(samples: &mut [f32], range: Range<u64>) {
+    let r = frames(samples, range);
+    let slice = &mut samples[r.start * 2..r.end * 2];
+    let n = slice.len() / 2;
+    if n == 0 {
+        return;
+    }
+    for ch in 0..2 {
+        let mean = slice
+            .iter()
+            .skip(ch)
+            .step_by(2)
+            .filter(|v| v.is_finite())
+            .map(|&v| f64::from(v))
+            .sum::<f64>()
+            / n as f64;
+        for v in slice.iter_mut().skip(ch).step_by(2) {
+            *v -= mean as f32;
+        }
+    }
+}
+
+/// Wendet eine Bearbeitung aus der Liste eines Clips an (`studiocraft_project::processing`).
+/// Ausgeschaltete Einträge ändern nichts.
+pub fn apply(samples: &mut [f32], step: &studiocraft_project::ClipProcess) {
+    use studiocraft_project::ProcessKind as K;
+    if !step.on {
+        return;
+    }
+    let r = step.from..step.to;
+    match step.kind {
+        K::Normalize { target_db } => {
+            normalize(samples, r, target_db);
+        }
+        K::Gain { db } => gain(samples, r, db),
+        K::Silence => silence(samples, r),
+        K::Reverse => reverse(samples, r),
+        K::InvertPhase => invert(samples, r),
+        K::FadeIn => fade_in(samples, r),
+        K::FadeOut => fade_out(samples, r),
+        K::RemoveDc => remove_dc(samples, r),
+    }
+}
+
+/// Rendert die ganze Liste auf eine Kopie von `source`.
+pub fn render(source: &[f32], steps: &[studiocraft_project::ClipProcess]) -> Vec<f32> {
+    let mut out = source.to_vec();
+    for s in steps {
+        apply(&mut out, s);
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -141,5 +209,47 @@ mod tests {
         reverse(&mut s, from..to);
         fade_in(&mut s, u64::MAX - 1..u64::MAX);
         assert!((s[0] - 0.5).abs() < 1e-6 && (s[2] - 1.0).abs() < 1e-3);
+    }
+
+    #[test]
+    fn silence_invert_and_dc_touch_only_the_range() {
+        let mut s = ramp(6);
+        silence(&mut s, 0..1);
+        assert_eq!(&s[..2], &[0.0, 0.0]);
+        invert(&mut s, 1..2);
+        assert_eq!(&s[2..4], &[-0.1, 0.1]);
+        let mut d: Vec<f32> = (0..4).flat_map(|_| [0.5f32, -0.25]).collect();
+        d[0] = 0.7;
+        d[2] = 0.3;
+        remove_dc(&mut d, 0..4);
+        let mean_l: f32 = d.iter().step_by(2).sum::<f32>() / 4.0;
+        let mean_r: f32 = d.iter().skip(1).step_by(2).sum::<f32>() / 4.0;
+        assert!(mean_l.abs() < 1e-6 && mean_r.abs() < 1e-6, "{d:?}");
+        remove_dc(&mut d, 3..3);
+    }
+
+    #[test]
+    fn a_process_list_renders_in_order_and_skips_switched_off_steps() {
+        use studiocraft_project::{ClipProcess, ProcessKind};
+        let step = |kind, on| ClipProcess {
+            kind,
+            from: 0,
+            to: 4,
+            on,
+        };
+        let src: Vec<f32> = (1..=4).flat_map(|i| [i as f32, i as f32]).collect();
+        let out = render(
+            &src,
+            &[
+                step(ProcessKind::Reverse, true),
+                step(ProcessKind::Gain { db: 6.0206 }, true),
+                step(ProcessKind::Silence, false),
+            ],
+        );
+        let left: Vec<f32> = out.iter().step_by(2).copied().collect();
+        for (a, b) in left.iter().zip([8.0, 6.0, 4.0, 2.0]) {
+            assert!((a - b).abs() < 1e-3, "{left:?}");
+        }
+        assert_eq!(src[0], 1.0, "the source stays");
     }
 }

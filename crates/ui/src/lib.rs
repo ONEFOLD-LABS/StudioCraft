@@ -50,6 +50,7 @@ mod mixer;
 mod noteinfo;
 mod panel_undo;
 mod pre_ui;
+mod processes_ui;
 mod quantize;
 mod recording;
 mod render;
@@ -5354,6 +5355,66 @@ mod tests {
     }
 
     #[test]
+    fn sample_editor_keeps_an_editable_list_of_processes() {
+        use studiocraft_project::ProcessKind;
+        let (mut w, id) = one_event_window();
+        let source = w.project.event(id).unwrap().clip.unwrap();
+        w.open_sample_editor(id);
+        w.clear_history();
+        let mut h = window_harness(w);
+        h.run_steps(2);
+        h.get_by_label("Keine – das Original klingt");
+        h.get_by_label("Umkehren").click();
+        h.run_steps(2);
+        h.get_by_label("Phase drehen").click();
+        h.run_steps(2);
+        let kinds = |h: &Harness<'_, ProjectWindow>| -> Vec<(ProcessKind, bool)> {
+            let (_, steps) = h.state().event_processes(id).unwrap();
+            steps.iter().map(|s| (s.kind, s.on)).collect()
+        };
+        assert_eq!(
+            kinds(&h),
+            [
+                (ProcessKind::Reverse, true),
+                (ProcessKind::InvertPhase, true)
+            ]
+        );
+        let clip = |h: &Harness<'_, ProjectWindow>| h.state().project.event(id).unwrap().clip;
+        let orig = h.state().clip(source).unwrap().samples.clone();
+        let sound = |h: &Harness<'_, ProjectWindow>| {
+            let c = clip(h).unwrap();
+            h.state().clip(c).unwrap().samples.clone()
+        };
+        // Reversed and inverted: the last frame of the original, negated, comes first.
+        let n = orig.len();
+        assert!((sound(&h)[0] + orig[n - 2]).abs() < 1e-6);
+        // Switch the reverse off: only the phase stays inverted.
+        h.get_by_label("1. Umkehren").click();
+        h.run_steps(2);
+        assert_eq!(
+            kinds(&h),
+            [
+                (ProcessKind::Reverse, false),
+                (ProcessKind::InvertPhase, true)
+            ]
+        );
+        assert!((sound(&h)[100] + orig[100]).abs() < 1e-6);
+        // Move the phase up, then remove it: no process left, the original plays.
+        h.get_by_label("Bearbeitung 2 nach oben").click();
+        h.run_steps(2);
+        assert_eq!(kinds(&h)[0].0, ProcessKind::InvertPhase);
+        h.get_by_label("Bearbeitung 1 entfernen").click();
+        h.run_steps(2);
+        h.get_by_label("Bearbeitung 1 entfernen").click();
+        h.run_steps(2);
+        assert_eq!(clip(&h), Some(source), "back to the original clip");
+        // Every change was one undo step: six changes, one undone.
+        h.state_mut().undo();
+        assert_eq!(kinds(&h), [(ProcessKind::Reverse, false)]);
+        assert_eq!(h.state().undo.len(), 5);
+    }
+
+    #[test]
     fn sample_editor_processes_non_destructively_and_trims_to_the_selection() {
         let (mut w, id) = one_event_window();
         let old_clip = w.project.event(id).and_then(|e| e.clip).unwrap();
@@ -5363,8 +5424,11 @@ mod tests {
         };
         w.open_sample_editor(id);
         assert_eq!(w.lower, LowerZone::SampleEditor);
-        w.process_clip(id, sampleeditor::Process::Normalize)
-            .unwrap();
+        w.process_clip(
+            id,
+            studiocraft_project::ProcessKind::Normalize { target_db: 0.0 },
+        )
+        .unwrap();
         let new_clip = w.project.event(id).and_then(|e| e.clip).unwrap();
         assert_ne!(new_clip, old_clip, "a new clip, the original stays");
         let s = &w.clip(new_clip).unwrap().samples;
@@ -5478,6 +5542,11 @@ mod tests {
             w.sample_editor.selection = Some((48_000, 96_000));
             w.detect_hitpoints(id);
             w.detect_tempo(id);
+            use studiocraft_project::ProcessKind;
+            w.add_process(id, ProcessKind::Normalize { target_db: -1.0 }, (0, 192_000))
+                .unwrap();
+            w.add_process(id, ProcessKind::FadeOut, (144_000, 192_000))
+                .unwrap();
         });
     }
 
