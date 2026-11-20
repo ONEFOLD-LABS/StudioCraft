@@ -29,3 +29,17 @@ jobs:
       os: '["ubuntu-24.04","windows-latest","macos-latest"]'
       select-os: '["windows-latest","macos-latest"]'
       select-label: full-ci
+
+  # The browser build (wasm32): clippy without warnings for the web app and everything it uses.
+  web:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: wasm32
+      - run: cargo clippy --locked --target wasm32-unknown-unknown -p studiocraft-web -- -D warnings
