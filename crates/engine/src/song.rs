@@ -26,6 +26,10 @@ pub struct PlayEvent {
     /// und dessen Länge. Damit verlaufen die Fades wie beim ganzen Event.
     pub env_offset: u64,
     pub env_length: u64,
+    /// Überblendung an verdeckten Kanten dieses Ausschnitts (Comp-Grenzen), in Frames: am
+    /// Anfang einblenden, am Ende ausblenden, während das obere Event aus- bzw. einblendet.
+    pub edge_in: u64,
+    pub edge_out: u64,
 }
 
 impl PlayEvent {
@@ -42,14 +46,24 @@ impl PlayEvent {
             gain: 1.0,
             env_offset: 0,
             env_length: length,
+            edge_in: 0,
+            edge_out: 0,
         }
     }
 
     /// Lautstärkefaktor aus Fades und Event-Lautstärke an Frame `k` des Events.
     #[inline]
     fn fade_gain(&self, k: u64) -> f32 {
-        let k = k.saturating_add(self.env_offset);
         let mut g = self.gain;
+        // Comp-Grenzen: linear gegen das Fade des oberen Events.
+        if k < self.edge_in {
+            g *= k as f32 / self.edge_in as f32;
+        }
+        let left = self.length.saturating_sub(k);
+        if left < self.edge_out {
+            g *= left as f32 / self.edge_out as f32;
+        }
+        let k = k.saturating_add(self.env_offset);
         if k < self.fade_in {
             g *= self.fade_in_curve.shape(k as f32 / self.fade_in as f32);
         }
@@ -258,7 +272,7 @@ impl Song {
             .map(|(slot, t)| {
                 // Auf einer Audiospur klingt bei Überlappung nur das oberste Event
                 // (höchster Comp-Rang, sonst das spätere in der Liste). Verdeckte Teile fallen weg.
-                let audible = t.audible_parts();
+                let audible = t.audible_spans();
                 let mut events = Vec::new();
                 for (e, parts) in t.events.iter().zip(&audible) {
                     let Some(samples) = e.clip.and_then(|c| clips.get(&c)) else {
@@ -273,12 +287,19 @@ impl Song {
                         // Wird noch gedehnt: bis dahin still.
                         Err(()) => continue,
                     };
-                    for &(a, b) in parts {
+                    for part in parts {
+                        let (a, b) = (part.from, part.to);
                         let (fa, fb) = (tempo.frames(a, rate), tempo.frames(b, rate));
                         if fb <= fa {
                             continue;
                         }
                         let env_offset = fa - ev_start;
+                        let edge_in = tempo.duration_frames(a, part.ramp_in, rate);
+                        let edge_out = tempo.duration_frames(
+                            b.saturating_sub(part.ramp_out),
+                            part.ramp_out,
+                            rate,
+                        );
                         events.push(PlayEvent {
                             // Fades als Dauer an ihrer Stelle (Tempowechsel möglich).
                             fade_in: tempo.duration_frames(e.start.0, e.fade_in, rate),
@@ -292,6 +313,8 @@ impl Song {
                             gain: db_to_gain(e.gain_db),
                             env_offset,
                             env_length,
+                            edge_in: edge_in.min(fb - fa),
+                            edge_out: edge_out.min(fb - fa),
                             ..PlayEvent::new(fa, fb - fa, base + env_offset, samples.clone())
                         });
                     }
@@ -681,7 +704,7 @@ impl PlayTrack {
             let n = n.min(src.len());
             let dst_from = (from - pos) as usize * 2;
             let dst = &mut out[dst_from..dst_from + n];
-            if ev.fade_in == 0 && ev.fade_out == 0 {
+            if ev.fade_in == 0 && ev.fade_out == 0 && ev.edge_in == 0 && ev.edge_out == 0 {
                 let g = ev.gain;
                 for (d, s) in dst.iter_mut().zip(&src[..n]) {
                     *d += s * g;
@@ -1131,6 +1154,58 @@ mod tests {
         map.rows.iter_mut().find(|r| r.pitch == 38).unwrap().solo = true;
         p.tracks[t].drum_map = Some(map);
         assert_eq!(keys(&p), [38]);
+    }
+
+    #[test]
+    fn comp_boundaries_crossfade_without_jumps() {
+        use studiocraft_project::PoolClip;
+        let rate = 48_000u32;
+        let mut p = Project::default();
+        let t = p.add_track(TrackKind::Audio, "Gesang");
+        let c = p.add_clip(PoolClip {
+            name: "c".into(),
+            path: None,
+            sample_rate: rate,
+            frames: u64::from(rate),
+        });
+        let take1 = p.add_audio_event(t, 0, c).unwrap();
+        p.add_audio_event(t, 0, c).unwrap();
+        // Comp the middle of take 1 (ticks at 120 BPM: 960 per quarter = 0.5 s).
+        p.comp(take1, 240, 720).unwrap();
+        let clips = HashMap::from([(c, vec![1.0f32; rate as usize * 2].into())]);
+        let song = Song::build(&p, &clips, rate);
+        let n = rate as usize;
+        let mut out = vec![0.0f32; n * 2];
+        song.mix(&mut out, 0, n);
+        // Both takes are 1.0: the sum stays 1 everywhere, also inside the crossfades.
+        let left: Vec<f32> = out.chunks(2).map(|f| f[0]).collect();
+        let worst = left[..n - 1]
+            .iter()
+            .map(|v| (v - 1.0).abs())
+            .fold(0.0f32, f32::max);
+        let bad: Vec<(usize, f32)> = left[..n - 1]
+            .iter()
+            .enumerate()
+            .filter(|(_, v)| (*v - 1.0).abs() >= 0.01)
+            .map(|(i, v)| (i, *v))
+            .take(5)
+            .collect();
+        assert!(
+            worst < 0.01,
+            "level stays 1: off by {worst} at {bad:?} of {n}"
+        );
+        let jump = left[..n - 1]
+            .windows(2)
+            .map(|w| (w[1] - w[0]).abs())
+            .fold(0.0f32, f32::max);
+        assert!(jump < 0.01, "no hard step: {jump}");
+        // Inside a crossfade both takes play.
+        let fades: usize = song.tracks[0]
+            .events
+            .iter()
+            .filter(|e| e.edge_in > 0 || e.edge_out > 0)
+            .count();
+        assert_eq!(fades, 2);
     }
 
     #[test]
