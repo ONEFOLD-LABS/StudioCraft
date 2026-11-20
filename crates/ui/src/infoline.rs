@@ -6,6 +6,7 @@
 //! gelb. Zeitwerte wirken relativ auf alle (Anfang einen Takt später: alle einen Takt später),
 //! Name und Stumm gelten für alle gleich. Jede Änderung ist ein Rückgängig-Schritt.
 
+use crate::i18n::tr;
 use egui::{Key, RichText, TextEdit, Ui};
 use studiocraft_project::{EventId, Position};
 
@@ -41,7 +42,7 @@ fn selected(w: &ProjectWindow) -> Option<(Vec<EventId>, EventId)> {
 pub(crate) fn show(w: &mut ProjectWindow, ui: &mut Ui) {
     ui.horizontal(|ui| {
         let Some((ids, id)) = selected(w) else {
-            ui.weak("Keine Auswahl");
+            ui.weak(tr("Keine Auswahl"));
             return;
         };
         let Some(ev) = w.project.event(id) else {
@@ -50,31 +51,39 @@ pub(crate) fn show(w: &mut ProjectWindow, ui: &mut Ui) {
         let multi = ids.len() > 1;
         if multi {
             let t = crate::theme::tokens(ui.ctx());
-            ui.label(RichText::new(format!("{} Events", ids.len())).color(t.solo))
-                .on_hover_text("Werte des ersten Events; Zeitwerte ändern alle relativ");
+            ui.label(
+                RichText::new(crate::i18n::trf("{n} Events", &[("n", &ids.len())])).color(t.solo),
+            )
+            .on_hover_text(tr("Werte des ersten Events; Zeitwerte ändern alle relativ"));
         }
         let tempo = &w.project.tempo;
         let mut edits = Vec::new();
-        if let Some(name) = field(ui, "Name", ev.name.clone(), 110.0, multi) {
+        if let Some(name) = field(ui, tr("Name"), ev.name.clone(), 110.0, multi) {
             edits.push(Edit::Name(name));
         }
         let start = tempo.format_position(ev.start);
-        if let Some(t) = field(ui, "Anfang", start, 80.0, multi) {
+        if let Some(t) = field(ui, tr("Anfang"), start, 80.0, multi) {
             edits.extend(tempo.parse_position(&t).map(|p| Edit::Start(p.0)));
         }
         let end = tempo.format_position(Position(ev.end()));
-        if let Some(t) = field(ui, "Ende", end, 80.0, multi) {
+        if let Some(t) = field(ui, tr("Ende"), end, 80.0, multi) {
             edits.extend(tempo.parse_position(&t).map(|p| Edit::End(p.0)));
         }
-        if let Some(t) = field(ui, "Länge", tempo.format_length(ev.length), 80.0, multi) {
+        if let Some(t) = field(ui, tr("Länge"), tempo.format_length(ev.length), 80.0, multi) {
             edits.extend(tempo.parse_length(&t).map(Edit::Length));
         }
-        if let Some(t) = field(ui, "Fade-In", tempo.format_length(ev.fade_in), 80.0, multi) {
+        if let Some(t) = field(
+            ui,
+            tr("Fade-In"),
+            tempo.format_length(ev.fade_in),
+            80.0,
+            multi,
+        ) {
             edits.extend(tempo.parse_length(&t).map(Edit::FadeIn));
         }
         if let Some(t) = field(
             ui,
-            "Fade-Out",
+            tr("Fade-Out"),
             tempo.format_length(ev.fade_out),
             80.0,
             multi,
@@ -82,7 +91,7 @@ pub(crate) fn show(w: &mut ProjectWindow, ui: &mut Ui) {
             edits.extend(tempo.parse_length(&t).map(Edit::FadeOut));
         }
         let mut muted = ev.muted;
-        if ui.checkbox(&mut muted, "Stumm").changed() {
+        if ui.checkbox(&mut muted, tr("Stumm")).changed() {
             edits.push(Edit::Mute(muted));
         }
         for edit in edits {

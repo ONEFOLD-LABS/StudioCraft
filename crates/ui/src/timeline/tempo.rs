@@ -3,6 +3,7 @@
 //! Objektauswahl zieht einen Punkt (Takt nach Snap, Tempo nach Höhe; Alt: ohne Snap), Stift
 //! setzt einen Punkt, Radiergummi löscht ihn. Rampen und genaue Werte im Inspector.
 
+use crate::i18n::tr;
 use egui::{Align2, FontId, Painter, Pos2, Stroke, pos2};
 use studiocraft_project::{BPM_RANGE, TempoMap};
 
@@ -175,7 +176,7 @@ pub(super) fn paint(w: &ProjectWindow, painter: &Painter, g: &Geo, row: usize) {
                 g.row_top(row) + g.row_height(row) - 3.0,
             ),
             Align2::LEFT_BOTTOM,
-            "Festes Tempo – Tempospur im Inspector einschalten",
+            tr("Festes Tempo – Tempospur im Inspector einschalten"),
             font,
             t.text_dim,
         );

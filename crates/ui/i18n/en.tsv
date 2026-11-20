@@ -261,3 +261,177 @@ Zurückspulen um einen Takt	Back one bar
 {name} · {n} Noten	{name} · {n} notes
 {name}: Event konnte nicht angelegt werden	{name}: the event could not be created
 {n} Events	{n} events
++ Controller-Spur	+ Controller Lane
+1 Takt	1 bar
+2 Takte	2 bars
+4 Takte	4 bars
+Ab dem Takt am Cursor (bzw. dem nächsten, wenn der Cursor im Takt steht)	From the bar at the cursor (or the next one if the cursor is inside a bar)
+Abspielen	Play
+Aftertouch	Aftertouch
+Akustisches Feedback	Acoustic feedback
+An Zoom anpassen	Adapt to zoom
+Anfangstempo	Start tempo
+Angeklickte und verschobene Noten erklingen	Clicked and moved notes sound
+Audio	Audio
+Aufnahme im Vorzähler abgebrochen	Recording stopped during the count-in
+Aufnahme nicht möglich: {e}	Cannot record: {e}
+Aufnahme: {e}	Recording: {e}
+Aus	Off
+Aus: festes Tempo aus der Transportleiste	Off: fixed tempo from the transport bar
+Auswahl	Select
+Auswahl vorhören	Preview selection
+Auswahl {a}–{b} s	Selection {a}–{b} s
+Bereich	Range
+Bildlaufleiste Spuren	Track scroll bar
+Bildlaufleiste Zeit	Time scroll bar
+Blau	Blue
+Clip fehlt im Pool	Clip missing from the pool
+Clip ist nicht geladen	Clip is not loaded
+Comping	Comping
+Cursor	Cursor
+Cycle aus Locatoren	Loop from Locators
+Cycle-Marker: die Locatoren liegen aufeinander	Loop marker: the locators are at the same position
+Die Ansicht folgt dem Cursor während der Wiedergabe	The view follows the cursor during playback
+Doppelklick auf ein Audio-Event öffnet es hier.	Double-click an audio event to open it here.
+Doppelklick auf einen Part öffnet ihn hier im Key-Editor	Double-click a part to open it here in the piano roll
+Eigene	Custom
+Eingefroren	Frozen
+Einpassen	Fit
+Einzeln:	Single:
+Ende	End
+Ersetzen	Replace
+Event auf Auswahl	Event to Selection
+Event fehlt	Event missing
+Event-Farbe	Event color
+Events	Events
+Events + Cursor	Events + Cursor
+Events + Raster + Cursor	Events + Grid + Cursor
+Exponentiell	Exponential
+Expression	Expression
+Fade	Fade
+Fade-In	Fade-in
+Fade-Out	Fade-out
+Festes Tempo – Tempospur im Inspector einschalten	Fixed tempo – switch on the tempo track in the inspector
+Folgen (F)	Follow (F)
+Frames (25 fps)	Frames (25 fps)
+FX-Kanal	FX Channel
+Gelb	Yellow
+Gestapelt	Stacked
+Gleiche Lautstärke	Equal gain
+Gleiche Leistung	Equal power
+Glocke	Bell
+Gruppe	Group
+Größe ändern	Resize
+Größe ändern, Inhalt mitschieben	Resize, slide content
+Größe ändern, Inhalt strecken	Resize, stretch content
+Grün	Green
+H	B
+High-Cut	High cut
+High-Shelf	High shelf
+Hinspringen	Go there
+Höchstens {max} Controller-Spuren	At most {max} controller lanes
+Höchstens {max} Stücke; der Rest bleibt ein Event	At most {max} pieces; the rest stays one event
+Im Cycle	In loop
+Inhalt strecken geht bisher nur bei MIDI-Parts	Stretching content only works on MIDI parts so far
+kein Audio-Event	not an audio event
+kein Bereich	no range
+Keine Auswahl	No selection
+Keine Spur aufnahmebereit (R im Spurkopf)	No track is record-enabled (R in the track header)
+Klang	Sound
+Kleben	Glue
+Kurve Fade-In	Fade-in curve
+Kurve Fade-Out	Fade-out curve
+Lautstärke	Volume
+Lautstärke (dB)	Volume (dB)
+Low-Cut	Low cut
+Low-Shelf	Low shelf
+Länge	Length
+Länge (Ticks)	Length (ticks)
+Länge {len}	Length {len}
+Marker {id} gibt es nicht	Marker {id} does not exist
+Metronom	Metronome
+MIDI	MIDI
+MIDI-Aufnahme	MIDI recording
+MIDI: aus	MIDI: off
+MIDI: kein Eingang	MIDI: no input
+Mischen	Merge
+Mix	Mix
+Modulation	Modulation
+Nachträgliche Aufnahme: keine Instrument-Spur gewählt	Retrospective recording: no instrument track selected
+Nachträgliche Aufnahme: keine vollständige Note	Retrospective recording: no complete note
+Nachträgliche Aufnahme: nichts gespielt	Retrospective recording: nothing played
+Name von Marker {id}	Name of marker {id}
+Neue Audio-Spur	New audio track
+Neue Instrument-Spur	New instrument track
+Neuer Part	New part
+Noch keine Marker	No markers yet
+Normalisieren	Normalize
+normalisiert	normalized
+Orange	Orange
+Ordner	Folder
+Panorama	Pan
+Pink	Pink
+Pitchbend	Pitch bend
+Punkt am Cursor	Point at Cursor
+punktiert	dotted
+Quantisieren (Q)	Quantize (Q)
+Quantisierung	Quantize
+Quantisierung verwenden	Use quantize value
+Quantisierungs-Panel	Quantize Panel
+Rampe	Ramp
+Raster	Grid
+Raster + Cursor	Grid + Cursor
+Raster relativ	Grid relative
+Rot	Red
+S-Kurve	S-curve
+Sample-Editor: {e}	Sample editor: {e}
+Samples	Samples
+Schieben	Shuffle
+Sekunden	Seconds
+Snap-Modus	Snap mode
+Spur {name} entfernen	Remove lane {name}
+Spuren: ziehen oder daneben klicken	Tracks: drag or click beside it
+Spurfarbe übernehmen	Use track color
+Stereo kombiniert	Stereo combined
+Stereo-Balance	Stereo balance
+Stumm	Mute
+stumm	muted
+Stärke	Strength
+Swing	Swing
+Takt 1	Bar 1
+Takt {bar}	Bar {bar}
+Takt-Eins betonen	Accent the downbeat
+Taktart	Time signature
+Taktart Takt 1	Time signature bar 1
+Taktart Takt {bar}	Time signature bar {bar}
+Taktwechsel am Cursor	Time Signature Change at Cursor
+Tempo bei {pos}	Tempo at {pos}
+Tempo gleitet vom vorigen Punkt hierher	Tempo glides here from the previous point
+Tempospur aktiv	Tempo track active
+Tonhöhe	Pitch
+Tonhöhe „{t}“ nicht verstanden	Pitch “{t}” not understood
+Trennen	Split
+triolisch	triplet
+Türkis	Turquoise
+umgekehrt	reversed
+Umkehren	Reverse
+Velocity	Velocity
+Velocity „{t}“ nicht verstanden	Velocity “{t}” not understood
+Violett	Violet
+Vorzähler	Count-in
+Weitere Controller	More controllers
+Werte der ersten Note; Änderungen wirken relativ auf alle	Values of the first note; changes apply relatively to all
+Werte des ersten Events; Zeitwerte ändern alle relativ	Values of the first event; time values change all relatively
+Wiedergabe	Play
+Zeichnen	Draw
+Zeit: ziehen oder daneben klicken	Time: drag or click beside it
+Zeitkorrektur	Time Warp
+Zoom	Zoom
+Zählzeit	Beat
+{device} · {n} Kanäle	{device} · {n} channels
+{label} Nenner	{label} denominator
+{label} Zähler	{label} numerator
+{n} Noten	{n} notes
+{n} Take(s) aufgenommen, aber {overruns} Samples verloren (Puffer voll)	{n} take(s) recorded, but {overruns} samples lost (buffer full)
+{rows} Spuren	{rows} tracks
+Über bestehenden Parts	Over existing parts

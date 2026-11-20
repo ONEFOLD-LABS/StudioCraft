@@ -1,5 +1,6 @@
 //! Werkzeuge und Raster (Spec-Abschnitte „Werkzeuge“ und „Raster, Snap und Bearbeitung“).
 
+use crate::i18n::tr;
 use egui::Key;
 use studiocraft_project::{Project, QuantizeValue, TICKS_PER_QUARTER};
 
@@ -20,9 +21,9 @@ impl ResizeMode {
 
     pub fn label(self) -> &'static str {
         match self {
-            ResizeMode::Normal => "Größe ändern",
-            ResizeMode::Slide => "Größe ändern, Inhalt mitschieben",
-            ResizeMode::Stretch => "Größe ändern, Inhalt strecken",
+            ResizeMode::Normal => tr("Größe ändern"),
+            ResizeMode::Slide => tr("Größe ändern, Inhalt mitschieben"),
+            ResizeMode::Stretch => tr("Größe ändern, Inhalt strecken"),
         }
     }
 }
@@ -75,17 +76,17 @@ impl Tool {
 
     pub fn label(self) -> &'static str {
         match self {
-            Tool::Select => "Auswahl",
-            Tool::Range => "Bereich",
-            Tool::Split => "Trennen",
-            Tool::Glue => "Kleben",
-            Tool::Erase => "Löschen",
-            Tool::Zoom => "Zoom",
-            Tool::Mute => "Stumm",
-            Tool::Draw => "Zeichnen",
-            Tool::Play => "Wiedergabe",
-            Tool::TimeWarp => "Zeitkorrektur",
-            Tool::Comp => "Comping",
+            Tool::Select => tr("Auswahl"),
+            Tool::Range => tr("Bereich"),
+            Tool::Split => tr("Trennen"),
+            Tool::Glue => tr("Kleben"),
+            Tool::Erase => tr("Löschen"),
+            Tool::Zoom => tr("Zoom"),
+            Tool::Mute => tr("Stumm"),
+            Tool::Draw => tr("Zeichnen"),
+            Tool::Play => tr("Wiedergabe"),
+            Tool::TimeWarp => tr("Zeitkorrektur"),
+            Tool::Comp => tr("Comping"),
         }
     }
 
@@ -172,14 +173,14 @@ impl SnapMode {
 
     pub fn label(self) -> &'static str {
         match self {
-            SnapMode::Grid => "Raster",
-            SnapMode::GridRelative => "Raster relativ",
-            SnapMode::Events => "Events",
-            SnapMode::Cursor => "Cursor",
-            SnapMode::GridCursor => "Raster + Cursor",
-            SnapMode::EventsCursor => "Events + Cursor",
-            SnapMode::EventsGridCursor => "Events + Raster + Cursor",
-            SnapMode::Shuffle => "Schieben",
+            SnapMode::Grid => tr("Raster"),
+            SnapMode::GridRelative => tr("Raster relativ"),
+            SnapMode::Events => tr("Events"),
+            SnapMode::Cursor => tr("Cursor"),
+            SnapMode::GridCursor => tr("Raster + Cursor"),
+            SnapMode::EventsCursor => tr("Events + Cursor"),
+            SnapMode::EventsGridCursor => tr("Events + Raster + Cursor"),
+            SnapMode::Shuffle => tr("Schieben"),
         }
     }
 
@@ -241,12 +242,12 @@ impl Grid {
 
     pub fn label(self) -> &'static str {
         match self {
-            Grid::Bar => "Takt",
-            Grid::Beat => "Zählzeit",
-            Grid::UseQuantize => "Quantisierung verwenden",
-            Grid::Seconds => "Sekunden",
-            Grid::Frames => "Frames (25 fps)",
-            Grid::Samples => "Samples",
+            Grid::Bar => tr("Takt"),
+            Grid::Beat => tr("Zählzeit"),
+            Grid::UseQuantize => tr("Quantisierung verwenden"),
+            Grid::Seconds => tr("Sekunden"),
+            Grid::Frames => tr("Frames (25 fps)"),
+            Grid::Samples => tr("Samples"),
         }
     }
 

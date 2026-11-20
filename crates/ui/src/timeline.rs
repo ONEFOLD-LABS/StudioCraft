@@ -8,6 +8,7 @@ use studiocraft_project::{
     EVENT_MAX_DB, Event, EventId, FadeCurve, MIN_DB, TimeBase, Track, TrackKind,
 };
 
+use crate::i18n::tr;
 use crate::icons::Icon;
 use crate::{ProjectWindow, TPQ, Tool};
 
@@ -576,7 +577,7 @@ pub(crate) fn show(w: &mut ProjectWindow, ui: &mut Ui) {
     painter.text(
         corner.left_center() + vec2(8.0, 0.0),
         Align2::LEFT_CENTER,
-        format!("{rows} Spuren"),
+        crate::i18n::trf("{rows} Spuren", &[("rows", &rows)]),
         FontId::proportional(12.0),
         ui.visuals().weak_text_color(),
     );
@@ -650,9 +651,9 @@ fn scrollbars(w: &mut ProjectWindow, ui: &Ui, painter: &Painter, lanes: Rect, co
             ui.scope_id().with("bildlauf-zeit"),
             Sense::click_and_drag(),
         )
-        .on_hover_text("Zeit: ziehen oder daneben klicken");
+        .on_hover_text(tr("Zeit: ziehen oder daneben klicken"));
     hresp.widget_info(|| {
-        egui::WidgetInfo::labeled(egui::Role::ScrollBar, true, "Bildlaufleiste Zeit")
+        egui::WidgetInfo::labeled(egui::Role::ScrollBar, true, tr("Bildlaufleiste Zeit"))
     });
     if hresp.dragged() {
         let per_px = total / f64::from(htrack.width().max(1.0));
@@ -688,9 +689,9 @@ fn scrollbars(w: &mut ProjectWindow, ui: &Ui, painter: &Painter, lanes: Rect, co
                 ui.scope_id().with("bildlauf-spuren"),
                 Sense::click_and_drag(),
             )
-            .on_hover_text("Spuren: ziehen oder daneben klicken");
+            .on_hover_text(tr("Spuren: ziehen oder daneben klicken"));
         vresp.widget_info(|| {
-            egui::WidgetInfo::labeled(egui::Role::ScrollBar, true, "Bildlaufleiste Spuren")
+            egui::WidgetInfo::labeled(egui::Role::ScrollBar, true, tr("Bildlaufleiste Spuren"))
         });
         if vresp.dragged() {
             w.view.scroll_y += vresp.drag_delta().y * total_h / vtrack.height().max(1.0);
@@ -765,7 +766,7 @@ fn paint_plugin_target(painter: &Painter, g: &Geo, target: PluginTarget) {
             painter.text(
                 pos2(g.header.left() + 12.0, y + 4.0),
                 Align2::LEFT_TOP,
-                "Neue Instrument-Spur",
+                tr("Neue Instrument-Spur"),
                 FontId::proportional(12.0),
                 accent,
             );
@@ -840,7 +841,7 @@ fn paint_drop_target(painter: &Painter, g: &Geo, row: Option<usize>, ticks: u64)
             painter.text(
                 pos2(x + 6.0, g.lanes.top() + 6.0),
                 Align2::LEFT_TOP,
-                "Neue Audio-Spur",
+                tr("Neue Audio-Spur"),
                 FontId::proportional(12.0),
                 accent,
             );
@@ -1080,7 +1081,7 @@ fn resize_edge(w: &mut ProjectWindow, id: EventId, at: u64, start: bool) {
             };
             let (na, nb) = if start { (at.min(b - 1), b) } else { (a, at) };
             if !w.project.stretch_to(id, na, nb) {
-                w.message = Some("Inhalt strecken geht bisher nur bei MIDI-Parts".into());
+                w.message = Some(tr("Inhalt strecken geht bisher nur bei MIDI-Parts").into());
                 if start {
                     w.project.trim_start(id, at);
                 } else {
@@ -1787,9 +1788,9 @@ fn click(w: &mut ProjectWindow, g: &Geo, p: Pos2, mods: egui::Modifiers) {
                 // Alt: das ganze Event in Stücke dieser Länge teilen (Spec „Werkzeuge“).
                 let ids = w.project.split_equal(id, at);
                 if ids.len() as u64 == studiocraft_project::Project::MAX_EQUAL_PIECES {
-                    w.message = Some(format!(
-                        "Höchstens {} Stücke; der Rest bleibt ein Event",
-                        studiocraft_project::Project::MAX_EQUAL_PIECES
+                    w.message = Some(crate::i18n::trf(
+                        "Höchstens {max} Stücke; der Rest bleibt ein Event",
+                        &[("max", &studiocraft_project::Project::MAX_EQUAL_PIECES)],
                     ));
                 }
             } else {
@@ -2060,7 +2061,7 @@ fn paint_frozen(painter: &Painter, g: &Geo, row: usize) {
     painter.text(
         pos2(g.lanes.left() + 6.0, top + g.view.row_h - 4.0),
         egui::Align2::LEFT_BOTTOM,
-        "Eingefroren",
+        tr("Eingefroren"),
         egui::FontId::proportional(12.0),
         tk.text,
     );
@@ -2242,7 +2243,7 @@ fn paint_fades(painter: &Painter, g: &Geo, ev: &Event, body: Rect, selected: boo
         painter.circle_stroke(c, 3.0, Stroke::new(1.0, t.border));
         if ev.gain_db != 0.0 {
             let text = if ev.gain_db <= MIN_DB {
-                "stumm".to_owned()
+                tr("stumm").to_owned()
             } else {
                 format!("{:+.1} dB", ev.gain_db)
             };
@@ -2459,7 +2460,7 @@ fn paint_headers(w: &ProjectWindow, painter: &Painter, g: &Geo) {
         painter.text(
             pos2(rect.right() - 6.0, g.header_line(row, 1) + 9.0),
             Align2::RIGHT_CENTER,
-            track.kind.label(),
+            tr(track.kind.label()),
             FontId::proportional(10.0),
             visuals.weak_text_color(),
         );

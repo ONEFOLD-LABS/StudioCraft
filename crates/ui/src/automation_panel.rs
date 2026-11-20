@@ -62,7 +62,7 @@ impl ProjectWindow {
         let mut add = None;
         ui.menu_button(tr("+ Parameter"), |ui| {
             for p in [AutoParam::Volume, AutoParam::Pan, AutoParam::Mute] {
-                if ui.button(p.label()).clicked() {
+                if ui.button(crate::i18n::tr_dyn(&p.label())).clicked() {
                     add = Some(p);
                     ui.close();
                 }
@@ -133,15 +133,15 @@ impl ProjectWindow {
                 .and_then(|t| t.sends.get(index as usize))
                 .map(|s| self.track_name(s.target));
             return match target {
-                Some(name) => format!("{} · {name}", param.label()),
-                None => param.label(),
+                Some(name) => format!("{} · {name}", crate::i18n::tr_dyn(&param.label())),
+                None => crate::i18n::tr_dyn(&param.label()),
             };
         }
         let AutoParam::Plugin { slot, id } = param else {
-            return param.label();
+            return crate::i18n::tr_dyn(&param.label());
         };
         let Some(track) = self.project.tracks.get(idx) else {
-            return param.label();
+            return crate::i18n::tr_dyn(&param.label());
         };
         let ins = if slot == u32::MAX {
             track.instrument.as_ref()
@@ -157,6 +157,6 @@ impl ProjectWindow {
                 .find(|p| p.id == id)?;
             Some(format!("{} · {}", i.name, p.name))
         })
-        .unwrap_or_else(|| param.label())
+        .unwrap_or_else(|| crate::i18n::tr_dyn(&param.label()))
     }
 }

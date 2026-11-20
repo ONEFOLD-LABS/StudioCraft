@@ -57,7 +57,7 @@ impl ProjectWindow {
         let label = current
             .and_then(|id| self.project.io.input(id))
             .map_or_else(
-                || self.project.tracks[track].input.label(),
+                || crate::i18n::tr_dyn(&self.project.tracks[track].input.label()),
                 |b| b.name.clone(),
             );
         let mut choice = None;

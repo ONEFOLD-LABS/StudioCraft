@@ -5,6 +5,7 @@
 //! rechten Rand Länge ändern), Zeichnen (Note setzen, Länge aufziehen),
 //! Löschen. Alt hebt Snap auf. Klick auf die Klaviatur spielt den Ton an.
 
+use crate::i18n::tr;
 use egui::{
     Align2, Color32, FontId, Painter, Pos2, Rect, Sense, Stroke, StrokeKind, Ui, pos2, vec2,
 };
@@ -116,7 +117,7 @@ fn is_black(pitch: i32) -> bool {
 pub(crate) fn note_name(pitch: u8) -> String {
     format!(
         "{}{}",
-        NOTE_NAMES[usize::from(pitch % 12)],
+        crate::i18n::tr(NOTE_NAMES[usize::from(pitch % 12)]),
         i32::from(pitch) / 12 - 2
     )
 }
@@ -287,7 +288,9 @@ impl ProjectWindow {
 pub(crate) fn show(w: &mut ProjectWindow, ui: &mut Ui) {
     let Some(part) = w.key_editor.part.filter(|p| w.project.event(*p).is_some()) else {
         ui.centered_and_justified(|ui| {
-            ui.weak("Doppelklick auf einen Part öffnet ihn hier im Key-Editor")
+            ui.weak(tr(
+                "Doppelklick auf einen Part öffnet ihn hier im Key-Editor",
+            ))
         });
         return;
     };
@@ -301,10 +304,10 @@ pub(crate) fn show(w: &mut ProjectWindow, ui: &mut Ui) {
         .map_or(Color32::LIGHT_BLUE, |c| Color32::from_rgb(c[0], c[1], c[2]));
 
     ui.horizontal(|ui| {
-        ui.toggle_value(&mut w.key_editor.feedback, "Akustisches Feedback")
-            .on_hover_text("Angeklickte und verschobene Noten erklingen");
-        ui.toggle_value(&mut w.follow_playback, "Folgen (F)")
-            .on_hover_text("Die Ansicht folgt dem Cursor während der Wiedergabe");
+        ui.toggle_value(&mut w.key_editor.feedback, tr("Akustisches Feedback"))
+            .on_hover_text(tr("Angeklickte und verschobene Noten erklingen"));
+        ui.toggle_value(&mut w.follow_playback, tr("Folgen (F)"))
+            .on_hover_text(tr("Die Ansicht folgt dem Cursor während der Wiedergabe"));
         // Reiter der geöffneten Parts, wenn es mehrere sind.
         let others = w.other_parts();
         if !others.is_empty() {
@@ -330,7 +333,7 @@ pub(crate) fn show(w: &mut ProjectWindow, ui: &mut Ui) {
                 }
             }
         }
-        ui.menu_button("+ Controller-Spur", |ui| {
+        ui.menu_button(tr("+ Controller-Spur"), |ui| {
             if let Some(k) = lanes::kind_menu(ui) {
                 w.add_ctrl_lane(k);
                 ui.close();
@@ -940,7 +943,7 @@ fn paint_velocity(p: &Painter, g: &KGeo, notes: &[Note], sel: &[usize], color: C
     p.text(
         g.vel.left_top() + vec2(4.0, 2.0),
         Align2::LEFT_TOP,
-        "Velocity",
+        tr("Velocity"),
         FontId::proportional(10.0),
         v.weak_text_color(),
     );
