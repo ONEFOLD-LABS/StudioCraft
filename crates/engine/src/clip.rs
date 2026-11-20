@@ -61,11 +61,15 @@ impl AudioClip {
     pub fn load(path: impl AsRef<Path>) -> Result<Self, ClipError> {
         let path = path.as_ref();
         let bytes = std::fs::read(path).map_err(ClipError::Io)?;
-        let ext = path
-            .extension()
-            .and_then(|e| e.to_str())
-            .map(str::to_ascii_lowercase);
-        let (_, buf) = craft_audio::decode(&bytes, ext.as_deref())
+        let ext = path.extension().and_then(|e| e.to_str());
+        Self::from_bytes(&bytes, ext)
+    }
+
+    /// Wie [`Self::load`], aber aus Bytes (etwa eine im Browser gewählte Datei); `ext` ist die
+    /// Dateiendung als Hinweis auf das Format.
+    pub fn from_bytes(bytes: &[u8], ext: Option<&str>) -> Result<Self, ClipError> {
+        let ext = ext.map(str::to_ascii_lowercase);
+        let (_, buf) = craft_audio::decode(bytes, ext.as_deref())
             .map_err(|e| ClipError::Decode(e.to_string()))?;
         let sample_rate = check_rate(buf.sample_rate)?;
         let l = buf

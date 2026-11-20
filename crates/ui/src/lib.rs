@@ -19,6 +19,9 @@
 mod automation_panel;
 mod automation_write;
 mod autosave;
+#[cfg(target_arch = "wasm32")]
+mod browser;
+mod bundle;
 mod colors;
 mod devices;
 mod eq_ui;
@@ -222,6 +225,9 @@ pub struct ProjectWindow {
     project_path: Option<PathBuf>,
     /// Dialog „Stems exportieren“ (Issue #56).
     stems: stems::StemDialog,
+    /// Im Browser gewählte Dateien, die noch zu verarbeiten sind.
+    #[cfg(target_arch = "wasm32")]
+    browser: browser::Pending,
     /// Dialog „Audio-Anschlüsse“ offen, Stand vor einer laufenden Eingabe darin, Kanäle des
     /// Ausgabegeräts.
     io_dialog: bool,
@@ -383,6 +389,8 @@ impl ProjectWindow {
             lanes_rect: egui::Rect::NOTHING,
             project_path: None,
             stems: stems::StemDialog::default(),
+            #[cfg(target_arch = "wasm32")]
+            browser: browser::Pending::default(),
             io_dialog: false,
             io_before: None,
             output_channels: 2,
@@ -1064,6 +1072,8 @@ impl ProjectWindow {
         self.key_commands_dialog(ui.ctx());
         self.repeat_dialog(ui.ctx());
         self.stem_dialog(ui.ctx());
+        #[cfg(target_arch = "wasm32")]
+        self.poll_browser_files();
         self.io_dialog(ui.ctx());
         self.recovery_dialog(ui.ctx());
         self.fade_editor_dialog(ui.ctx());
@@ -3728,6 +3738,82 @@ mod tests {
                 w.selected_track = Some(3);
             });
         }
+    }
+
+    #[test]
+    fn a_project_bundle_round_trips_with_its_audio() {
+        let mut w = ProjectWindow::new(Project::default(), None, String::new());
+        let clip = AudioClip {
+            sample_rate: 48_000,
+            samples: (0..9600)
+                .map(|i| (i as f32 * 0.001).sin() * 0.4)
+                .collect::<Vec<f32>>()
+                .into(),
+        };
+        w.import_clip("Gitarre/Take 1", None, clip.clone(), None)
+            .unwrap();
+        w.import_clip("Gitarre/Take 1", None, clip.clone(), None)
+            .unwrap();
+        w.project.tracks[0].volume_db = -3.0;
+        w.project_path = Some(PathBuf::from("/x/Mein Song/Mein Song.studiocraft"));
+        let (name, bytes) = w.project_bundle().unwrap();
+        assert_eq!(name, "Mein Song.studiocraft.zip");
+        assert!(!w.is_modified(), "als gespeichert markiert");
+
+        let mut o = ProjectWindow::new(Project::default(), None, String::new());
+        o.open_bundle(&name, &bytes).unwrap();
+        assert_eq!(o.message, None);
+        assert_eq!(o.project.tracks.len(), 2);
+        assert_eq!(o.project.tracks[0].volume_db, -3.0);
+        assert_eq!(o.project.pool.len(), 2);
+        for id in 0..2 {
+            let back = &o.clip(id).unwrap().samples;
+            assert_eq!(back[..], clip.samples[..], "Clip {id} verlustfrei");
+        }
+        assert_eq!(o.project_stem(), "Mein Song");
+        assert!(!o.is_modified());
+    }
+
+    #[test]
+    fn a_plain_project_file_opens_without_audio_and_bad_input_is_an_error() {
+        let mut w = ProjectWindow::new(Project::default(), None, String::new());
+        let clip = AudioClip {
+            sample_rate: 48_000,
+            samples: vec![0.1f32; 200].into(),
+        };
+        w.import_clip("Take", None, clip, None).unwrap();
+        let json = studiocraft_project::file::to_json(&w.project);
+        let mut o = ProjectWindow::new(Project::default(), None, String::new());
+        o.open_bundle("Lied.studiocraft", json.as_bytes()).unwrap();
+        assert_eq!(o.project.tracks.len(), 1);
+        assert!(
+            o.message
+                .as_deref()
+                .unwrap_or("")
+                .contains("Fehlende Audiodateien")
+        );
+        assert!(o.open_bundle("x.zip", b"PK\x03\x04kaputt").is_err());
+        assert!(o.open_bundle("x.studiocraft", b"{ kein json").is_err());
+        assert_eq!(
+            o.project.tracks.len(),
+            1,
+            "Fehler lassen das Projekt stehen"
+        );
+    }
+
+    #[test]
+    fn audio_bytes_import_and_mixdown_bytes_come_back() {
+        let mut w = ProjectWindow::new(Project::default(), None, String::new());
+        let samples: Vec<f32> = vec![0.25f32; 2 * 4800];
+        let (wav, _) = studiocraft_engine::export::encode_audio(&samples, 48_000, "wav").unwrap();
+        w.import_audio_bytes("Bass.wav", &wav).unwrap();
+        assert_eq!(w.project.tracks[0].name, "Bass");
+        assert!(w.import_audio_bytes("leer.wav", b"nichts").is_err());
+        let (name, bytes, peak) = w.mixdown_bytes("flac").unwrap();
+        assert_eq!(name, "Unbenannt.flac");
+        assert!((peak - 0.25).abs() < 1e-3, "{peak}");
+        let back = AudioClip::from_bytes(&bytes, Some("flac")).unwrap();
+        assert!((back.samples[100] - 0.25).abs() < 1e-3);
     }
 
     #[test]

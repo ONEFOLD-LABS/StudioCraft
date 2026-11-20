@@ -389,7 +389,7 @@ impl ProjectWindow {
             chosen = Some(None);
         }
         if instruments.is_empty() {
-            ui.weak("Keine Instrumente installiert");
+            ui.weak(none_found("Keine Instrumente installiert"));
         }
         ui.separator();
         egui::ScrollArea::vertical()
@@ -694,7 +694,7 @@ impl ProjectWindow {
             .cloned()
             .collect();
         if effects.is_empty() {
-            ui.label("Keine CLAP-Effekte gefunden");
+            ui.label(none_found("Keine Effekte gefunden"));
             return;
         }
         let mut by_vendor: Vec<(String, Vec<PluginInfo>)> = Vec::new();
@@ -953,5 +953,15 @@ impl ProjectWindow {
                         }
                     });
             });
+    }
+}
+
+/// Hinweis, wenn keine Plugins zur Auswahl stehen. Im Browser kann StudioCraft grundsätzlich
+/// keine Plugins laden; das sagt der Hinweis dort statt `native`.
+fn none_found(native: &str) -> &str {
+    if cfg!(target_arch = "wasm32") {
+        "Plugins sind im Browser nicht verfügbar"
+    } else {
+        native
     }
 }

@@ -82,18 +82,14 @@ pub fn render_file(
     Ok(peak)
 }
 
-/// Schreibt fertiges verschachteltes Stereo wie der Mixdown: Format nach Dateiendung
-/// (`.wav`, `.flac`, `.aif`/`.aiff`, je 24 Bit), Werte über 0 dBFS begrenzt. Gibt die Spitze
-/// (linear) zurück.
-pub fn write_audio(samples: &[f32], rate: u32, path: &Path) -> Result<f32, String> {
+/// Kodiert fertiges verschachteltes Stereo wie der Mixdown: Format nach Endung `ext`
+/// (`wav`, `flac`, `aif`/`aiff`, je 24 Bit), Werte über 0 dBFS begrenzt. Gibt die Bytes und die
+/// Spitze (linear) zurück. Grundlage für Dateien und für Downloads im Browser.
+pub fn encode_audio(samples: &[f32], rate: u32, ext: &str) -> Result<(Vec<u8>, f32), String> {
     let peak = samples.iter().fold(0.0f32, |m, s| m.max(s.abs()));
-    let ext = path
-        .extension()
-        .and_then(|e| e.to_str())
-        .map(str::to_ascii_lowercase);
-    let format = match ext.as_deref() {
-        Some("flac") => Some(craft_audio::EncodeFormat::Flac),
-        Some("aif" | "aiff") => Some(craft_audio::EncodeFormat::Aiff),
+    let format = match ext.to_ascii_lowercase().as_str() {
+        "flac" => Some(craft_audio::EncodeFormat::Flac),
+        "aif" | "aiff" => Some(craft_audio::EncodeFormat::Aiff),
         _ => None,
     };
     let Some(format) = format else {
@@ -103,8 +99,9 @@ pub fn write_audio(samples: &[f32], rate: u32, path: &Path) -> Result<f32, Strin
             bits_per_sample: 24,
             sample_format: hound::SampleFormat::Int,
         };
-        let err = |e: hound::Error| format!("{}: {e}", path.display());
-        let mut writer = hound::WavWriter::create(path, spec).map_err(err)?;
+        let mut out = std::io::Cursor::new(Vec::new());
+        let err = |e: hound::Error| format!("WAV: {e}");
+        let mut writer = hound::WavWriter::new(&mut out, spec).map_err(err)?;
         const MAX: f32 = 8_388_607.0;
         for &s in samples {
             writer
@@ -112,14 +109,55 @@ pub fn write_audio(samples: &[f32], rate: u32, path: &Path) -> Result<f32, Strin
                 .map_err(err)?;
         }
         writer.finalize().map_err(err)?;
-        return Ok(peak);
+        return Ok((out.into_inner(), peak));
     };
     let clamped: Vec<f32> = samples.iter().map(|s| s.clamp(-1.0, 1.0)).collect();
     let buf = craft_audio::AudioBuffer::from_interleaved(rate, 2, &clamped);
     let bytes = craft_audio::encode(&buf, &craft_audio::EncodeOptions::new(format))
-        .map_err(|e| format!("{}: {e}", path.display()))?;
+        .map_err(|e| e.to_string())?;
+    Ok((bytes, peak))
+}
+
+/// Schreibt fertiges verschachteltes Stereo wie der Mixdown: Format nach Dateiendung
+/// (`.wav`, `.flac`, `.aif`/`.aiff`, je 24 Bit), Werte über 0 dBFS begrenzt. Gibt die Spitze
+/// (linear) zurück.
+pub fn write_audio(samples: &[f32], rate: u32, path: &Path) -> Result<f32, String> {
+    let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("wav");
+    let (bytes, peak) =
+        encode_audio(samples, rate, ext).map_err(|e| format!("{}: {e}", path.display()))?;
     std::fs::write(path, bytes).map_err(|e| format!("{}: {e}", path.display()))?;
     Ok(peak)
+}
+
+/// Mischt `start..end` (Frames) der Abspielliste offline als verschachteltes Stereo.
+pub fn mix_range(song: &Song, start: u64, end: u64) -> Vec<f32> {
+    let frames = end.saturating_sub(start) as usize;
+    let mut inter = vec![0.0f32; frames * 2];
+    let mut pos = 0usize;
+    while pos < frames {
+        let n = (frames - pos).min(BLOCK);
+        song.mix(&mut inter[pos * 2..(pos + n) * 2], start + pos as u64, n);
+        pos += n;
+    }
+    inter
+}
+
+/// Kodiert verschachteltes Stereo als 32-Bit-Float-WAV (verlustfrei) in Bytes.
+pub fn wav_f32_bytes(samples: &[f32], rate: u32) -> Result<Vec<u8>, String> {
+    let spec = hound::WavSpec {
+        channels: 2,
+        sample_rate: rate,
+        bits_per_sample: 32,
+        sample_format: hound::SampleFormat::Float,
+    };
+    let mut out = std::io::Cursor::new(Vec::new());
+    let err = |e: hound::Error| format!("WAV: {e}");
+    let mut writer = hound::WavWriter::new(&mut out, spec).map_err(err)?;
+    for &s in samples {
+        writer.write_sample(s).map_err(err)?;
+    }
+    writer.finalize().map_err(err)?;
+    Ok(out.into_inner())
 }
 
 /// Speichert verschachteltes Stereo als 32-Bit-Float-WAV (verlustfrei).
@@ -210,5 +248,20 @@ mod tests {
         let clip = AudioClip::load_wav(&path).unwrap();
         assert_eq!(clip.sample_rate, 44_100);
         assert_eq!(&clip.samples[..], &s);
+    }
+    #[test]
+    fn encoded_bytes_decode_back_for_every_format() {
+        let samples: Vec<f32> = (0..2000).map(|i| ((i as f32) * 0.01).sin() * 0.5).collect();
+        for ext in ["wav", "flac", "aiff"] {
+            let (bytes, peak) = encode_audio(&samples, 48_000, ext).unwrap();
+            assert!(peak > 0.49 && peak <= 0.5, "{ext}: {peak}");
+            let clip = AudioClip::from_bytes(&bytes, Some(ext)).unwrap();
+            assert_eq!(clip.sample_rate, 48_000, "{ext}");
+            assert_eq!(clip.samples.len(), samples.len(), "{ext}");
+            assert!((clip.samples[100] - samples[100]).abs() < 1e-3, "{ext}");
+        }
+        let raw = wav_f32_bytes(&samples, 44_100).unwrap();
+        let clip = AudioClip::from_bytes(&raw, Some("wav")).unwrap();
+        assert_eq!(clip.samples[..], samples[..]);
     }
 }
