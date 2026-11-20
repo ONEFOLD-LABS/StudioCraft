@@ -322,6 +322,9 @@ mod connected {
             let flag = Arc::clone(&stop);
             let thread = std::thread::spawn(move || {
                 let mut window = ProjectWindow::new(Project::default(), None, String::new());
+                // Labels as the tests name them, whatever the system's language and the
+                // settings say (the language is per thread).
+                studiocraft_ui::i18n::set_language(studiocraft_ui::i18n::Language::German);
                 setup(&mut window);
                 let listener = TcpListener::bind("127.0.0.1:0").unwrap();
                 let mut control = Control::serve(listener, TOKEN.into(), || {}).unwrap();
