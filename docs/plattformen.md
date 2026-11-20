@@ -10,7 +10,7 @@ StudioCraft ist ein eigenständiges Projekt, kein Teil der Craft-Familie. Es üb
 | Linux | riscv64 | deb, rpm, tar.gz |
 | Windows | x64, arm64 | MSI, portables zip |
 | macOS | universal (Intel + Apple Silicon) | DMG, CLI als zip |
-| FreeBSD | x86_64, aarch64 | tar.gz |
+| FreeBSD | x86_64, aarch64 | tar.gz, pkg |
 | Web | wasm32 | zip |
 
 Jedes Release bringt `SHA256SUMS.txt` und signierte Pakete mit (`.asc`/`.sig`). Windows und macOS werden code-signiert und notarisiert.
@@ -39,7 +39,7 @@ apps/studiocraft-cli    Kommandozeile        (vorhanden)
 apps/studiocraft-web    WASM-Build           (geplant)
 crates/*                Bibliotheken         (vorhanden)
 xtask/                  cargo xtask ci, version, layers  (geplant)
-packaging/{linux,windows,macos} vorhanden; {freebsd,web} geplant
+packaging/{linux,windows,macos,freebsd} vorhanden; web geplant
 .github/workflows/      ci.yml, release.yml über storytold/craft-common-actions  (geplant)
 ```
 
@@ -49,7 +49,8 @@ Releases laufen über den gemeinsamen Workflow `storytold/craft-common-actions/.
 
 | System | Hosts | Auswahl |
 | --- | --- | --- |
-| Linux, FreeBSD | PipeWire (Standard), ALSA; JACK mit `--features jack` | `--audio-host <name>` |
+| Linux | PipeWire (Standard), ALSA; JACK mit `--features jack` | `--audio-host <name>` |
+| FreeBSD | ALSA (über alsa-plugins-oss auf OSS); PipeWire mit `--features pipewire`, JACK mit `--features jack` | ebenso |
 | Windows | WASAPI (Shared Mode, Low-Latency geplant: Issue #110); ASIO nur im Selbstbau mit `--features asio`, nicht in den Paketen (Lizenz des SDK, Issue #107) | ebenso |
 | macOS | CoreAudio; JACK mit `--features jack` | ebenso |
 | Web | Web Audio | automatisch |
@@ -77,3 +78,7 @@ SoundCraft und StudioCraft haben jeweils ein eigenes Bedienkonzept. Gemeinsame B
 - `arch-package.sh`: ein Arch-Paket (`pkg.tar.zst`, x86_64) über `makepkg`; lilv ist optional.
 
 Der Release-Workflow installiert deb und rpm testweise unter Debian 13, Ubuntu 24.04 und Fedora und startet beide Programme, ebenso das Arch-Paket und das Flatpak.
+
+## FreeBSD
+
+`packaging/freebsd/package.sh` baut auf FreeBSD ein tar.gz für `/usr/local` und ein natives `pkg` (Abhängigkeiten alsa-lib und alsa-plugins). Ton läuft über ALSA, das alsa-plugins auf OSS (sound(4)) umleitet. MIDI fehlt auf FreeBSD vorerst: midir hat dort kein Backend (`crates/engine/src/midi_backend.rs` meldet das, statt den Build zu brechen). Der Workflow `.github/workflows/freebsd.yml` baut und testet über den gemeinsamen Craft-Workflow in einer FreeBSD-VM und prüft das Paket.

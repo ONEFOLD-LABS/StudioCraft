@@ -15,14 +15,22 @@ rtrb = "0.4"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 cpal = "0.18"
+
+# midir hat nur für diese Systeme ein Backend; sonst fehlt MIDI (src/midi_backend.rs).
+[target.'cfg(any(target_os = "linux", target_os = "windows", target_os = "macos", target_os = "ios"))'.dependencies]
 midir = "0.11"
+
+# Linux: PipeWire als bevorzugter Host (sonst ALSA). Die BSDs laufen über ALSA, das dort per
+# alsa-plugins-oss auf OSS geht; PipeWire gibt es dort nur mit dem Feature `pipewire`.
+[target.'cfg(target_os = "linux")'.dependencies]
+cpal = { version = "0.18", features = ["pipewire"] }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 cpal = { version = "0.18", features = ["wasm-bindgen"] }
 
 [features]
-default = ["pipewire"]
-# Linux/BSD: PipeWire als bevorzugter Host (sonst ALSA).
+default = []
+# BSD: PipeWire zusätzlich zu ALSA (unter Linux immer dabei).
 pipewire = ["cpal/pipewire"]
 # Linux/BSD/macOS: JACK als zusätzlicher Host.
 jack = ["cpal/jack"]
