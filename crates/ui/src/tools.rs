@@ -142,7 +142,7 @@ impl Tool {
 
     /// Ob das Werkzeug im Prototyp schon etwas tut.
     pub fn implemented(self) -> bool {
-        !matches!(self, Tool::TimeWarp)
+        true
     }
 }
 

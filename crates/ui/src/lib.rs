@@ -147,6 +147,8 @@ pub struct ProjectWindow {
     draw_shape: studiocraft_project::DrawShape,
     /// Wiedergabe-Werkzeug bei gedrückter Maustaste (Spec „Werkzeuge“, Taste 9).
     audition: Option<timeline::Audition>,
+    /// Laufende Zeitkorrektur (Werkzeug 0).
+    time_warp: Option<timeline::TimeWarp>,
     /// Werkzeugpalette am Mauszeiger (Rechtsklick in die Event-Anzeige) und ihr Alter in
     /// Bildern, damit der öffnende Klick sie nicht gleich wieder schließt.
     tool_palette: Option<egui::Pos2>,
@@ -358,6 +360,7 @@ impl ProjectWindow {
             resize_mode: tools::ResizeMode::default(),
             draw_shape: studiocraft_project::DrawShape::default(),
             audition: None,
+            time_warp: None,
             tool_palette: None,
             tool_palette_age: 0,
             keymap: keymap::Keymap::default(),
@@ -5846,6 +5849,55 @@ mod tests {
         h.run_steps(2);
         assert_eq!(h.state().cursor, 0, "release returns the cursor");
         assert!(h.state().audition.is_none());
+    }
+
+    #[test]
+    fn time_warp_tool_puts_an_audio_point_on_the_beat() {
+        let (mut w, id) = one_event_window();
+        w.tool = Tool::TimeWarp;
+        w.clear_history();
+        let bar = w.bar_ticks();
+        let audio_start = w.project.tempo.seconds(studiocraft_project::Position(
+            w.project.event(id).unwrap().start.0,
+        ));
+        let mut h = window_harness(w);
+        let at = |h: &Harness<'_, ProjectWindow>, t: u64| {
+            let w = h.state();
+            let r = w.lanes_rect;
+            let x =
+                r.left() + ((t as f64 - w.view.scroll_ticks) / TPQ) as f32 * w.view.px_per_quarter;
+            egui::pos2(x, r.top() + w.view.row_h / 2.0)
+        };
+        // Eine Stelle eine Achtel nach Takt 3 packen und auf Takt 3 legen.
+        let grab = 2 * bar + TPQ as u64 / 2;
+        let x_grab = at(&h, grab);
+        let seconds = h
+            .state()
+            .project
+            .tempo
+            .seconds(studiocraft_project::Position(grab));
+        let x_beat = at(&h, 2 * bar);
+        drag_with(
+            &mut h,
+            x_grab,
+            x_beat,
+            egui::Modifiers::NONE,
+            egui::Modifiers::NONE,
+        );
+        let p = &h.state().project;
+        // Die gepackte Stelle (in Sekunden) liegt jetzt auf Takt 3 (auf den Pixel genau).
+        let now = p.tempo.seconds(studiocraft_project::Position(2 * bar));
+        assert!((now - seconds).abs() < 0.01, "{now} statt {seconds}");
+        assert!(p.tempo.use_track);
+        // Das Audio auf der linearen Spur behält seine Zeit.
+        let start = p
+            .tempo
+            .seconds(studiocraft_project::Position(p.event(id).unwrap().start.0));
+        assert!((start - audio_start).abs() < 0.001);
+        assert!(h.state().time_warp.is_none());
+        // Ein Schritt zurück: wieder festes Tempo.
+        h.state_mut().undo();
+        assert!(!h.state().project.tempo.use_track);
     }
 
     #[test]
