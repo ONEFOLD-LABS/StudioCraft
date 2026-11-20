@@ -1557,6 +1557,9 @@ impl ProjectWindow {
         if kind == TrackKind::Instrument {
             inspector_section(ui, tr("Instrument"), true, |ui| self.instrument_ui(ui, idx));
         }
+        if matches!(kind, TrackKind::Instrument | TrackKind::Midi) {
+            inspector_section(ui, tr("Drum-Map"), false, |ui| self.drum_map_ui(ui, idx));
+        }
         if channel {
             inspector_section(ui, tr("Inserts"), true, |ui| self.inserts_ui(ui, idx));
             inspector_section(ui, tr("Sends"), true, |ui| self.sends_ui(ui, idx));
@@ -4975,6 +4978,155 @@ mod tests {
         assert!(hi > lo + 20.0, "between high and low: {hi} {lo}");
         assert!(pts.iter().all(|p| p.value == hi || p.value == lo));
         assert!(pts.windows(2).all(|w| w[0].tick < w[1].tick));
+    }
+
+    /// Instrument-Spur mit GM-Drum-Map und leerem Part, im Drum-Editor geöffnet.
+    fn drum_editor_window() -> (ProjectWindow, EventId) {
+        let (mut w, part) = key_editor_window();
+        let t = w.project.find(part).unwrap().0;
+        w.project.tracks[t].drum_map = Some(studiocraft_project::DrumMap::general_midi());
+        w.project.event_mut(part).unwrap().notes.clear();
+        w.clear_history();
+        w.open_key_editor(part);
+        w.key_editor.selection.clear();
+        (w, part)
+    }
+
+    /// Bildschirmpunkt im Drum-Editor: Tick ab Projektanfang, Tonhöhe (Zeile der Map).
+    fn drum_pos(h: &Harness<'_, ProjectWindow>, tick: f64, pitch: u8) -> egui::Pos2 {
+        let s = h.state();
+        let g = s.key_editor.grid_rect;
+        let v = s.key_editor.view;
+        let t = s.project.find(s.key_editor.part.unwrap()).unwrap().0;
+        let map = s.project.tracks[t].drum_map.as_ref().unwrap();
+        let row = map.rows.iter().position(|r| r.pitch == pitch).unwrap();
+        let x = g.left() + ((tick - v.scroll_ticks) / TPQ) as f32 * v.px_per_quarter;
+        let y = g.top() + (row as f32 + 0.5) * keyeditor::drum::ROW_H - s.key_editor.drum_scroll_y;
+        egui::pos2(x, y)
+    }
+
+    #[test]
+    fn drum_editor_draws_toggles_moves_and_mutes_rows() {
+        let (mut w, part) = drum_editor_window();
+        w.tool = Tool::Draw;
+        w.snap = true;
+        let mut h = window_harness(w);
+        h.run_steps(2);
+        let notes = |h: &Harness<'_, ProjectWindow>| {
+            let mut n = h.state().project.event(part).unwrap().notes.clone();
+            n.sort_by_key(|n| (n.start, n.pitch));
+            n
+        };
+        // Scroll so the kick (36) is visible: rows run from 81 down to 35.
+        h.state_mut().key_editor.drum_scroll_y = f32::MAX;
+        h.run_steps(2);
+        // Draw: a snare just after beat 2 lands on the grid with the row's length.
+        let p = drum_pos(&h, TPQ + 30.0, 38);
+        mouse_click(&mut h, p);
+        let n = notes(&h);
+        assert_eq!(n.len(), 1);
+        assert_eq!((n[0].pitch, n[0].start), (38, TPQ as i64));
+        assert_eq!(
+            n[0].length,
+            studiocraft_project::drummap::DEFAULT_DRUM_LENGTH
+        );
+        // A row with its own grid: the kick snaps to quarters.
+        let t = h.state().project.find(part).unwrap().0;
+        h.state_mut().project.tracks[t]
+            .drum_map
+            .as_mut()
+            .unwrap()
+            .rows
+            .iter_mut()
+            .find(|r| r.pitch == 36)
+            .unwrap()
+            .quantize = TPQ as u64;
+        let p = drum_pos(&h, 2.0 * TPQ - TPQ / 4.0 + 10.0, 36);
+        mouse_click(&mut h, p);
+        assert!(
+            notes(&h)
+                .iter()
+                .any(|n| n.pitch == 36 && n.start == 2 * TPQ as i64)
+        );
+        // Clicking a diamond with the draw tool removes it.
+        let p = drum_pos(&h, TPQ, 38);
+        mouse_click(&mut h, p);
+        assert!(notes(&h).iter().all(|n| n.pitch != 38));
+        h.state_mut().undo();
+        assert!(notes(&h).iter().any(|n| n.pitch == 38));
+        // Select tool: drag the snare one beat right and one row up (pitch 39).
+        h.state_mut().tool = Tool::Select;
+        h.run_steps(1);
+        let (a, b) = (drum_pos(&h, TPQ, 38), drum_pos(&h, 2.0 * TPQ, 39));
+        mouse_drag(&mut h, a, b, egui::Modifiers::NONE);
+        assert!(
+            notes(&h)
+                .iter()
+                .any(|n| n.pitch == 39 && n.start == 2 * TPQ as i64),
+            "{:?}",
+            notes(&h)
+        );
+        // M on the kick row mutes it for playback.
+        h.get_by_label("Bassdrum stumm").click();
+        h.run_steps(2);
+        let map = h.state().project.tracks[t].drum_map.clone().unwrap();
+        assert!(!map.audible(36) && map.audible(39));
+    }
+
+    #[test]
+    fn the_inspector_assigns_a_drum_map_and_parts_open_in_the_drum_editor() {
+        let (mut w, part) = key_editor_window();
+        let t = w.project.find(part).unwrap().0;
+        w.selected_track = Some(t);
+        w.show_inspector = true;
+        let mut h = window_harness(w);
+        h.run_steps(2);
+        // First the collapsed section header, then the combo box inside.
+        h.get_by_label("Drum-Map").click();
+        h.run_steps(2);
+        h.get_all_by_label("Drum-Map").last().unwrap().click();
+        h.run_steps(2);
+        h.get_by_label("GM-Schlagzeug").click();
+        h.run_steps(2);
+        assert!(h.state().project.tracks[t].drum_map.is_some());
+        h.state_mut().open_key_editor(part);
+        h.run_steps(2);
+        h.get_by_label("Raster für Triangel offen");
+        h.state_mut().undo();
+        assert!(h.state().project.tracks[t].drum_map.is_none());
+    }
+
+    #[test]
+    fn renders_drum_editor() {
+        shot("drum-editor", |w| {
+            let mut p = Project::default();
+            let t = p.add_track(TrackKind::Instrument, "Drums");
+            let part = p.create_event(t, 0, 4 * 3840).unwrap();
+            let q = TPQ as i64;
+            let ev = p.event_mut(part).unwrap();
+            for k in 0..8 {
+                ev.notes.push(studiocraft_project::Note {
+                    pitch: 42,
+                    velocity: 70 + (k % 2) as u8 * 40,
+                    start: k * q / 2,
+                    length: 120,
+                });
+            }
+            for (pitch, beat) in [(36, 0), (38, 1), (36, 2), (38, 3), (10, 3)] {
+                ev.notes.push(studiocraft_project::Note {
+                    pitch,
+                    velocity: 110,
+                    start: beat * q,
+                    length: 120,
+                });
+            }
+            let mut map = studiocraft_project::DrumMap::general_midi();
+            map.rows.iter_mut().find(|r| r.pitch == 46).unwrap().mute = true;
+            p.tracks[t].drum_map = Some(map);
+            w.project = p;
+            w.open_key_editor(part);
+            w.key_editor.drum_scroll_y = f32::MAX;
+        });
     }
 
     #[test]

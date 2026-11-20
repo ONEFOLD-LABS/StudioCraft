@@ -70,6 +70,9 @@ impl Project {
         for t in &mut self.tracks {
             clamp!(t.midi_channel, t.midi_channel.clamp(1, 16));
             clamp!(t.program, t.program.map(|p| p.min(127)));
+            if let Some(m) = &mut t.drum_map {
+                fix(m.sanitize());
+            }
             clamp!(
                 t.link_group,
                 t.link_group

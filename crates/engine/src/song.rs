@@ -288,7 +288,13 @@ impl Song {
                 if !frozen && matches!(t.kind, TrackKind::Instrument | TrackKind::Midi) {
                     for e in t.events.iter().filter(|e| !e.muted) {
                         let len = e.length as i64;
-                        for n in e.notes.iter().filter(|n| n.start >= 0 && n.start < len) {
+                        // Drum-Map: Noten stummer bzw. nicht soloierter Zeilen klingen nicht.
+                        let drums = t.drum_map.as_ref().filter(|m| m.filters());
+                        for n in e.notes.iter().filter(|n| {
+                            n.start >= 0
+                                && n.start < len
+                                && drums.is_none_or(|m| m.audible(n.pitch))
+                        }) {
                             let a = e.start.0 + n.start as u64;
                             let b = e.start.0 + n.end().min(len) as u64;
                             notes.push(PlayNote {
@@ -910,6 +916,43 @@ mod tests {
             "Fade-In bei halber Länge: {}",
             out[0]
         );
+    }
+
+    #[test]
+    fn drum_map_mute_and_solo_filter_the_played_notes() {
+        use studiocraft_project::{DrumMap, Note};
+        let mut p = Project::default();
+        let t = p.add_track(TrackKind::Instrument, "Drums");
+        p.tracks[t].instrument = Some(studiocraft_project::InsertSlot {
+            plugin_id: "x".into(),
+            name: "X".into(),
+            bypass: false,
+            params: Vec::new(),
+            state: None,
+        });
+        let id = p.create_event(t, 0, 4 * TICKS_PER_QUARTER).unwrap();
+        p.event_mut(id).unwrap().notes = [36u8, 38, 42]
+            .into_iter()
+            .map(|pitch| Note {
+                pitch,
+                velocity: 100,
+                start: 0,
+                length: 10,
+            })
+            .collect();
+        let keys = |p: &Project| -> Vec<u8> {
+            let song = Song::build(p, &HashMap::new(), 48_000);
+            song.tracks[0].notes.iter().map(|n| n.key).collect()
+        };
+        let mut map = DrumMap::general_midi();
+        p.tracks[t].drum_map = Some(map.clone());
+        assert_eq!(keys(&p), [36, 38, 42], "no mute/solo: everything");
+        map.rows.iter_mut().find(|r| r.pitch == 42).unwrap().mute = true;
+        p.tracks[t].drum_map = Some(map.clone());
+        assert_eq!(keys(&p), [36, 38]);
+        map.rows.iter_mut().find(|r| r.pitch == 38).unwrap().solo = true;
+        p.tracks[t].drum_map = Some(map);
+        assert_eq!(keys(&p), [38]);
     }
 
     #[test]

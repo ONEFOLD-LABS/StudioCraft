@@ -14,6 +14,7 @@ use studiocraft_project::{EventId, Note};
 
 use crate::{ProjectWindow, TPQ, Tool};
 
+pub(crate) mod drum;
 mod lanes;
 
 const KEYS_W: f32 = 52.0;
@@ -83,6 +84,8 @@ pub(crate) struct KeyEditor {
     /// Lage des Notenrasters und der Velocity-Spur im letzten Frame (für Tests).
     pub grid_rect: Rect,
     pub vel_rect: Rect,
+    /// Drum-Editor: Oberkante der Ansicht in Pixel ab der ersten Zeile (drum.rs).
+    pub drum_scroll_y: f32,
 }
 
 impl Default for KeyEditor {
@@ -101,6 +104,7 @@ impl Default for KeyEditor {
             ctrl_drag: None,
             grid_rect: Rect::NOTHING,
             vel_rect: Rect::NOTHING,
+            drum_scroll_y: 0.0,
         }
     }
 }
@@ -294,6 +298,13 @@ pub(crate) fn show(w: &mut ProjectWindow, ui: &mut Ui) {
         });
         return;
     };
+    // Spur mit Drum-Map: Drum-Editor statt Klaviatur (drum.rs).
+    if let Some((track, _)) = w.project.find(part)
+        && let Some(map) = w.project.tracks[track].drum_map.clone()
+    {
+        drum::show(w, ui, part, track, map);
+        return;
+    }
     let Some(ev) = w.project.event(part).cloned() else {
         return;
     };
