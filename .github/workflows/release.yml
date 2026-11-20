@@ -1,12 +1,14 @@
 name: Release
 
-# A tag v* builds packages for every platform that has packaging today and publishes them as a
-# draft GitHub release. workflow_dispatch runs the same builds without publishing.
-# Switch to storytold/craft-common-actions release.yml once packaging/ covers Windows, macOS,
-# FreeBSD and the web.
+# A tag v* builds packages for every platform and publishes them as a draft GitHub release.
+# workflow_dispatch and the nightly schedule run the same builds without publishing, so a broken
+# package shows up within a day, not on release day. (StudioCraft keeps its own release workflow
+# instead of the shared Craft one, which assumes that family's branches and app ids; issue #31.)
 on:
   push:
     tags: ["v*"]
+  schedule:
+    - cron: "37 2 * * *"
   workflow_dispatch:
 
 permissions:
@@ -226,7 +228,7 @@ jobs:
           path: dist
           merge-multiple: true
       - name: Checksums
-        run: cd dist && sha256sum * > SHA256SUMS
+        run: cd dist && sha256sum * > SHA256SUMS.txt
       - name: Draft release
         env:
           GH_TOKEN: ${{ github.token }}

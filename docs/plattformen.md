@@ -13,7 +13,7 @@ StudioCraft ist ein eigenständiges Projekt, kein Teil der Craft-Familie. Es üb
 | FreeBSD | x86_64, aarch64 | tar.gz, pkg |
 | Web | wasm32 | zip |
 
-Jedes Release bringt `SHA256SUMS.txt` und signierte Pakete mit (`.asc`/`.sig`). Windows und macOS werden code-signiert und notarisiert.
+Jedes Release bringt `SHA256SUMS.txt` mit. Windows- und macOS-Pakete werden code-signiert (macOS auch notarisiert), sobald die Zertifikate als Secrets hinterlegt sind; bis dahin sind sie unsigniert bzw. ad hoc signiert.
 
 ## Bausteine
 
@@ -43,7 +43,7 @@ packaging/{linux,windows,macos,freebsd,web} vorhanden
 .github/workflows/      ci.yml, release.yml über storytold/craft-common-actions  (geplant)
 ```
 
-Releases laufen über den gemeinsamen Workflow `storytold/craft-common-actions/.github/workflows/release.yml` mit `app-name: studiocraft`. Er erwartet die `packaging/`-Skripte in der Struktur oben.
+Releases laufen über den eigenen Workflow `.github/workflows/release.yml`: Ein Tag `v*` baut alle Pakete und legt einen Release-Entwurf an; nachts und auf Abruf läuft derselbe Bau als Probelauf ohne Veröffentlichung. Den gemeinsamen Release-Workflow der Craft-Familie nutzt StudioCraft nicht, weil er deren Branches, Umgebungen und App-Kennungen voraussetzt (Issue #31); CI-Gate und FreeBSD-Prüfung kommen weiter aus `storytold/craft-common-actions`.
 
 ## Audio-Hosts je System
 
