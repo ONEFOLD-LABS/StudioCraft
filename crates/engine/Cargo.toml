@@ -15,6 +15,9 @@ rtrb = "0.4"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 cpal = "0.18"
+
+# midir hat nur für diese Systeme ein Backend; sonst fehlt MIDI (src/midi_backend.rs).
+[target.'cfg(any(target_os = "linux", target_os = "windows", target_os = "macos", target_os = "ios"))'.dependencies]
 midir = "0.11"
 
 # Linux: PipeWire als bevorzugter Host (sonst ALSA). Die BSDs laufen über ALSA, das dort per
