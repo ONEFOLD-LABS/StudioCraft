@@ -146,6 +146,11 @@ fn dir() -> Option<PathBuf> {
     if let Some(d) = std::env::var_os("STUDIOCRAFT_CONFIG_DIR") {
         return Some(PathBuf::from(d));
     }
+    // Tests lesen und schreiben nie die echten Einstellungen: ein Test, der die Sprache im
+    // Menü umschaltet, speichert sonst Englisch für alle späteren Fenster.
+    if cfg!(test) {
+        return None;
+    }
     let home = std::env::var_os("HOME").map(PathBuf::from);
     if cfg!(windows) {
         std::env::var_os("APPDATA").map(|a| PathBuf::from(a).join("StudioCraft"))
