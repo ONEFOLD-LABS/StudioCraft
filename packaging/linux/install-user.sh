@@ -8,7 +8,9 @@
 set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$HERE/../.." && pwd)"
-APP_ID=io.github.xxcrusaderxx.studiocraft
+APP_ID=io.github.onefold_labs.studiocraft
+# App id until 0.7.0; its desktop entry is removed so the launcher shows StudioCraft once.
+OLD_APP_ID=io.github.xxcrusaderxx.studiocraft
 DATA="${XDG_DATA_HOME:-$HOME/.local/share}"
 ICONS="$DATA/icons/hicolor"
 
@@ -19,7 +21,7 @@ refresh() {
 }
 
 if [[ "${1:-}" == "--uninstall" ]]; then
-  rm -f "$DATA/applications/$APP_ID.desktop"
+  rm -f "$DATA/applications/$APP_ID.desktop" "$DATA/applications/$OLD_APP_ID.desktop"
   find "$ICONS" -path '*/apps/studiocraft.*' -delete 2>/dev/null || true
   refresh
   echo "removed"
@@ -30,6 +32,7 @@ EXEC="${1:-studiocraft}"
 if [[ "$EXEC" == */* ]]; then EXEC="$(cd "$(dirname "$EXEC")" && pwd)/$(basename "$EXEC")"; fi
 
 mkdir -p "$DATA/applications"
+rm -f "$DATA/applications/$OLD_APP_ID.desktop"
 # Exec may contain spaces: quote it as the desktop entry spec requires.
 sed "s|^Exec=studiocraft |Exec=\"$EXEC\" |" "$HERE/$APP_ID.desktop" >"$DATA/applications/$APP_ID.desktop"
 for dir in "$ROOT"/assets/app-icon/hicolor/*/apps; do

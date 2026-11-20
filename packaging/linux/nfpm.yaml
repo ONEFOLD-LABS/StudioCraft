@@ -4,7 +4,7 @@ arch: ${NFPM_ARCH}
 version: ${VERSION}
 maintainer: StudioCraft contributors
 description: Digital audio workstation – record, arrange and mix music
-homepage: https://github.com/xXCrusaderXx/StudioCraft
+homepage: https://github.com/ONEFOLD-LABS/StudioCraft
 license: MIT OR Apache-2.0
 section: sound
 priority: optional

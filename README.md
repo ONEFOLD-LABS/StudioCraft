@@ -11,7 +11,7 @@ come from third-party repositories; see [`NOTICE`](NOTICE).
 
 > **Status:** early development, no release yet. Linux is the platform used day to day; Windows
 > and macOS builds are produced in CI but are not tested by hand. The user interface is German for
-> now; language switching is planned ([#99](https://github.com/xXCrusaderXx/StudioCraft/issues/99)).
+> now; language switching is planned ([#99](https://github.com/ONEFOLD-LABS/StudioCraft/issues/99)).
 
 ## Features
 

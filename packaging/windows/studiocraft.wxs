@@ -10,7 +10,7 @@
 
     <Icon Id="StudioCraftIcon.ico" SourceFile="$(var.IconPath)" />
     <Property Id="ARPPRODUCTICON" Value="StudioCraftIcon.ico" />
-    <Property Id="ARPURLINFOABOUT" Value="https://github.com/xXCrusaderXx/StudioCraft" />
+    <Property Id="ARPURLINFOABOUT" Value="https://github.com/ONEFOLD-LABS/StudioCraft" />
 
     <StandardDirectory Id="ProgramFiles6432Folder">
       <Directory Id="INSTALLFOLDER" Name="StudioCraft" />
