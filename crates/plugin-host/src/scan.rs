@@ -202,7 +202,12 @@ mod tests {
     #[test]
     fn clap_path_comes_first() {
         // SAFETY: Test setzt die Variable nur für sich selbst; andere Tests lesen sie nicht.
-        unsafe { std::env::set_var("CLAP_PATH", "/opt/a:/opt/b") };
+        let v = if cfg!(windows) {
+            "/opt/a;/opt/b"
+        } else {
+            "/opt/a:/opt/b"
+        };
+        unsafe { std::env::set_var("CLAP_PATH", v) };
         let p = default_paths();
         unsafe { std::env::remove_var("CLAP_PATH") };
         assert_eq!(&p[..2], &[PathBuf::from("/opt/a"), PathBuf::from("/opt/b")]);
