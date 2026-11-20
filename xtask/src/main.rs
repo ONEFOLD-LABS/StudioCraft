@@ -1,4 +1,4 @@
-//! Entwicklungsaufgaben für StudioCraft, wie in den anderen Craft-Apps:
+//! Entwicklungsaufgaben für StudioCraft:
 //!
 //! - `cargo xtask ci` – die Prüfungen vor jedem Commit und in der CI: Formatierung,
 //!   Clippy ohne Warnungen, alle Tests.
