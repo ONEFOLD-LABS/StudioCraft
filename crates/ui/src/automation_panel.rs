@@ -2,6 +2,7 @@
 //! Spur zeigen, stummschalten, entfernen und für weitere Parameter anlegen, auch für die
 //! Parameter der Inserts und des Instruments.
 
+use crate::i18n::tr;
 use egui::Ui;
 use studiocraft_project::AutoParam;
 
@@ -13,7 +14,7 @@ impl ProjectWindow {
             return;
         };
         if !track.read {
-            ui.weak("R ist aus: Kurven werden nicht abgespielt.");
+            ui.weak(tr("R ist aus: Kurven werden nicht abgespielt."));
         }
         let mut remove = None;
         let mut changed = false;
@@ -22,7 +23,7 @@ impl ProjectWindow {
                 let mut visible = lane.visible;
                 if ui
                     .checkbox(&mut visible, self.param_name(idx, lane.param))
-                    .on_hover_text("In der Event-Anzeige zeigen")
+                    .on_hover_text(tr("In der Event-Anzeige zeigen"))
                     .changed()
                 {
                     self.project.tracks[idx].automation[i].visible = visible;
@@ -32,16 +33,16 @@ impl ProjectWindow {
                 if crate::icons::state_toggle(
                     ui,
                     &mut muted,
-                    "M",
+                    tr("M"),
                     crate::theme::tokens(ui.ctx()).mute,
                 )
-                .on_hover_text("Automationsspur stumm")
+                .on_hover_text(tr("Automationsspur stumm"))
                 .changed()
                 {
                     self.project.tracks[idx].automation[i].muted = muted;
                     changed = true;
                 }
-                if ui.small_button("Entfernen").clicked() {
+                if ui.small_button(tr("Entfernen")).clicked() {
                     remove = Some(i);
                 }
             });
@@ -51,13 +52,15 @@ impl ProjectWindow {
             changed = true;
         }
         ui.horizontal(|ui| {
-            let l = ui.label("Ausdünnen");
+            let l = ui.label(tr("Ausdünnen"));
             ui.add(egui::Slider::new(&mut self.auto_writer.reduction, 0..=100).suffix(" %"))
                 .labelled_by(l.id)
-                .on_hover_text("Wie stark geschriebene Punkte beim Stopp ausgedünnt werden");
+                .on_hover_text(tr(
+                    "Wie stark geschriebene Punkte beim Stopp ausgedünnt werden",
+                ));
         });
         let mut add = None;
-        ui.menu_button("+ Parameter", |ui| {
+        ui.menu_button(tr("+ Parameter"), |ui| {
             for p in [AutoParam::Volume, AutoParam::Pan, AutoParam::Mute] {
                 if ui.button(p.label()).clicked() {
                     add = Some(p);

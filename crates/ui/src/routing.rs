@@ -1,5 +1,6 @@
 //! Ausgang und Sends im Inspector (Spec „Mixer“: Sends 1–8, Gruppen, FX-Kanäle).
 
+use crate::i18n::tr;
 use egui::Ui;
 use studiocraft_project::{MAX_DB, MIN_DB, Project, SendSlot, TrackId, TrackKind};
 
@@ -61,7 +62,7 @@ impl ProjectWindow {
             );
         let mut choice = None;
         ui.horizontal(|ui| {
-            let l = ui.label("Eingang");
+            let l = ui.label(tr("Eingang"));
             egui::ComboBox::from_id_salt(("eingang", track))
                 .selected_text(label)
                 .show_ui(ui, |ui| {
@@ -72,7 +73,7 @@ impl ProjectWindow {
                         }
                     }
                     ui.separator();
-                    if ui.button("Audio-Anschlüsse …").clicked() {
+                    if ui.button(tr("Audio-Anschlüsse …")).clicked() {
                         self.io_dialog = true;
                     }
                 })
@@ -95,7 +96,7 @@ impl ProjectWindow {
             .io
             .outputs
             .first()
-            .map_or("Summe".to_owned(), |b| b.name.clone());
+            .map_or(tr("Summe").to_owned(), |b| b.name.clone());
         let label = match (
             current,
             current_bus.and_then(|id| self.project.io.output(id)),
@@ -107,7 +108,7 @@ impl ProjectWindow {
         // Wahl: Gruppe, Hauptmix (None, None) oder weiterer Ausgangsbus (None, Some).
         let mut choice: Option<(Option<TrackId>, Option<u32>)> = None;
         ui.horizontal(|ui| {
-            let l = ui.label("Ausgang");
+            let l = ui.label(tr("Ausgang"));
             egui::ComboBox::from_id_salt(("ausgang", track))
                 .selected_text(label)
                 .show_ui(ui, |ui| {
@@ -151,7 +152,7 @@ impl ProjectWindow {
                 let mut on = send.on;
                 let cb = ui
                     .checkbox(&mut on, format!("{}", k + 1))
-                    .on_hover_text("Send ein/aus");
+                    .on_hover_text(tr("Send ein/aus"));
                 if cb.changed() {
                     self.edit_send(track, k, |s| s.on = on);
                 }
@@ -176,21 +177,21 @@ impl ProjectWindow {
                     })
                     .response
                     .labelled_by(cb.id)
-                    .on_hover_text("Ziel des Sends");
+                    .on_hover_text(tr("Ziel des Sends"));
                 if let Some(t) = target.filter(|t| *t != send.target) {
                     self.edit_send(track, k, |s| s.target = t);
                 }
                 let mut pre = send.pre_fader;
                 if ui
-                    .toggle_value(&mut pre, "Pre")
-                    .on_hover_text("Vor dem Fader abgreifen")
+                    .toggle_value(&mut pre, tr("Pre"))
+                    .on_hover_text(tr("Vor dem Fader abgreifen"))
                     .changed()
                 {
                     self.edit_send(track, k, |s| s.pre_fader = pre);
                 }
                 if ui
-                    .small_button("x")
-                    .on_hover_text("Send entfernen")
+                    .small_button(tr("x"))
+                    .on_hover_text(tr("Send entfernen"))
                     .clicked()
                 {
                     remove = Some(k);
@@ -199,7 +200,7 @@ impl ProjectWindow {
             let mut level = send.level_db;
             let r = ui.add(
                 egui::Slider::new(&mut level, MIN_DB..=MAX_DB)
-                    .text(format!("Send {}", k + 1))
+                    .text(crate::i18n::trf("Send {nr}", &[("nr", &(k + 1))]))
                     .custom_formatter(|v, _| db_label(v as f32)),
             );
             if r.changed() {
@@ -215,7 +216,7 @@ impl ProjectWindow {
         }
         let targets = self.route_targets(me, false);
         if sends.len() < MAX_SENDS && !targets.is_empty() {
-            ui.menu_button("+ Send hinzufügen", |ui| {
+            ui.menu_button(tr("+ Send hinzufügen"), |ui| {
                 for id in targets {
                     if ui.button(self.track_name(id)).clicked() {
                         let before = self.project.clone();
@@ -231,7 +232,7 @@ impl ProjectWindow {
                 }
             });
         } else if targets.is_empty() && sends.is_empty() {
-            ui.weak("Kein FX-Kanal oder Gruppe vorhanden (Menü Projekt)");
+            ui.weak(tr("Kein FX-Kanal oder Gruppe vorhanden (Menü Projekt)"));
         }
     }
 

@@ -73,6 +73,7 @@ use std::{
     sync::Arc,
 };
 
+use crate::i18n::tr;
 use egui::{Color32, Rect, RichText, Ui};
 use studiocraft_engine::{AudioClip, Command, EngineControl, Song, TransportState};
 use studiocraft_project::{
@@ -546,7 +547,12 @@ impl ProjectWindow {
         let ev = self
             .project
             .add_audio_event(track, start, id)
-            .ok_or_else(|| format!("{name}: Event konnte nicht angelegt werden"))?;
+            .ok_or_else(|| {
+                crate::i18n::trf(
+                    "{name}: Event konnte nicht angelegt werden",
+                    &[("name", &name)],
+                )
+            })?;
         self.selected_track = Some(track);
         self.selection = vec![ev];
         self.dirty = true;
@@ -699,7 +705,10 @@ impl ProjectWindow {
             language: i18n::language(),
         };
         if let Err(e) = s.save() {
-            self.message = Some(format!("Einstellung nicht gespeichert: {e}"));
+            self.message = Some(crate::i18n::trf(
+                "Einstellung nicht gespeichert: {e}",
+                &[("e", &e)],
+            ));
         }
     }
 
@@ -753,7 +762,7 @@ impl ProjectWindow {
         let mut tempo = self.project.tempo.clone();
         let mut editing = false;
         let mut changed = false;
-        let l = ui.label("Tempo");
+        let l = ui.label(tr("Tempo"));
         if self.project.tempo.varies() {
             // Tempospur aktiv: das Tempo am Cursor, bearbeitet wird in der Tempospur.
             let bpm = self.project.tempo.bpm_at(self.cursor);
@@ -761,7 +770,7 @@ impl ProjectWindow {
                 egui::RichText::new(format!("{bpm:.1}")).monospace(),
             ))
             .labelled_by(l.id)
-            .on_hover_text("Tempo am Cursor (aus der Tempospur)");
+            .on_hover_text(tr("Tempo am Cursor (aus der Tempospur)"));
         } else {
             let r = ui
                 .add(
@@ -771,18 +780,18 @@ impl ProjectWindow {
                         .fixed_decimals(1),
                 )
                 .labelled_by(l.id)
-                .on_hover_text("Tempo in BPM (ziehen oder eintippen)");
+                .on_hover_text(tr("Tempo in BPM (ziehen oder eintippen)"));
             changed |= r.changed();
             editing |= r.dragged() || r.has_focus();
         }
         if ui
-            .selectable_label(self.project.tempo.use_track, "Spur")
-            .on_hover_text("Tempospur an/aus (aus: festes Tempo)")
+            .selectable_label(self.project.tempo.use_track, tr("Spur"))
+            .on_hover_text(tr("Tempospur an/aus (aus: festes Tempo)"))
             .clicked()
         {
             self.toggle_tempo_track();
         }
-        let takt = ui.label("Takt");
+        let takt = ui.label(tr("Takt"));
         let r = ui
             .add(egui::DragValue::new(&mut tempo.signature.numerator).range(1..=16))
             .labelled_by(takt.id);
@@ -823,7 +832,7 @@ impl ProjectWindow {
             icons::Icon::Metronome,
             self.metronome,
             Some(accent),
-            "Metronom (C)",
+            tr("Metronom (C)"),
         )
         .clicked()
         {
@@ -990,19 +999,26 @@ impl ProjectWindow {
                     // Reiter am unteren Rand der Zone, Inhalt darüber (docs/ui-parity.md).
                     ui.with_layout(egui::Layout::bottom_up(egui::Align::LEFT), |ui| {
                         ui.horizontal(|ui| {
-                            ui.selectable_value(&mut self.lower, LowerZone::Mixer, "Mixer");
-                            ui.selectable_value(&mut self.lower, LowerZone::Editor, "Key-Editor");
+                            ui.selectable_value(&mut self.lower, LowerZone::Mixer, tr("Mixer"));
+                            ui.selectable_value(
+                                &mut self.lower,
+                                LowerZone::Editor,
+                                tr("Key-Editor"),
+                            );
                             ui.selectable_value(
                                 &mut self.lower,
                                 LowerZone::SampleEditor,
-                                "Sample-Editor",
+                                tr("Sample-Editor"),
                             );
                             if self.lower == LowerZone::Editor
                                 && let Some(ev) =
                                     self.key_editor.part.and_then(|p| self.project.event(p))
                             {
                                 ui.separator();
-                                ui.weak(format!("{} · {} Noten", ev.name, ev.notes.len()));
+                                ui.weak(crate::i18n::trf(
+                                    "{name} · {n} Noten",
+                                    &[("name", &ev.name), ("n", &ev.notes.len())],
+                                ));
                             }
                         });
                         ui.separator();
@@ -1126,10 +1142,10 @@ impl ProjectWindow {
             self.global_states(ui);
             icons::group_gap(ui);
             // Transport-Kurzform
-            if icon_button(ui, Icon::ToStart, false, None, "Zum Anfang (Pos1)").clicked() {
+            if icon_button(ui, Icon::ToStart, false, None, tr("Zum Anfang (Pos1)")).clicked() {
                 self.locate(0);
             }
-            if icon_button(ui, Icon::Stop, false, None, "Stopp").clicked() {
+            if icon_button(ui, Icon::Stop, false, None, tr("Stopp")).clicked() {
                 self.stop();
             }
             let playing = self.is_playing();
@@ -1138,7 +1154,7 @@ impl ProjectWindow {
                 Icon::Start,
                 playing,
                 Some(t.monitor),
-                "Start (Leertaste)",
+                tr("Start (Leertaste)"),
             )
             .clicked()
             {
@@ -1149,13 +1165,13 @@ impl ProjectWindow {
                 Icon::Record,
                 self.recording,
                 Some(t.rec),
-                "Aufnahme (*)",
+                tr("Aufnahme (*)"),
             )
             .clicked()
             {
                 self.toggle_record();
             }
-            if icon_button(ui, Icon::Cycle, self.cycle, Some(t.accent), "Cycle (/)").clicked() {
+            if icon_button(ui, Icon::Cycle, self.cycle, Some(t.accent), tr("Cycle (/)")).clicked() {
                 self.toggle_cycle();
             }
 
@@ -1181,7 +1197,7 @@ impl ProjectWindow {
                 // Untermenü am Werkzeugknopf: Modus für das Ziehen am Rand (Spec).
                 if tool == Tool::Select {
                     r.context_menu(|ui| {
-                        ui.label("Ziehen am Rand");
+                        ui.label(tr("Ziehen am Rand"));
                         for mode in tools::ResizeMode::ALL {
                             if ui.radio(self.resize_mode == mode, mode.label()).clicked() {
                                 self.resize_mode = mode;
@@ -1193,7 +1209,15 @@ impl ProjectWindow {
                 }
             }
             icons::group_gap(ui);
-            if icon_button(ui, Icon::Snap, self.snap, Some(t.accent), "Snap an/aus (J)").clicked() {
+            if icon_button(
+                ui,
+                Icon::Snap,
+                self.snap,
+                Some(t.accent),
+                tr("Snap an/aus (J)"),
+            )
+            .clicked()
+            {
                 self.snap = !self.snap;
             }
             snap::toolbar(self, ui);
@@ -1211,7 +1235,7 @@ impl ProjectWindow {
                     Icon::ZoneRight,
                     self.show_right,
                     Some(t.accent),
-                    "Rechte Zone (Alt+R)",
+                    tr("Rechte Zone (Alt+R)"),
                 )
                 .clicked()
                 {
@@ -1222,7 +1246,7 @@ impl ProjectWindow {
                     Icon::ZoneLower,
                     self.show_lower,
                     Some(t.accent),
-                    "Untere Zone",
+                    tr("Untere Zone"),
                 )
                 .clicked()
                 {
@@ -1233,7 +1257,7 @@ impl ProjectWindow {
                     Icon::ZoneLeft,
                     self.show_inspector,
                     Some(t.accent),
-                    "Linke Zone (Alt+L)",
+                    tr("Linke Zone (Alt+L)"),
                 )
                 .clicked()
                 {
@@ -1255,14 +1279,19 @@ impl ProjectWindow {
         let any_read = tracks.iter().any(|t| channel(t.kind) && t.read);
         let any_write = tracks.iter().any(|t| channel(t.kind) && t.write);
         let switches = [
-            ("M", any_mute, t.mute, "Mute aufheben (alle Spuren)"),
-            ("S", any_solo, t.solo, "Solo aufheben (alle Spuren)"),
-            ("R", any_read, t.monitor, "Automation lesen (alle Kanäle)"),
+            (tr("M"), any_mute, t.mute, "Mute aufheben (alle Spuren)"),
+            (tr("S"), any_solo, t.solo, "Solo aufheben (alle Spuren)"),
             (
-                "W",
+                tr("R"),
+                any_read,
+                t.monitor,
+                tr("Automation lesen (alle Kanäle)"),
+            ),
+            (
+                tr("W"),
                 any_write,
                 t.rec,
-                "Automation schreiben aus (alle Kanäle)",
+                tr("Automation schreiben aus (alle Kanäle)"),
             ),
         ];
         let mut clicked = None;
@@ -1302,7 +1331,7 @@ impl ProjectWindow {
             .selected_track
             .filter(|&i| i < self.project.tracks.len())
         else {
-            ui.weak("Keine Spur ausgewählt");
+            ui.weak(tr("Keine Spur ausgewählt"));
             return;
         };
         let track = &mut self.project.tracks[idx];
@@ -1339,7 +1368,7 @@ impl ProjectWindow {
         );
         ui.add_space(4.0);
         ui.horizontal(|ui| {
-            let label = ui.label("Name");
+            let label = ui.label(tr("Name"));
             let mut c = color;
             // Platz für Farbknopf und Abstände lassen, sonst wächst die Zone jedes Frame.
             let w = (ui.available_width() - 48.0).max(40.0);
@@ -1347,7 +1376,7 @@ impl ProjectWindow {
                 .labelled_by(label.id);
             if ui
                 .color_edit_button_srgba(&mut c)
-                .on_hover_text("Spurfarbe")
+                .on_hover_text(tr("Spurfarbe"))
                 .changed()
             {
                 track.color = [c.r(), c.g(), c.b()];
@@ -1366,7 +1395,7 @@ impl ProjectWindow {
                     icons::Icon::Record,
                     track.record,
                     Some(t.rec),
-                    "Aufnahme bereit",
+                    tr("Aufnahme bereit"),
                 )
                 .clicked()
             {
@@ -1378,7 +1407,7 @@ impl ProjectWindow {
                     icons::Icon::Play,
                     track.monitor,
                     Some(t.monitor),
-                    "Monitor",
+                    tr("Monitor"),
                 )
                 .clicked()
             {
@@ -1387,31 +1416,31 @@ impl ProjectWindow {
             }
             if mixer::has_channel(track.kind) {
                 icons::state_toggle(ui, &mut track.read, "R", t.monitor)
-                    .on_hover_text("Automation lesen");
+                    .on_hover_text(tr("Automation lesen"));
                 icons::state_toggle(ui, &mut track.write, "W", t.rec)
-                    .on_hover_text("Automation schreiben");
+                    .on_hover_text(tr("Automation schreiben"));
             }
         });
         if track.kind.holds_events() {
             ui.horizontal(|ui| {
                 use studiocraft_project::TimeBase;
-                let l = ui.label("Zeitbasis");
+                let l = ui.label(tr("Zeitbasis"));
                 let mut base = track.time_base();
                 egui::ComboBox::from_id_salt("zeitbasis")
                     .selected_text(match base {
-                        TimeBase::Musical => "Musikalisch",
-                        TimeBase::Linear => "Linear",
+                        TimeBase::Musical => tr("Musikalisch"),
+                        TimeBase::Linear => tr("Linear"),
                     })
                     .show_ui(ui, |ui| {
-                        ui.selectable_value(&mut base, TimeBase::Musical, "Musikalisch");
-                        ui.selectable_value(&mut base, TimeBase::Linear, "Linear");
+                        ui.selectable_value(&mut base, TimeBase::Musical, tr("Musikalisch"));
+                        ui.selectable_value(&mut base, TimeBase::Linear, tr("Linear"));
                     })
                     .response
                     .labelled_by(l.id);
                 if base != track.time_base() {
                     track.time_base = Some(base);
                 }
-                ui.checkbox(&mut track.show_lanes, "Lanes");
+                ui.checkbox(&mut track.show_lanes, tr("Lanes"));
             });
         }
         // Marker- und Tempospur haben keinen Klang: keine Lautstärke, kein Panorama.
@@ -1422,17 +1451,17 @@ impl ProjectWindow {
                         &mut track.volume_db,
                         studiocraft_project::MIN_DB..=studiocraft_project::MAX_DB,
                     )
-                    .text("dB")
+                    .text(tr("dB"))
                     .custom_formatter(|v, _| mixer::db_label(v as f32)),
                 );
                 self.dirty |= r.changed();
             });
             ui.horizontal(|ui| {
-                let r = ui.add(egui::Slider::new(&mut track.pan, -1.0..=1.0).text("Pan"));
+                let r = ui.add(egui::Slider::new(&mut track.pan, -1.0..=1.0).text(tr("Pan")));
                 self.dirty |= r.changed();
             });
             ui.horizontal(|ui| {
-                let l = ui.label("Pan-Modus");
+                let l = ui.label(tr("Pan-Modus"));
                 let before = track.pan_mode;
                 egui::ComboBox::from_id_salt(("pan-modus", idx))
                     .selected_text(track.pan_mode.label())
@@ -1448,7 +1477,10 @@ impl ProjectWindow {
                     .labelled_by(l.id);
                 self.dirty |= track.pan_mode != before;
             });
-            ui.label(format!("{} Events", track.events.len()));
+            ui.label(crate::i18n::trf(
+                "{n} Events",
+                &[("n", &track.events.len())],
+            ));
         }
         ui.add_space(4.0);
         // Sektionen mit Titelleiste (docs/ui-parity.md, „Linke Zone“): Routing zuerst,
@@ -1457,10 +1489,10 @@ impl ProjectWindow {
         let channel = crate::mixer::has_channel(kind);
         self.folder_ui(ui, idx);
         if kind == TrackKind::Midi {
-            inspector_section(ui, "MIDI-Ausgang", true, |ui| self.midi_out_ui(ui, idx));
+            inspector_section(ui, tr("MIDI-Ausgang"), true, |ui| self.midi_out_ui(ui, idx));
         }
         if kind == TrackKind::Audio || channel {
-            inspector_section(ui, "Routing", true, |ui| {
+            inspector_section(ui, tr("Routing"), true, |ui| {
                 if kind == TrackKind::Audio {
                     self.input_ui(ui, idx);
                 }
@@ -1470,25 +1502,27 @@ impl ProjectWindow {
             });
         }
         if kind == TrackKind::Marker {
-            inspector_section(ui, "Marker", true, |ui| self.markers_ui(ui));
+            inspector_section(ui, tr("Marker"), true, |ui| self.markers_ui(ui));
         }
         if kind == TrackKind::Tempo {
-            inspector_section(ui, "Tempo", true, |ui| self.tempo_track_ui(ui));
+            inspector_section(ui, tr("Tempo"), true, |ui| self.tempo_track_ui(ui));
         }
         if channel {
-            inspector_section(ui, "Pre", false, |ui| self.pre_ui(ui, idx));
+            inspector_section(ui, tr("Pre"), false, |ui| self.pre_ui(ui, idx));
         }
         if kind == TrackKind::Instrument {
-            inspector_section(ui, "Instrument", true, |ui| self.instrument_ui(ui, idx));
+            inspector_section(ui, tr("Instrument"), true, |ui| self.instrument_ui(ui, idx));
         }
         if channel {
-            inspector_section(ui, "Inserts", true, |ui| self.inserts_ui(ui, idx));
-            inspector_section(ui, "Sends", true, |ui| self.sends_ui(ui, idx));
-            inspector_section(ui, "EQ", false, |ui| self.eq_ui(ui, idx));
-            inspector_section(ui, "Automation", false, |ui| self.automation_ui(ui, idx));
+            inspector_section(ui, tr("Inserts"), true, |ui| self.inserts_ui(ui, idx));
+            inspector_section(ui, tr("Sends"), true, |ui| self.sends_ui(ui, idx));
+            inspector_section(ui, tr("EQ"), false, |ui| self.eq_ui(ui, idx));
+            inspector_section(ui, tr("Automation"), false, |ui| {
+                self.automation_ui(ui, idx)
+            });
         }
-        inspector_section(ui, "Notizen", false, |ui| {
-            ui.weak("Kommt später");
+        inspector_section(ui, tr("Notizen"), false, |ui| {
+            ui.weak(tr("Kommt später"));
         });
     }
 
@@ -1506,20 +1540,20 @@ impl ProjectWindow {
             };
             // Locatoren, dazwischen Punch-In, Cycle, Punch-Out
             ui.label(RichText::new(format!("L {}", fmt(self.left_locator))).monospace())
-                .on_hover_text("Linker Locator (Strg+Klick ins Lineal)");
+                .on_hover_text(tr("Linker Locator (Strg+Klick ins Lineal)"));
             ui.add_space(4.0);
             if icon_button(
                 ui,
                 Icon::PunchIn,
                 self.punch_in,
                 Some(t.rec),
-                "Punch-In (I)",
+                tr("Punch-In (I)"),
             )
             .clicked()
             {
                 self.punch_in = !self.punch_in;
             }
-            if icon_button(ui, Icon::Cycle, self.cycle, Some(t.accent), "Cycle (/)").clicked() {
+            if icon_button(ui, Icon::Cycle, self.cycle, Some(t.accent), tr("Cycle (/)")).clicked() {
                 self.toggle_cycle();
             }
             if icon_button(
@@ -1527,7 +1561,7 @@ impl ProjectWindow {
                 Icon::PunchOut,
                 self.punch_out,
                 Some(t.rec),
-                "Punch-Out (O)",
+                tr("Punch-Out (O)"),
             )
             .clicked()
             {
@@ -1535,7 +1569,7 @@ impl ProjectWindow {
             }
             ui.add_space(4.0);
             ui.label(RichText::new(format!("R {}", fmt(self.right_locator))).monospace())
-                .on_hover_text("Rechter Locator (Alt+Klick ins Lineal)");
+                .on_hover_text(tr("Rechter Locator (Alt+Klick ins Lineal)"));
             icons::group_gap(ui);
 
             // Positionsanzeige
@@ -1563,16 +1597,40 @@ impl ProjectWindow {
 
             // Transportknöpfe
             let bar_len = self.bar_ticks();
-            if icon_button(ui, Icon::ToStart, false, None, "Zum Anfang (Pos1, Komma)").clicked() {
+            if icon_button(
+                ui,
+                Icon::ToStart,
+                false,
+                None,
+                tr("Zum Anfang (Pos1, Komma)"),
+            )
+            .clicked()
+            {
                 self.locate(0);
             }
-            if icon_button(ui, Icon::Rewind, false, None, "Zurückspulen um einen Takt").clicked() {
+            if icon_button(
+                ui,
+                Icon::Rewind,
+                false,
+                None,
+                tr("Zurückspulen um einen Takt"),
+            )
+            .clicked()
+            {
                 self.locate(self.cursor.saturating_sub(bar_len));
             }
-            if icon_button(ui, Icon::Forward, false, None, "Vorspulen um einen Takt").clicked() {
+            if icon_button(
+                ui,
+                Icon::Forward,
+                false,
+                None,
+                tr("Vorspulen um einen Takt"),
+            )
+            .clicked()
+            {
                 self.locate(self.cursor.saturating_add(bar_len));
             }
-            if icon_button(ui, Icon::Stop, false, None, "Stopp").clicked() {
+            if icon_button(ui, Icon::Stop, false, None, tr("Stopp")).clicked() {
                 self.stop();
             }
             let playing = self.is_playing();
@@ -1581,7 +1639,7 @@ impl ProjectWindow {
                 Icon::Start,
                 playing,
                 Some(t.monitor),
-                "Start (Leertaste)",
+                tr("Start (Leertaste)"),
             )
             .clicked()
             {
@@ -1592,7 +1650,7 @@ impl ProjectWindow {
                 Icon::Record,
                 self.recording,
                 Some(t.rec),
-                "Aufnahme (*)",
+                tr("Aufnahme (*)"),
             )
             .clicked()
             {
@@ -1600,13 +1658,16 @@ impl ProjectWindow {
             }
             // Vorzähler: verbleibende Zählzeiten.
             if let Some(beats) = self.count_in_beats() {
-                ui.colored_label(t.rec, format!("Vorzähler {beats}"));
+                ui.colored_label(
+                    t.rec,
+                    crate::i18n::trf("Vorzähler {beats}", &[("beats", &beats)]),
+                );
             }
             icons::group_gap(ui);
             ui.spacing_mut().item_spacing.x = 6.0;
             // Automationsmodus für Spuren mit W; rot, solange geschrieben wird.
             let writing = self.writing_automation();
-            let label = RichText::new("Auto");
+            let label = RichText::new(tr("Auto"));
             let l = ui.label(if writing { label.color(t.rec) } else { label });
             egui::ComboBox::from_id_salt("automationsmodus")
                 .selected_text(self.auto_writer.mode.label())
@@ -1618,7 +1679,7 @@ impl ProjectWindow {
                 })
                 .response
                 .labelled_by(l.id)
-                .on_hover_text("Automation schreiben bei W: Touch oder Auto-Latch");
+                .on_hover_text(tr("Automation schreiben bei W: Touch oder Auto-Latch"));
             icons::group_gap(ui);
             self.tempo_controls(ui);
 
@@ -1647,28 +1708,35 @@ impl ProjectWindow {
             ui.spacing_mut().item_spacing.x = 6.0;
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 ui.weak(format!("UI {:.1} ms", self.frame_ms))
-                    .on_hover_text("Zeit pro Bild der Oberfläche");
+                    .on_hover_text(tr("Zeit pro Bild der Oberfläche"));
                 ui.separator();
                 match load {
                     Some(l) => {
-                        let pct = format!("Last {:.0} %", l * 100.0);
+                        let pct = crate::i18n::trf(
+                            "Last {pct} %",
+                            &[("pct", &format!("{:.0}", l * 100.0))],
+                        );
                         let text = if l >= 0.8 {
                             RichText::new(pct).color(t.rec)
                         } else {
                             RichText::new(pct).weak()
                         };
-                        ui.label(text)
-                            .on_hover_text("Audio-Last: Rechenzeit pro Block gegen seine Dauer");
+                        ui.label(text).on_hover_text(tr(
+                            "Audio-Last: Rechenzeit pro Block gegen seine Dauer",
+                        ));
                     }
                     None => {
-                        ui.weak("Last –");
+                        ui.weak(tr("Last –"));
                     }
                 }
                 ui.separator();
                 ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
                     let mut parts = vec![self.audio_status.clone()];
                     if !self.input_status.is_empty() {
-                        parts.push(format!("Eingang: {}", self.input_status));
+                        parts.push(crate::i18n::trf(
+                            "Eingang: {status}",
+                            &[("status", &self.input_status)],
+                        ));
                     }
                     if !self.midi_status.is_empty() {
                         parts.push(self.midi_status.clone());

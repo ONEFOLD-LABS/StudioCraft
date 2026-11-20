@@ -1,6 +1,7 @@
 //! Eingang und Pre-Sektion eines Kanalzugs im Inspector (Spec „Mixer → Signalfluss“,
 //! Punkte 1 und 2; Issue #19): Eingangsgain, Phase umkehren, Hoch- und Tiefpass.
 
+use crate::i18n::tr;
 use egui::Ui;
 use studiocraft_project::model::{INPUT_GAIN_DB, PRE_FILTER_HZ};
 
@@ -13,7 +14,7 @@ impl ProjectWindow {
         };
         let mut changed = false;
         ui.horizontal(|ui| {
-            let l = ui.label("Gain");
+            let l = ui.label(tr("Gain"));
             changed |= ui
                 .add(
                     egui::Slider::new(&mut t.input_gain_db, INPUT_GAIN_DB.0..=INPUT_GAIN_DB.1)
@@ -23,10 +24,12 @@ impl ProjectWindow {
                 .labelled_by(l.id)
                 .changed();
         });
-        changed |= ui.checkbox(&mut t.phase_invert, "Phase umkehren").changed();
+        changed |= ui
+            .checkbox(&mut t.phase_invert, tr("Phase umkehren"))
+            .changed();
         for (label, filter, default) in [
-            ("Hochpass", &mut t.pre_hpf, 80.0),
-            ("Tiefpass", &mut t.pre_lpf, 12_000.0),
+            (tr("Hochpass"), &mut t.pre_hpf, 80.0),
+            (tr("Tiefpass"), &mut t.pre_lpf, 12_000.0),
         ] {
             ui.horizontal(|ui| {
                 let mut on = filter.is_some();
@@ -36,7 +39,7 @@ impl ProjectWindow {
                 }
                 let mut hz = filter.unwrap_or(default);
                 let speed = f64::from(hz) * 0.01;
-                let l = ui.weak("Hz");
+                let l = ui.weak(tr("Hz"));
                 let r = ui
                     .add_enabled(
                         on,

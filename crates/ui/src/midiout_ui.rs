@@ -1,6 +1,7 @@
 //! MIDI-Spuren zu externen Geräten im Inspector (Issue #12): Ausgang (MIDI-Port), Kanal und
 //! Programm. Das Programm geht beim Wählen und bei jedem Start der Wiedergabe an das Gerät.
 
+use crate::i18n::tr;
 use egui::Ui;
 
 use crate::ProjectWindow;
@@ -33,33 +34,37 @@ impl ProjectWindow {
         let mut new_channel = channel;
         let mut new_program = program;
         ui.horizontal(|ui| {
-            let l = ui.label("Ausgang");
+            let l = ui.label(tr("Ausgang"));
             egui::ComboBox::from_id_salt(("midi-ausgang", idx))
                 .width(120.0)
                 .truncate()
-                .selected_text(port.clone().unwrap_or_else(|| "Kein Ausgang".into()))
+                .selected_text(port.clone().unwrap_or_else(|| tr("Kein Ausgang").into()))
                 .show_ui(ui, |ui| {
-                    ui.selectable_value(&mut new_port, None, "Kein Ausgang");
+                    ui.selectable_value(&mut new_port, None, tr("Kein Ausgang"));
                     for p in &ports {
                         ui.selectable_value(&mut new_port, Some(p.clone()), p);
                     }
                     // Ein gespeicherter Port, der gerade fehlt, bleibt wählbar.
                     if let Some(p) = port.as_ref().filter(|p| !ports.contains(p)) {
-                        ui.selectable_value(&mut new_port, Some(p.clone()), format!("{p} (fehlt)"));
+                        ui.selectable_value(
+                            &mut new_port,
+                            Some(p.clone()),
+                            crate::i18n::trf("{p} (fehlt)", &[("p", &p)]),
+                        );
                     }
                 })
                 .response
                 .labelled_by(l.id);
         });
         if ui
-            .small_button("Ausgänge neu einlesen")
-            .on_hover_text("MIDI-Ausgänge des Systems neu einlesen")
+            .small_button(tr("Ausgänge neu einlesen"))
+            .on_hover_text(tr("MIDI-Ausgänge des Systems neu einlesen"))
             .clicked()
         {
             self.midi_out_ports = None;
         }
         ui.horizontal(|ui| {
-            let l = ui.label("Kanal");
+            let l = ui.label(tr("Kanal"));
             egui::ComboBox::from_id_salt(("midi-kanal", idx))
                 .selected_text(channel.to_string())
                 .show_ui(ui, |ui| {
@@ -72,10 +77,10 @@ impl ProjectWindow {
         });
         ui.horizontal(|ui| {
             let mut on = program.is_some();
-            ui.checkbox(&mut on, "Programm");
+            ui.checkbox(&mut on, tr("Programm"));
             // Anzeige 1–128 wie auf den meisten Geräten, gespeichert 0–127.
             let mut shown = i32::from(program.unwrap_or(0)) + 1;
-            let l = ui.weak("Nr.");
+            let l = ui.weak(tr("Nr."));
             ui.add_enabled(on, egui::DragValue::new(&mut shown).range(1..=128))
                 .labelled_by(l.id);
             new_program = on.then(|| (shown.clamp(1, 128) - 1) as u8);
