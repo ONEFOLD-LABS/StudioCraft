@@ -64,7 +64,7 @@ impl ProjectWindow {
                 .filter(|i| !set.contains(i))
                 .filter(|&i| {
                     let t = &self.project.tracks[i];
-                    t.output.is_some_and(|o| ids.contains(&o))
+                    ids.iter().any(|&id| t.routes_to(id))
                         || t.sends.iter().any(|s| ids.contains(&s.target))
                 })
                 .collect();
@@ -99,14 +99,20 @@ impl ProjectWindow {
             if spec.target != RenderTarget::Main {
                 t.solo = false;
                 t.mute = false;
-                // Nur Wege, die im Gerenderten bleiben.
+                // Nur Wege, die im Gerenderten bleiben; weitere Ausgänge auf Busse gingen
+                // an der Spur vorbei in die Summe.
                 t.sends.retain(|s| ids.contains(&s.target));
+                t.extra_outputs.retain(|o| match *o {
+                    studiocraft_project::OutTarget::Group(g) => ids.contains(&g),
+                    studiocraft_project::OutTarget::Bus(_) => false,
+                });
             }
         }
         if let RenderTarget::Track(target) = spec.target {
             let t = &mut project.tracks[target];
             t.output = None;
             t.out_bus = None;
+            t.extra_outputs.clear();
             t.sends.clear();
             if !spec.with_channel {
                 t.volume_db = 0.0;

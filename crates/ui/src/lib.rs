@@ -4005,6 +4005,60 @@ mod tests {
         assert_eq!(h.state().project.tracks[0].out_bus, None);
     }
 
+    #[test]
+    fn renders_inspector_extra_outputs() {
+        use studiocraft_project::{OutTarget, TrackKind};
+        shot("inspector-weitere-ausgaenge", |w| {
+            let g = w
+                .project
+                .add_track(TrackKind::Group, String::from("Drums Bus"));
+            let id = w.project.tracks[g].id;
+            let bus = w.project.io.add(true, true).unwrap();
+            w.project.tracks[0].extra_outputs = vec![OutTarget::Group(id), OutTarget::Bus(bus)];
+            w.selected_track = Some(0);
+            w.show_inspector = true;
+        });
+    }
+
+    #[test]
+    fn a_track_routes_to_extra_outputs_from_the_inspector() {
+        use studiocraft_project::{OutTarget, TrackKind};
+        let (mut w, _) = one_event_window();
+        let g = w.project.add_track(TrackKind::Group, String::from("Bus A"));
+        let gid = w.project.tracks[g].id;
+        w.selected_track = Some(0);
+        w.show_inspector = true;
+        let mut h = window_harness(w);
+        h.run_steps(3);
+        // Add the group as an extra destination; the main mix stays the output.
+        h.get_by_label("+ Weiterer Ausgang").click();
+        h.run_steps(2);
+        h.get_all_by_label("Bus A").last().unwrap().click();
+        h.run_steps(3);
+        let t = &h.state().project.tracks[0];
+        assert_eq!(t.output, None);
+        assert_eq!(t.extra_outputs, vec![OutTarget::Group(gid)]);
+        h.get_by_label("Auch an: Bus A");
+        // Choosing the group as the main output drops it from the extra destinations.
+        h.get_by_label("Ausgang").click();
+        h.run_steps(2);
+        h.get_all_by_label("Bus A").last().unwrap().click();
+        h.run_steps(3);
+        let t = &h.state().project.tracks[0];
+        assert_eq!(t.output, Some(gid));
+        assert!(t.extra_outputs.is_empty());
+        // Undo twice: back to main mix plus the group, then to no extra destination.
+        h.state_mut().undo();
+        assert_eq!(
+            h.state().project.tracks[0].extra_outputs,
+            vec![OutTarget::Group(gid)]
+        );
+        h.run_steps(2);
+        h.get_by_label("Weiteren Ausgang entfernen").click();
+        h.run_steps(2);
+        assert!(h.state().project.tracks[0].extra_outputs.is_empty());
+    }
+
     /// Wellenform bei nicht ganzzahliger Skalierung (Bild für den Vergleich mit
     /// `STUDIOCRAFT_SHOTS`): keine senkrechten Streifen.
     #[test]

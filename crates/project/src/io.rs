@@ -191,6 +191,9 @@ impl Project {
             if output && t.out_bus == Some(id) {
                 t.out_bus = None;
             }
+            if output {
+                t.extra_outputs.retain(|o| *o != crate::OutTarget::Bus(id));
+            }
             if !output && t.input_bus == Some(id) {
                 t.input_bus = None;
             }

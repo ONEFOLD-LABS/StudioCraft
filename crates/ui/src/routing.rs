@@ -2,7 +2,9 @@
 
 use crate::i18n::tr;
 use egui::Ui;
-use studiocraft_project::{MAX_DB, MIN_DB, Project, SendSlot, TrackId, TrackKind};
+use studiocraft_project::{
+    MAX_DB, MAX_EXTRA_OUTPUTS, MIN_DB, OutTarget, Project, SendSlot, TrackId, TrackKind,
+};
 
 use crate::{ProjectWindow, mixer::db_label};
 
@@ -136,9 +138,91 @@ impl ProjectWindow {
         });
         if let Some(c) = choice.filter(|c| *c != (current, current_bus)) {
             let before = self.project.clone();
-            self.project.tracks[track].output = c.0;
-            self.project.tracks[track].out_bus = c.1;
+            let t = &mut self.project.tracks[track];
+            t.output = c.0;
+            t.out_bus = c.1;
+            // Der neue Hauptausgang steht nicht zusätzlich in den weiteren Ausgängen.
+            let extras = std::mem::take(&mut t.extra_outputs);
+            t.extra_outputs = extras
+                .into_iter()
+                .filter(|o| !t.is_main_output(*o))
+                .collect();
             self.checkpoint(before);
+        }
+        self.extra_outputs_ui(ui, track);
+    }
+
+    /// Name eines Ausgangsziels.
+    fn out_target_name(&self, o: OutTarget) -> String {
+        match o {
+            OutTarget::Group(id) => self.track_name(id),
+            OutTarget::Bus(id) => self
+                .project
+                .io
+                .output(id)
+                .map_or_else(|| "?".to_owned(), |b| b.name.clone()),
+        }
+    }
+
+    /// Weitere Ausgänge der Spur (Spec „Routing und Busse“: direkt auf mehrere Ziele):
+    /// Liste mit Entfernen und „+ Weiterer Ausgang“ mit allen Bussen und Gruppen, die noch
+    /// frei sind und keine Schleife bilden.
+    fn extra_outputs_ui(&mut self, ui: &mut Ui, track: usize) {
+        let t = &self.project.tracks[track];
+        let me = t.id;
+        let extras = t.extra_outputs.clone();
+        let mut remove = None;
+        for (k, &o) in extras.iter().enumerate() {
+            ui.horizontal(|ui| {
+                ui.label(crate::i18n::trf(
+                    "Auch an: {name}",
+                    &[("name", &self.out_target_name(o))],
+                ));
+                let r = ui
+                    .small_button(tr("x"))
+                    .on_hover_text(tr("Weiteren Ausgang entfernen"));
+                r.widget_info(|| {
+                    egui::WidgetInfo::labeled(
+                        egui::Role::Button,
+                        true,
+                        tr("Weiteren Ausgang entfernen"),
+                    )
+                });
+                if r.clicked() {
+                    remove = Some(k);
+                }
+            });
+        }
+        if let Some(k) = remove {
+            let before = self.project.clone();
+            self.project.tracks[track].extra_outputs.remove(k);
+            self.checkpoint(before);
+        }
+        let t = &self.project.tracks[track];
+        let candidates: Vec<OutTarget> = self
+            .project
+            .io
+            .outputs
+            .iter()
+            .map(|b| OutTarget::Bus(b.id))
+            .chain(
+                self.route_targets(me, true)
+                    .into_iter()
+                    .map(OutTarget::Group),
+            )
+            .filter(|o| !t.is_main_output(*o) && !t.extra_outputs.contains(o))
+            .collect();
+        if t.extra_outputs.len() < MAX_EXTRA_OUTPUTS && !candidates.is_empty() {
+            ui.menu_button(tr("+ Weiterer Ausgang"), |ui| {
+                for o in candidates {
+                    if ui.button(self.out_target_name(o)).clicked() {
+                        let before = self.project.clone();
+                        self.project.tracks[track].extra_outputs.push(o);
+                        self.checkpoint(before);
+                        ui.close();
+                    }
+                }
+            });
         }
     }
 

@@ -51,6 +51,8 @@ pub struct TrackDelay {
     pub direct: u32,
     /// Zusätzlich je Send (in der Reihenfolge von `PlayTrack::sends`).
     pub sends: Vec<u32>,
+    /// Zusätzlich je weiterem Ausgang (in der Reihenfolge von `PlayTrack::extra`).
+    pub extras: Vec<u32>,
     /// MIDI-Spuren an externe Geräte: um so viel später senden (statt Verzögerungsleitung).
     pub midi: u32,
 }
@@ -85,33 +87,49 @@ impl Compensation {
                     e[r] = e[r].max(o[i]);
                 }
             };
-            if let Output::Bus(b) = t.output {
-                feed(b);
+            for out in std::iter::once(&t.output).chain(&t.extra) {
+                if let Output::Bus(b) = *out {
+                    feed(b);
+                }
             }
             for s in &t.sends {
                 feed(s.bus);
             }
         }
+        let to_device = |o: &Output| matches!(o, Output::Master | Output::Hw(_));
         let total = (0..n)
-            .filter(|&i| matches!(song.tracks[i].output, Output::Master | Output::Hw(_)))
+            .filter(|&i| {
+                let t = &song.tracks[i];
+                to_device(&t.output) || t.extra.iter().any(to_device)
+            })
             .map(|i| o[i])
             .max()
             .unwrap_or(0);
         let mut tracks = vec![TrackDelay::default(); track_count];
         for (i, t) in song.tracks.iter().enumerate() {
             let arrive = |bus: usize| reader(bus).map_or(o[i], |r| e[r]);
-            let direct = match t.output {
-                Output::Master | Output::Hw(_) => total,
-                Output::Bus(b) => arrive(b),
-                Output::Nowhere => o[i],
-            }
-            .saturating_sub(o[i]);
+            let path = |out: Output| {
+                match out {
+                    Output::Master | Output::Hw(_) => total,
+                    Output::Bus(b) => arrive(b),
+                    Output::Nowhere => o[i],
+                }
+                .saturating_sub(o[i])
+            };
+            let direct = path(t.output);
+            let extras: Vec<u64> = t.extra.iter().map(|&x| path(x)).collect();
             let sends: Vec<u64> = t
                 .sends
                 .iter()
                 .map(|s| arrive(s.bus).saturating_sub(o[i]))
                 .collect();
-            let common = sends.iter().copied().chain([direct]).min().unwrap_or(0);
+            let common = sends
+                .iter()
+                .chain(&extras)
+                .copied()
+                .chain([direct])
+                .min()
+                .unwrap_or(0);
             let clamp = |v: u64| u32::try_from(v).unwrap_or(u32::MAX);
             if let Some(slot) = tracks.get_mut(t.slot) {
                 *slot = if t.midi_out.is_some() {
@@ -125,6 +143,7 @@ impl Compensation {
                         common: clamp(common),
                         direct: clamp(direct - common),
                         sends: sends.iter().map(|&s| clamp(s - common)).collect(),
+                        extras: extras.iter().map(|&s| clamp(s - common)).collect(),
                         midi: 0,
                     }
                 };
@@ -139,7 +158,10 @@ impl Compensation {
     /// Ob irgendwo verzögert wird.
     pub fn is_empty(&self) -> bool {
         self.tracks.iter().all(|t| {
-            t.common == 0 && t.direct == 0 && t.midi == 0 && t.sends.iter().all(|&s| s == 0)
+            t.common == 0
+                && t.direct == 0
+                && t.midi == 0
+                && t.sends.iter().chain(&t.extras).all(|&s| s == 0)
         })
     }
 }
@@ -149,6 +171,7 @@ pub struct TrackLines {
     pub common: Option<DelayLine>,
     pub direct: Option<DelayLine>,
     pub sends: Vec<Option<DelayLine>>,
+    pub extras: Vec<Option<DelayLine>>,
     /// MIDI an externe Geräte: Versatz in Frames.
     pub midi: u32,
 }
@@ -175,6 +198,7 @@ impl DelayBank {
                     common: DelayLine::new(t.common),
                     direct: DelayLine::new(t.direct),
                     sends: t.sends.iter().map(|&s| DelayLine::new(s)).collect(),
+                    extras: t.extras.iter().map(|&s| DelayLine::new(s)).collect(),
                     midi: t.midi,
                 })
                 .collect(),
@@ -228,6 +252,28 @@ mod tests {
             "no delay line"
         );
         assert_eq!(DelayBank::new(&c).tracks[1].midi, 480);
+    }
+
+    #[test]
+    fn extra_outputs_get_their_own_delay() {
+        // Track 0 goes to the main mix and to group bus 0 (track 1, 100 frames latency);
+        // track 2 (no latency) goes straight to the main mix.
+        let mut a = track(0, Output::Master, None, Vec::new());
+        a.extra = vec![Output::Bus(0)];
+        let song = Song {
+            tracks: vec![
+                a,
+                track(1, Output::Master, Some(0), Vec::new()),
+                track(2, Output::Master, None, Vec::new()),
+            ],
+            ..Song::default()
+        };
+        let c = Compensation::compute(&song, &[0, 100, 0], 3);
+        assert_eq!(c.total, 100);
+        // The direct path of track 0 waits for the group; its path into the group does not.
+        let t0 = &c.tracks[0];
+        assert_eq!((t0.common, t0.direct, t0.extras.clone()), (0, 100, vec![0]));
+        assert_eq!(c.tracks[2].common + c.tracks[2].direct, 100);
     }
 
     #[test]
