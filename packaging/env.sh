@@ -12,7 +12,7 @@
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 export ROOT
-export APP_ID="${APP_ID:-io.github.xxcrusaderxx.studiocraft}"
+export APP_ID="${APP_ID:-io.github.onefold_labs.studiocraft}"
 
 # Die Version steht an genau einer Stelle: `[workspace.package] version` in Cargo.toml.
 workspace_version() {

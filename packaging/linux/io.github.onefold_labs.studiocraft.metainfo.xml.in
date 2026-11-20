@@ -1,12 +1,12 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <component type="desktop-application">
-  <id>io.github.xxcrusaderxx.studiocraft</id>
+  <id>io.github.onefold_labs.studiocraft</id>
   <metadata_license>CC0-1.0</metadata_license>
   <project_license>MIT OR Apache-2.0</project_license>
   <name>StudioCraft</name>
   <summary>Record, arrange and mix music</summary>
   <summary xml:lang="de">Musik aufnehmen, arrangieren und mischen</summary>
-  <developer id="io.github.xxcrusaderxx">
+  <developer id="io.github.onefold_labs">
     <name>StudioCraft contributors</name>
   </developer>
   <description>
@@ -17,9 +17,13 @@
       arrangiert Events auf Spuren, mischt mit Gruppen, FX-Kanälen und CLAP-Plugins und exportiert
       den Mix als WAV, FLAC oder AIFF.</p>
   </description>
-  <url type="homepage">https://github.com/xXCrusaderXx/StudioCraft</url>
-  <url type="bugtracker">https://github.com/xXCrusaderXx/StudioCraft/issues</url>
-  <launchable type="desktop-id">io.github.xxcrusaderxx.studiocraft.desktop</launchable>
+  <url type="homepage">https://github.com/ONEFOLD-LABS/StudioCraft</url>
+  <url type="bugtracker">https://github.com/ONEFOLD-LABS/StudioCraft/issues</url>
+  <!-- App id until 0.7.0, before the move to ONEFOLD LABS. -->
+  <replaces>
+    <id>io.github.xxcrusaderxx.studiocraft</id>
+  </replaces>
+  <launchable type="desktop-id">io.github.onefold_labs.studiocraft.desktop</launchable>
   <icon type="stock">studiocraft</icon>
   <categories>
     <category>AudioVideo</category>
