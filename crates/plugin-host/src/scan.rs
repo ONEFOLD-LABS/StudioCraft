@@ -14,6 +14,8 @@ pub enum PluginFormat {
     Clap,
     Lv2,
     Vst3,
+    /// Audio Unit (nur macOS).
+    Au,
 }
 
 /// Beschreibung eines gefundenen Plugins.
@@ -38,6 +40,7 @@ impl PluginInfo {
             PluginFormat::Clap => self.name.clone(),
             PluginFormat::Lv2 => format!("{} (LV2)", self.name),
             PluginFormat::Vst3 => format!("{} (VST3)", self.name),
+            PluginFormat::Au => format!("{} (AU)", self.name),
         }
     }
 
@@ -171,6 +174,7 @@ pub fn scan(paths: &[PathBuf]) -> (Vec<PluginInfo>, Vec<String>) {
         }
     }
     found.extend(crate::lv2::scan());
+    found.extend(crate::au::scan());
     sort_plugins(&mut found);
     (found, errors)
 }
