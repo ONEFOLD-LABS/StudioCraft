@@ -267,6 +267,10 @@ pub struct Track {
     /// Solo-Defeat (Strg+Klick auf Solo): bleibt hörbar, wenn andere Spuren solo sind.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub solo_defeat: bool,
+    /// Drum-Map (`drummap.rs`): Parts öffnen im Drum-Editor, Mute/Solo je Zeile wirken auf
+    /// die Wiedergabe. `None`: Key-Editor.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub drum_map: Option<crate::DrumMap>,
     /// Link-Gruppe im Mixer (1 bis [`crate::MAX_LINK_GROUPS`]): Fader, Mute und Solo der
     /// Gruppe bewegen sich gemeinsam (`links.rs`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -900,6 +904,7 @@ impl Project {
                 program: None,
                 solo_defeat: false,
                 link_group: None,
+                drum_map: None,
                 pan_mode: PanMode::Balance,
                 mixer_hidden: false,
                 mixer_narrow: false,
@@ -1507,6 +1512,7 @@ impl Project {
             program: None,
             solo_defeat: false,
             link_group: None,
+            drum_map: None,
             pan_mode: PanMode::Balance,
             mixer_hidden: false,
             mixer_narrow: false,
