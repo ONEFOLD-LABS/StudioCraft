@@ -249,6 +249,11 @@ impl Song {
                     };
                     let ev_start = tempo.frames(e.start.0, rate);
                     let env_length = tempo.frames(e.end(), rate) - ev_start;
+                    // Folgt das Event dem Tempo, klingt ein gedehnter Ausschnitt ab Frame 0.
+                    let (samples, base) = match musical_render(tempo, e, samples, rate) {
+                        Some(s) => (s, 0),
+                        None => (samples.clone(), e.offset),
+                    };
                     for &(a, b) in parts {
                         let (fa, fb) = (tempo.frames(a, rate), tempo.frames(b, rate));
                         if fb <= fa {
@@ -268,7 +273,7 @@ impl Song {
                             gain: db_to_gain(e.gain_db),
                             env_offset,
                             env_length,
-                            ..PlayEvent::new(fa, fb - fa, e.offset + env_offset, samples.clone())
+                            ..PlayEvent::new(fa, fb - fa, base + env_offset, samples.clone())
                         });
                     }
                 }
@@ -568,6 +573,59 @@ impl Song {
     }
 }
 
+/// Kennzahl der Tempo-Map für den Zwischenspeicher des Time-Stretch.
+fn tempo_key(tempo: &TempoMap) -> (u64, bool, Vec<(u64, u64, bool)>) {
+    (
+        tempo.bpm.to_bits(),
+        tempo.use_track,
+        tempo
+            .events
+            .iter()
+            .map(|e| (e.tick, e.bpm.to_bits(), e.ramp))
+            .collect(),
+    )
+}
+
+/// Gedehnte Samples eines Audio-Events, das dem Projekttempo folgt (Issue #55), für die
+/// ganze Länge des Events ab dessen Anfang. `None`: nicht nötig (folgt nicht dem Tempo, oder
+/// das Tempo ist fest und gleich dem der Datei) – dann klingt der Clip 1:1.
+fn musical_render(
+    tempo: &TempoMap,
+    e: &studiocraft_project::Event,
+    samples: &Arc<[f32]>,
+    rate: u32,
+) -> Option<Arc<[f32]>> {
+    let bpm = e.musical.filter(|b| b.is_finite() && *b > 0.0)?;
+    if !tempo.varies() && (tempo.bpm - bpm).abs() < 1e-9 {
+        return None;
+    }
+    let start = tempo.frames(e.start.0, rate);
+    let frames = tempo
+        .frames(e.end(), rate)
+        .saturating_sub(start)
+        .min(crate::stretch::MAX_RENDER_FRAMES);
+    let key = crate::stretch::Key::new(
+        samples,
+        (
+            e.offset,
+            e.start.0,
+            e.length,
+            bpm.to_bits(),
+            rate,
+            tempo_key(tempo),
+        ),
+    );
+    let (offset, ev_tick) = (e.offset as f64, e.start.0 as f64);
+    let r = f64::from(rate);
+    let per_tick = 60.0 / bpm / studiocraft_project::TICKS_PER_QUARTER as f64 * r;
+    Some(crate::stretch::cached(key, || {
+        crate::stretch::render(samples, rate, frames as usize, |j| {
+            let tick = tempo.ticks_at_seconds((start as f64 + j) / r);
+            offset + (tick - ev_tick) * per_tick
+        })
+    }))
+}
+
 impl PlayTrack {
     /// Schreibt die Events dieser Spur ohne Fader und Panorama in `out`
     /// (wird addiert). Echtzeitsicher: keine Allokation.
@@ -685,6 +743,62 @@ mod tests {
                 },
             ]
         );
+    }
+
+    /// Projekt mit einer Audio-Spur und einem Event über einen Sinus-Clip (1 s, 48 kHz).
+    fn musical_project(bpm_file: f64) -> (Project, HashMap<ClipId, Arc<[f32]>>, u64) {
+        let mut p = Project::default();
+        p.add_track(TrackKind::Audio, "A");
+        let c = p.add_clip(PoolClip {
+            name: "loop".into(),
+            path: None,
+            sample_rate: 48_000,
+            frames: 48_000,
+        });
+        let id = p.add_audio_event(0, 0, c).unwrap();
+        assert!(p.set_musical(id, Some(bpm_file)));
+        let samples: Vec<f32> = (0..48_000)
+            .flat_map(|i| {
+                let v = (std::f64::consts::TAU * 440.0 * f64::from(i) / 48_000.0).sin() as f32;
+                [v, v]
+            })
+            .collect();
+        (p, HashMap::from([(c, samples.into())]), id)
+    }
+
+    #[test]
+    fn musical_audio_plays_one_to_one_at_the_file_tempo() {
+        let (p, clips, _) = musical_project(120.0);
+        let song = Song::build(&p, &clips, 48_000);
+        let ev = &song.tracks[0].events[0];
+        assert!(Arc::ptr_eq(&ev.samples, &clips[&0]), "kein Rendern nötig");
+        assert_eq!((ev.length, ev.offset), (48_000, 0));
+    }
+
+    #[test]
+    fn musical_audio_follows_a_faster_project_tempo() {
+        // Datei in 120 BPM, Projekt in 240 BPM: die Sekunde Audio dauert eine halbe Sekunde.
+        let (mut p, clips, id) = musical_project(120.0);
+        let mut tempo = p.tempo.clone();
+        tempo.bpm = 240.0;
+        p.set_tempo_map(tempo);
+        assert_eq!(
+            p.event(id).unwrap().length,
+            2 * TICKS_PER_QUARTER,
+            "Takte bleiben"
+        );
+        let song = Song::build(&p, &clips, 48_000);
+        let ev = &song.tracks[0].events[0];
+        assert_eq!(ev.length, 24_000);
+        assert_eq!(ev.samples.len(), 2 * 24_000);
+        // Die Tonhöhe bleibt: etwa 220 Schwingungen in der halben Sekunde.
+        let up = (1..24_000)
+            .filter(|&i| ev.samples[(i - 1) * 2] < 0.0 && ev.samples[i * 2] >= 0.0)
+            .count();
+        assert!((214..=226).contains(&up), "{up}");
+        // Gleiches Projekt: dasselbe Ergebnis aus dem Zwischenspeicher.
+        let again = Song::build(&p, &clips, 48_000);
+        assert!(Arc::ptr_eq(&again.tracks[0].events[0].samples, &ev.samples));
     }
 
     fn ones(frames: usize, v: f32) -> Arc<[f32]> {

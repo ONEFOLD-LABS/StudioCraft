@@ -93,6 +93,68 @@ pub struct Event {
     /// Geteilte Kopien: Events mit derselben Gruppe teilen ihren Inhalt (Noten, Clip).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub shared: Option<u32>,
+    /// Audio-Events, die dem Projekttempo folgen (Time-Stretch, Issue #55): das Tempo der
+    /// Datei in BPM. Solche Events hängen an Takten wie MIDI; ihr Inhalt wird so gedehnt,
+    /// dass eine Viertel der Datei eine Viertel im Projekt dauert. `None`: Wiedergabe 1:1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub musical: Option<f64>,
+}
+
+/// Frames des Clip-Inhalts für `ticks`: bei Events, die dem Tempo folgen (`musical`), im
+/// Tempo der Datei, sonst über die Tempo-Map.
+pub fn content_frames(tempo: &TempoMap, musical: Option<f64>, ticks: u64, rate: u32) -> u64 {
+    match musical {
+        Some(bpm) if bpm.is_finite() && bpm > 0.0 => {
+            let f = ticks as f64 / TICKS_PER_QUARTER as f64 * 60.0 / bpm * f64::from(rate);
+            if f.is_finite() {
+                f.round().max(0.0) as u64
+            } else {
+                0
+            }
+        }
+        _ => tempo.frames(ticks, rate),
+    }
+}
+
+/// Tempo aus einem Dateinamen wie „Beat 92bpm“ oder „loop_120_BPM“: die Zahl direkt vor
+/// „bpm“ (Groß-/Kleinschreibung egal, Trenner erlaubt), 40 bis 300.
+pub fn bpm_in_name(name: &str) -> Option<f64> {
+    let lower = name.to_lowercase();
+    let bytes = lower.as_bytes();
+    let mut from = 0;
+    while let Some(i) = lower[from..].find("bpm").map(|i| i + from) {
+        from = i + 3;
+        // Trenner zwischen Zahl und „bpm“ überspringen.
+        let mut end = i;
+        while end > 0 && matches!(bytes[end - 1], b' ' | b'_' | b'-') {
+            end -= 1;
+        }
+        let mut start = end;
+        while start > 0 && (bytes[start - 1].is_ascii_digit() || bytes[start - 1] == b'.') {
+            start -= 1;
+        }
+        if let Ok(v) = lower[start..end].parse::<f64>()
+            && (40.0..=300.0).contains(&v)
+        {
+            return Some(v);
+        }
+    }
+    None
+}
+
+/// Umkehrung von [`content_frames`]: Ticks für `frames` Frames des Clip-Inhalts.
+pub fn content_ticks(tempo: &TempoMap, musical: Option<f64>, frames: u64, rate: u32) -> u64 {
+    match musical {
+        Some(bpm) if bpm.is_finite() && bpm > 0.0 && rate > 0 => {
+            let t = frames as f64 / f64::from(rate) * bpm / 60.0 * TICKS_PER_QUARTER as f64;
+            if t.is_finite() {
+                t.round().max(0.0) as u64
+            } else {
+                0
+            }
+        }
+        _ => tempo.ticks(frames, rate),
+    }
 }
 
 fn default_channel() -> u8 {
@@ -948,6 +1010,7 @@ impl Project {
                         comp: 0,
                         color: None,
                         shared: None,
+                        musical: None,
                         gain_db: 0.0,
                         fade_in_curve: FadeCurve::Linear,
                         fade_out_curve: FadeCurve::Linear,
@@ -1015,7 +1078,8 @@ impl Project {
         let mut right = ev.clone();
         right.id = new_id;
         if let Some(c) = ev.clip.and_then(|c| self.pool.get(c as usize)) {
-            right.offset = ev.offset + self.tempo.frames(at - ev.start.0, c.sample_rate);
+            right.offset =
+                ev.offset + content_frames(&self.tempo, ev.musical, at - ev.start.0, c.sample_rate);
         }
         right.start = Position(at);
         right.length = ev.end() - at;
@@ -1158,6 +1222,7 @@ impl Project {
                 comp: 0,
                 color: None,
                 shared: None,
+                musical: None,
                 gain_db: 0.0,
                 fade_in_curve: FadeCurve::Linear,
                 fade_out_curve: FadeCurve::Linear,
@@ -1170,8 +1235,8 @@ impl Project {
     /// insgesamt reichen darf, in Ticks: begrenzt durch den Clip.
     fn clip_bounds(&self, ev: &Event) -> Option<(u64, u64)> {
         let c = self.pool.get(ev.clip? as usize)?;
-        let before = self.tempo.ticks(ev.offset, c.sample_rate);
-        let total = self.tempo.ticks(c.frames, c.sample_rate);
+        let before = content_ticks(&self.tempo, ev.musical, ev.offset, c.sample_rate);
+        let total = content_ticks(&self.tempo, ev.musical, c.frames, c.sample_rate);
         Some((before, total))
     }
 
@@ -1341,12 +1406,13 @@ impl Project {
             return false;
         };
         if let Some(rate) = rate {
+            let m = ev.musical;
             if start >= old_start {
-                ev.offset += tempo.frames(start - old_start, rate);
+                ev.offset += content_frames(&tempo, m, start - old_start, rate);
             } else {
-                ev.offset = ev
-                    .offset
-                    .saturating_sub(tempo.frames(old_start - start, rate));
+                ev.offset =
+                    ev.offset
+                        .saturating_sub(content_frames(&tempo, m, old_start - start, rate));
             }
         }
         // Noten und Controller bleiben an ihrer Stelle im Projekt.
@@ -1409,10 +1475,13 @@ impl Project {
             return false;
         };
         if let Some(rate) = rate {
+            let m = ev.musical;
             if end >= old_end {
-                ev.offset = ev.offset.saturating_sub(tempo.frames(end - old_end, rate));
+                ev.offset =
+                    ev.offset
+                        .saturating_sub(content_frames(&tempo, m, end - old_end, rate));
             } else {
-                ev.offset += tempo.frames(old_end - end, rate);
+                ev.offset += content_frames(&tempo, m, old_end - end, rate);
             }
         }
         let shift = end as i64 - old_end as i64;
@@ -1570,12 +1639,41 @@ impl Project {
                 comp: 0,
                 color: None,
                 shared: None,
+                musical: None,
                 gain_db: 0.0,
                 fade_in_curve: FadeCurve::Linear,
                 fade_out_curve: FadeCurve::Linear,
             },
         );
         Some(id)
+    }
+
+    /// Lässt ein Audio-Event dem Projekttempo folgen (`Some(Tempo der Datei)`) oder wieder 1:1
+    /// spielen (`None`). Der hörbare Ausschnitt des Clips bleibt derselbe; die Länge in Ticks
+    /// passt sich an. Gibt `false` zurück, wenn es kein Audio-Event ist.
+    pub fn set_musical(&mut self, id: EventId, bpm: Option<f64>) -> bool {
+        let bpm = match bpm {
+            Some(b) if b.is_finite() => Some(b.clamp(crate::BPM_RANGE.0, crate::BPM_RANGE.1)),
+            Some(_) => return false,
+            None => None,
+        };
+        let Some(ev) = self.event(id) else {
+            return false;
+        };
+        let Some(c) = ev.clip.and_then(|c| self.pool.get(c as usize)) else {
+            return false;
+        };
+        let rate = c.sample_rate;
+        let frames = content_frames(&self.tempo, ev.musical, ev.length, rate);
+        let length = content_ticks(&self.tempo, bpm, frames, rate).max(1);
+        let Some(ev) = self.event_mut(id) else {
+            return false;
+        };
+        ev.musical = bpm;
+        ev.length = length;
+        ev.fade_in = ev.fade_in.min(length);
+        ev.fade_out = ev.fade_out.min(length - ev.fade_in);
+        true
     }
 
     /// Rechnet einen Clip auf eine andere Abtastrate um (Länge im Pool und
@@ -1631,6 +1729,7 @@ impl Project {
             comp: 0,
             color: None,
             shared: None,
+            musical: None,
             gain_db: 0.0,
             fade_in_curve: FadeCurve::Linear,
             fade_out_curve: FadeCurve::Linear,
@@ -1671,7 +1770,8 @@ impl Project {
                 .ok_or("Clip fehlt")?;
             let seamless = a.clip == b.clip
                 && b.start.0 == a.end()
-                && b.offset == a.offset + self.tempo.frames(a.length, rate);
+                && a.musical == b.musical
+                && b.offset == a.offset + content_frames(&self.tempo, a.musical, a.length, rate);
             if !seamless {
                 return Err("Audio lässt sich nur kleben, wenn das Material direkt anschließt");
             }
@@ -1768,7 +1868,8 @@ impl Project {
             .iter_mut()
             .filter(|t| t.time_base() == TimeBase::Linear)
         {
-            for e in &mut t.events {
+            // Events, die dem Tempo folgen, behalten ihre Takte.
+            for e in t.events.iter_mut().filter(|e| e.musical.is_none()) {
                 let (s0, e0) = (e.start.0, e.end());
                 let (s1, e1) = (conv(s0), conv(e0));
                 let fin_end = conv(s0.saturating_add(e.fade_in));
@@ -2340,6 +2441,74 @@ mod tests {
         let id = p.add_audio_event(0, 0, c).unwrap();
         assert_eq!(p.event(id).unwrap().length, p.tempo.signature.bar_ticks());
         assert_eq!(p.event(id).unwrap().clip, Some(c));
+    }
+
+    #[test]
+    fn musical_audio_keeps_its_content_bars_and_split_offsets() {
+        let mut p = Project::default();
+        p.add_track(TrackKind::Audio, "A");
+        let c = p.add_clip(PoolClip {
+            name: "loop".into(),
+            path: None,
+            sample_rate: 48_000,
+            frames: 48_000,
+        });
+        let id = p.add_audio_event(0, 0, c).unwrap();
+        assert_eq!(p.event(id).unwrap().length, 1920, "1 s bei 120 BPM");
+        // Datei in 90 BPM: die Sekunde sind anderthalb Viertel.
+        assert!(p.set_musical(id, Some(90.0)));
+        assert_eq!(p.event(id).unwrap().length, 1440);
+        // Ungültige Werte und MIDI-Parts werden abgelehnt.
+        assert!(!p.set_musical(id, Some(f64::NAN)));
+        let midi = p.add_track(TrackKind::Midi, "M");
+        let part = p.create_event(midi, 0, 960).unwrap();
+        assert!(!p.set_musical(part, Some(100.0)));
+        // Tempowechsel: das Event behält Anfang und Länge in Ticks.
+        p.add_audio_event(0, 3840, c).unwrap();
+        let mut tempo = p.tempo.clone();
+        tempo.bpm = 60.0;
+        p.set_tempo_map(tempo);
+        let ev = p.event(id).unwrap();
+        assert_eq!((ev.start.0, ev.length), (0, 1440));
+        let plain = &p.tracks[0].events[1];
+        assert_eq!(plain.start.0, 1920, "lineares Audio behält seine Sekunden");
+        // Teilen nach einer Viertel: rechts beginnt der Clip 2/3 s später (Tempo der Datei).
+        let right = p.split(id, 960).unwrap();
+        assert_eq!(p.event(right).unwrap().offset, 32_000);
+        // Zurück auf 1:1: der Ausschnitt (16 000 Frames) dauert jetzt bei 60 BPM 1/3 s.
+        assert!(p.set_musical(right, None));
+        assert_eq!(p.event(right).unwrap().length, 320);
+    }
+
+    #[test]
+    fn tempo_from_file_names() {
+        assert_eq!(bpm_in_name("Beat 92bpm"), Some(92.0));
+        assert_eq!(bpm_in_name("loop_120_BPM.wav"), Some(120.0));
+        assert_eq!(bpm_in_name("Pad 87.5 bpm"), Some(87.5));
+        assert_eq!(bpm_in_name("bpm 120"), None);
+        assert_eq!(bpm_in_name("Take 3bpm"), None, "zu langsam");
+        assert_eq!(bpm_in_name("x9999bpm 100bpm"), Some(100.0));
+        assert_eq!(bpm_in_name("Gesang"), None);
+    }
+
+    #[test]
+    fn sanitize_drops_bad_file_tempos() {
+        let mut p = Project::default();
+        let t = p.add_track(TrackKind::Midi, "M");
+        let id = p.create_event(t, 0, 960).unwrap();
+        p.event_mut(id).unwrap().musical = Some(120.0);
+        let a = p.add_track(TrackKind::Audio, "A");
+        let c = p.add_clip(PoolClip {
+            name: "c".into(),
+            path: None,
+            sample_rate: 48_000,
+            frames: 4800,
+        });
+        let au = p.add_audio_event(a, 0, c).unwrap();
+        p.event_mut(au).unwrap().musical = Some(5000.0);
+        p.sanitize();
+        assert_eq!(p.event(id).unwrap().musical, None, "nur Audio-Events");
+        assert_eq!(p.event(au).unwrap().musical, Some(999.0));
     }
 
     #[test]

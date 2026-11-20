@@ -2298,9 +2298,17 @@ fn paint_waveform(
     let rate = f64::from(w.sample_rate);
     // Clip-Frame zu einer Tick-Position (über Sekunden, damit Tempowechsel stimmen).
     let start_s = tempo.seconds(studiocraft_project::Position(ev.start.0));
-    let frame_at = |t: f64| {
-        let s = tempo.seconds(studiocraft_project::Position(t.max(0.0) as u64));
-        ev.offset as f64 + (s - start_s) * rate
+    // Folgt das Event dem Tempo, zählt der Inhalt im Tempo der Datei (Issue #55).
+    let per_tick = ev
+        .musical
+        .filter(|b| b.is_finite() && *b > 0.0)
+        .map(|bpm| 60.0 / bpm / studiocraft_project::TICKS_PER_QUARTER as f64 * rate);
+    let frame_at = |t: f64| match per_tick {
+        Some(k) => ev.offset as f64 + (t - ev.start.0 as f64) * k,
+        None => {
+            let s = tempo.seconds(studiocraft_project::Position(t.max(0.0) as u64));
+            ev.offset as f64 + (s - start_s) * rate
+        }
     };
     let mid = area.center().y;
     let half = area.height() * 0.5 - 1.0;

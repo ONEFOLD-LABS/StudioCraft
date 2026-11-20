@@ -50,7 +50,7 @@ Ein Projekt besteht aus Spuren, auf denen Events liegen; Audio-Events verweisen 
 | Projekt-Cursor | Aktuelle Wiedergabeposition | Eine Position, folgt dem Transport |
 | Marker | Benannte Position oder Bereich (Cycle-Marker) | Eigene Marker-Spur |
 
-**Zeitbasis:** Jede Spur ist entweder musikalisch (Events hängen an Takten, Tempoänderungen verschieben sie) oder linear (Events hängen an Sekunden). Standard ist musikalisch für MIDI und linear für Audio.
+**Zeitbasis:** Jede Spur ist entweder musikalisch (Events hängen an Takten, Tempoänderungen verschieben sie) oder linear (Events hängen an Sekunden). Standard ist musikalisch für MIDI und linear für Audio. Einzelne Audio-Events können dem Projekttempo folgen (Info-Zeile „Folgt dem Tempo“ mit dem Tempo der Datei, vorbelegt aus einer BPM-Angabe im Dateinamen): sie hängen dann an Takten wie MIDI, und ihr Inhalt wird so gedehnt, dass eine Viertel der Datei eine Viertel im Projekt dauert – auch entlang der Tempospur; die Tonhöhe bleibt.
 
 **Undo:** Jede Bearbeitung ist ein Befehl im Undo-Verlauf. Der Verlauf ist unbegrenzt konfigurierbar und wird mit dem Projekt nicht gespeichert.
 

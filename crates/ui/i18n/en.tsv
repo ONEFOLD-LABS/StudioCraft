@@ -26,6 +26,9 @@ Daten 2	Data 2
 Keine Events	No events
 Note	Note
 Position	Position
+Folgt dem Tempo	Follows Tempo
+Audio wird gedehnt, sodass es zum Projekttempo passt (Tonhöhe bleibt)	Audio is stretched to fit the project tempo (pitch stays)
+Datei-Tempo	File Tempo
 MIDI-Datei importieren …	Import MIDI File…
 MIDI-Datei exportieren …	Export MIDI File…
 MIDI-Datei importieren	Import MIDI File

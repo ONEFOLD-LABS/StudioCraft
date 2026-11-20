@@ -22,6 +22,10 @@ enum Edit {
     FadeIn(u64),
     FadeOut(u64),
     Mute(bool),
+    /// Audio folgt dem Projekttempo (an) oder spielt 1:1 (aus).
+    Musical(bool),
+    /// Tempo der Datei in BPM (Audio, das dem Tempo folgt).
+    FileTempo(f64),
 }
 
 /// Die gewählten Events, die es gibt, und das früheste davon (Anzeige und Bezug).
@@ -94,6 +98,25 @@ pub(crate) fn show(w: &mut ProjectWindow, ui: &mut Ui) {
         if ui.checkbox(&mut muted, tr("Stumm")).changed() {
             edits.push(Edit::Mute(muted));
         }
+        if ev.clip.is_some() {
+            let mut musical = ev.musical.is_some();
+            if ui
+                .checkbox(&mut musical, tr("Folgt dem Tempo"))
+                .on_hover_text(tr(
+                    "Audio wird gedehnt, sodass es zum Projekttempo passt (Tonhöhe bleibt)",
+                ))
+                .changed()
+            {
+                edits.push(Edit::Musical(musical));
+            }
+            if let Some(bpm) = ev.musical
+                && let Some(t) = field(ui, tr("Datei-Tempo"), format!("{bpm:.2}"), 60.0, multi)
+                && let Ok(v) = t.trim().replace(',', ".").parse::<f64>()
+                && v.is_finite()
+            {
+                edits.push(Edit::FileTempo(v));
+            }
+        }
         for edit in edits {
             apply(w, &ids, id, edit);
         }
@@ -149,7 +172,7 @@ fn apply(w: &mut ProjectWindow, ids: &[EventId], reference: EventId, edit: Edit)
             continue;
         };
         let own = match &edit {
-            Edit::Name(_) | Edit::Mute(_) => edit.clone(),
+            Edit::Name(_) | Edit::Mute(_) | Edit::Musical(_) | Edit::FileTempo(_) => edit.clone(),
             Edit::Start(t) => Edit::Start(shift(ev.start.0, delta(*t, r.start.0))),
             Edit::End(t) => Edit::End(shift(ev.end(), delta(*t, r.end()))),
             Edit::Length(l) => Edit::Length(shift(ev.length, delta(*l, r.length)).max(1)),
@@ -199,12 +222,56 @@ fn apply_one(p: &mut studiocraft_project::Project, id: EventId, edit: Edit) {
                 ev.muted = m;
             }
         }
+        Edit::Musical(on) => {
+            let Some(ev) = p.event(id) else { return };
+            if on == ev.musical.is_some() {
+                return;
+            }
+            // Startwert: ein Tempo im Namen der Datei, sonst das Projekttempo am Event (dann
+            // ändert sich zunächst nichts hörbar).
+            let named = ev
+                .clip
+                .and_then(|c| p.pool.get(c as usize))
+                .and_then(|c| studiocraft_project::bpm_in_name(&c.name))
+                .or_else(|| studiocraft_project::bpm_in_name(&ev.name));
+            let bpm = named.unwrap_or_else(|| p.tempo.bpm_at(ev.start.0));
+            p.set_musical(id, on.then_some(bpm));
+        }
+        Edit::FileTempo(bpm) => {
+            if p.event(id).is_some_and(|e| e.musical.is_some()) {
+                p.set_musical(id, Some(bpm));
+            }
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn audio_follows_the_tempo_with_the_tempo_from_its_name() {
+        let mut project = studiocraft_project::Project::default();
+        project.add_track(studiocraft_project::TrackKind::Audio, "A");
+        let c = project.add_clip(studiocraft_project::PoolClip {
+            name: "Drums 90bpm".into(),
+            path: None,
+            sample_rate: 48_000,
+            frames: 48_000,
+        });
+        let id = project.add_audio_event(0, 0, c).unwrap();
+        let mut w = ProjectWindow::new(project, None, String::new());
+        apply(&mut w, &[id], id, Edit::Musical(true));
+        let ev = w.project.event(id).unwrap();
+        assert_eq!((ev.musical, ev.length), (Some(90.0), 1440));
+        apply(&mut w, &[id], id, Edit::FileTempo(120.0));
+        assert_eq!(w.project.event(id).unwrap().length, 1920);
+        apply(&mut w, &[id], id, Edit::Musical(false));
+        assert_eq!(w.project.event(id).unwrap().musical, None);
+        // Jede Änderung ist ein Schritt.
+        w.undo();
+        assert_eq!(w.project.event(id).unwrap().musical, Some(120.0));
+    }
 
     fn window() -> (ProjectWindow, EventId) {
         let mut project = studiocraft_project::Project::default();
