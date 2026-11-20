@@ -259,7 +259,7 @@ Die Insert-Aufteilung Pre/Post ist eine Projekt-Voreinstellung; jeder Slot ist e
   (Menü Transport → „Audio-Anschlüsse …“: Name, Mono/Stereo und erster Gerätekanal je Bus, bis zu acht je Richtung; der Hauptmix „Stereo Out“ bleibt immer. Spuren wählen im Inspector einen Eingangsbus und als Ausgang den Hauptmix, einen weiteren Ausgangsbus oder eine Gruppe. Entfernte Busse fallen auf den ersten Eingang bzw. den Hauptmix zurück.)
 - Ein Projekt hat mindestens einen Stereo-Ausgangsbus (Main Mix)
 - Gruppen können in Gruppen geroutet werden; das System verhindert Schleifen
-- Direktes Routing auf mehrere Ziele gleichzeitig kommt nach dem MVP
+- Direktes Routing auf mehrere Ziele gleichzeitig: Unter dem Ausgang fügt „+ Weiterer Ausgang“ bis zu sieben weitere Ziele hinzu (Ausgangsbusse und Gruppen). Sie bekommen dasselbe Signal nach dem Fader, ohne eigenen Pegel, jedes mit eigenem Latenzausgleich; Schleifen sind ausgeschlossen.
 
 **Sichtbarkeit und Ansicht**
 
