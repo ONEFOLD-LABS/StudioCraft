@@ -44,6 +44,8 @@ pub(crate) struct HostShared {
     pub resize: AtomicU64,
     pub timers: Mutex<Vec<Timer>>,
     next_timer: AtomicU32,
+    /// Angemeldete Dateideskriptoren (`clap.posix-fd-support`, nur Unix).
+    #[cfg(unix)]
     pub fds: Mutex<Vec<(i32, u32)>>,
     /// Das Plugin meldet geänderten Zustand (z. B. Einstellung im eigenen Fenster).
     pub state_dirty: AtomicBool,
@@ -55,6 +57,7 @@ impl HostShared {
     pub fn lock_timers(&self) -> std::sync::MutexGuard<'_, Vec<Timer>> {
         self.timers.lock().unwrap_or_else(PoisonError::into_inner)
     }
+    #[cfg(unix)]
     pub fn lock_fds(&self) -> std::sync::MutexGuard<'_, Vec<(i32, u32)>> {
         self.fds.lock().unwrap_or_else(PoisonError::into_inner)
     }
