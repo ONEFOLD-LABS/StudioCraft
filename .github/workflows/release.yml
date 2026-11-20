@@ -48,6 +48,36 @@ jobs:
           name: linux-${{ matrix.runner }}
           path: dist/release/*
 
+  # riscv64: cross-compiled on x86_64 (tar.gz, deb, rpm); smoke test through qemu-user.
+  linux-riscv64:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: riscv64gc-unknown-linux-gnu
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: riscv64
+      - uses: storytold/craft-common-actions/actions/install-riscv64-cross@main
+      - name: More packages (PipeWire for riscv64, clang for bindgen, nfpm)
+        run: |
+          echo 'deb [trusted=yes] https://repo.goreleaser.com/apt/ /' | sudo tee /etc/apt/sources.list.d/goreleaser.list
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends nfpm clang libclang-dev libpipewire-0.3-dev:riscv64
+      - name: Package
+        env:
+          CARGO_TARGET_RISCV64GC_UNKNOWN_LINUX_GNU_LINKER: riscv64-linux-gnu-gcc
+          CC_riscv64gc_unknown_linux_gnu: riscv64-linux-gnu-gcc
+          PKG_CONFIG_ALLOW_CROSS: "1"
+          PKG_CONFIG_LIBDIR: /usr/lib/riscv64-linux-gnu/pkgconfig:/usr/share/pkgconfig
+          BINDGEN_EXTRA_CLANG_ARGS_riscv64gc_unknown_linux_gnu: --target=riscv64-linux-gnu -I/usr/include/riscv64-linux-gnu
+        run: packaging/linux/package.sh --target riscv64gc-unknown-linux-gnu --formats "tar deb rpm"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: linux-riscv64
+          path: dist/release/*
+
   # Arch Linux package from the x86_64 tarball (Arch's official images are x86_64 only).
   arch:
     needs: linux
@@ -166,7 +196,7 @@ jobs:
 
   publish:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [linux, arch, install-test, windows, macos]
+    needs: [linux, linux-riscv64, arch, install-test, windows, macos]
     runs-on: ubuntu-latest
     permissions:
       contents: write
