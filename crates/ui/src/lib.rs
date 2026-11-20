@@ -40,6 +40,7 @@ mod keymap;
 pub mod keypad;
 mod latency;
 mod layouts_ui;
+mod listeditor;
 mod macros;
 mod markers_ui;
 mod menu;
@@ -272,6 +273,8 @@ pub struct ProjectWindow {
     /// Was die untere Zone zeigt.
     lower: LowerZone,
     key_editor: keyeditor::KeyEditor,
+    /// Filter des List-Editors (welche Event-Typen die Tabelle zeigt).
+    list_filter: listeditor::ListFilter,
     midi_inputs: Option<studiocraft_engine::midi::MidiInputs>,
     /// Anzeige der MIDI-Eingänge für die Statuszeile.
     midi_status: String,
@@ -314,6 +317,8 @@ pub(crate) enum LowerZone {
     Mixer,
     Editor,
     SampleEditor,
+    /// List-Editor: Events des aktiven Parts als Tabelle.
+    List,
 }
 
 impl ProjectWindow {
@@ -424,6 +429,7 @@ impl ProjectWindow {
             plugins: inserts::PluginState::default(),
             lower: LowerZone::Mixer,
             key_editor: keyeditor::KeyEditor::default(),
+            list_filter: listeditor::ListFilter::default(),
             midi_inputs: None,
             midi_status: String::new(),
             midi_target_sent: None,
@@ -1017,6 +1023,11 @@ impl ProjectWindow {
                                 LowerZone::SampleEditor,
                                 tr("Sample-Editor"),
                             );
+                            ui.selectable_value(
+                                &mut self.lower,
+                                LowerZone::List,
+                                tr("List-Editor"),
+                            );
                             if self.lower == LowerZone::Editor
                                 && let Some(ev) =
                                     self.key_editor.part.and_then(|p| self.project.event(p))
@@ -1039,6 +1050,7 @@ impl ProjectWindow {
                                 LowerZone::Mixer => mixer::show(self, ui),
                                 LowerZone::Editor => keyeditor::show(self, ui),
                                 LowerZone::SampleEditor => sampleeditor::show(self, ui),
+                                LowerZone::List => listeditor::show(self, ui),
                             }
                         });
                     });
@@ -4065,6 +4077,69 @@ mod tests {
         assert!(h.state().view.scroll_y > 0.0);
         h.get_by_label("Bildlaufleiste Zeit");
         h.get_by_label("Bildlaufleiste Spuren");
+    }
+
+    #[test]
+    fn render_list_editor() {
+        shot("list_editor", |w| {
+            let part = w
+                .project
+                .tracks
+                .iter()
+                .filter(|t| t.kind == TrackKind::Midi)
+                .flat_map(|t| &t.events)
+                .map(|e| e.id)
+                .next()
+                .unwrap();
+            let ev = w.project.event_mut(part).unwrap();
+            ev.notes = (0..12)
+                .map(|i| studiocraft_project::Note {
+                    pitch: 48 + (i * 5 % 24) as u8,
+                    velocity: 70 + i as u8 * 4,
+                    start: i64::from(i) * 480,
+                    length: 480,
+                })
+                .collect();
+            ev.controllers = vec![
+                studiocraft_project::CtrlPoint {
+                    kind: studiocraft_project::CtrlKind::Cc(1),
+                    start: 240,
+                    value: 64,
+                },
+                studiocraft_project::CtrlPoint {
+                    kind: studiocraft_project::CtrlKind::PitchBend,
+                    start: 960,
+                    value: 10_000,
+                },
+            ];
+            w.selection = vec![part];
+            w.key_editor.part = Some(part);
+            w.key_editor.selection = vec![1];
+            w.show_lower = true;
+            w.lower = LowerZone::List;
+        });
+    }
+
+    #[test]
+    fn the_list_editor_inserts_a_note_as_one_undo_step() {
+        let mut p = Project::default();
+        let t = p.add_track(TrackKind::Midi, "M");
+        let part = p.create_event(t, 0, 3840).unwrap();
+        let mut w = ProjectWindow::new(p, None, "kein Audio (Test)".into());
+        w.selection = vec![part];
+        w.show_lower = true;
+        w.lower = LowerZone::List;
+        let mut h = window_harness(w);
+        h.get_by_label("Keine Events");
+        h.get_by_label("Note einfügen").click();
+        h.run_steps(3);
+        assert_eq!(h.state().project.event(part).unwrap().notes.len(), 1);
+        assert_eq!(h.state().key_editor.selection, vec![0]);
+        h.get_by_label("Auswahl löschen").click();
+        h.run_steps(3);
+        assert!(h.state().project.event(part).unwrap().notes.is_empty());
+        h.state_mut().undo();
+        assert_eq!(h.state().project.event(part).unwrap().notes.len(), 1);
     }
 
     #[test]

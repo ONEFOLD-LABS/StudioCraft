@@ -13,6 +13,19 @@ Audio-Mixdown exportieren …	Export Audio Mixdown…
 Audio-Spur hinzufügen	Add Audio Track
 Audiodatei importieren …	Import Audio File…
 Audiodateien	Audio files
+List-Editor	List Editor
+Einen MIDI-Part wählen oder öffnen, um seine Events hier zu sehen	Select or open a MIDI part to see its events here
+Zeigen:	Show:
+Noten	Notes
+Controller	Controllers
+Note einfügen	Insert Note
+Auswahl löschen	Delete Selection
+Typ	Type
+Daten 1	Data 1
+Daten 2	Data 2
+Keine Events	No events
+Note	Note
+Position	Position
 MIDI-Datei importieren …	Import MIDI File…
 MIDI-Datei exportieren …	Export MIDI File…
 MIDI-Datei importieren	Import MIDI File
