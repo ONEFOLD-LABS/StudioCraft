@@ -3566,6 +3566,7 @@ dependencies = [
  "studiocraft-plugin-host",
  "studiocraft-project",
  "web-time",
+ "windows",
 ]
 
 [[package]]

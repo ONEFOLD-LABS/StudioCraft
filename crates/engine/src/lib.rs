@@ -35,6 +35,7 @@ pub mod transport;
 
 pub mod output;
 pub mod song;
+pub mod wasapi;
 
 pub use clip::{AudioClip, ClipError};
 pub use core::{Command, EngineControl, EngineCore, EngineStatus, engine};

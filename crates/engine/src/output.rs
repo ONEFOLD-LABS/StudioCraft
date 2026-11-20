@@ -3,7 +3,7 @@
 //! | System | Hosts |
 //! | --- | --- |
 //! | Linux, FreeBSD | PipeWire (Feature `pipewire`, Standard), ALSA, JACK (Feature `jack`) |
-//! | Windows | WASAPI, ASIO (Feature `asio`) |
+//! | Windows | WASAPI, eigenes WASAPI exklusiv und mit geringer Latenz ([`crate::wasapi`]), ASIO (Feature `asio`) |
 //! | macOS | CoreAudio, JACK (Feature `jack`) |
 //! | Web | Web Audio (wasm32) |
 
@@ -35,6 +35,11 @@ pub struct DeviceChoice {
 
 /// Host nach Namen; ohne Namen der Standard des Systems.
 pub(crate) fn host_by_name(name: Option<&str>) -> Result<Host, String> {
+    // Die eigenen WASAPI-Hosts zeigen dieselben Geräte wie der WASAPI-Host von cpal.
+    #[cfg(windows)]
+    if name.and_then(crate::wasapi::Mode::from_host).is_some() {
+        return cpal::host_from_id(cpal::HostId::Wasapi).map_err(|e| format!("WASAPI: {e}"));
+    }
     match name {
         None => Ok(cpal::default_host()),
         Some(name) => {
@@ -91,20 +96,48 @@ pub struct OutputInfo {
     /// `None`: Blockgröße bestimmt der Treiber.
     pub block_frames: Option<u32>,
     pub sample_format: String,
+    /// Ausgangslatenz in Frames, die der Treiber meldet (Puffer plus Gerät), falls bekannt.
+    pub latency_frames: Option<u32>,
+    /// Hinweis, wenn statt der Wahl ein anderer Modus läuft (z. B. exklusiv abgelehnt).
+    pub note: Option<String>,
+}
+
+impl OutputInfo {
+    /// Ausgangslatenz in Millisekunden, falls bekannt.
+    pub fn latency_ms(&self) -> Option<f32> {
+        let frames = self.latency_frames?;
+        (self.sample_rate > 0).then(|| frames as f32 * 1000.0 / self.sample_rate as f32)
+    }
 }
 
 /// Gewähltes Gerät samt Konfiguration, noch ohne laufenden Stream.
 /// Der Aufrufer kennt damit die Abtastrate, bevor er den Kern baut.
 pub struct PreparedOutput {
-    device: Device,
-    config: StreamConfig,
-    format: SampleFormat,
+    backend: Backend,
     pub info: OutputInfo,
+}
+
+enum Backend {
+    Cpal {
+        device: Device,
+        config: StreamConfig,
+        format: SampleFormat,
+    },
+    #[cfg(windows)]
+    Wasapi(crate::wasapi::Prepared),
+}
+
+/// Der laufende Stream: über cpal oder über den eigenen WASAPI-Pfad.
+/// Gehalten, damit der Stream läuft; beim Drop endet er.
+enum RunningStream {
+    Cpal(#[allow(dead_code)] Stream),
+    #[cfg(windows)]
+    Wasapi(#[allow(dead_code)] crate::wasapi::Running),
 }
 
 /// Laufende Ausgabe. Beim Drop wird der Stream beendet.
 pub struct AudioOutput {
-    stream: Stream,
+    stream: RunningStream,
     pub info: OutputInfo,
     shared: Arc<StreamShared>,
     /// Gibt der Audio-Thread den Kern zurück (Gerätewechsel), landet er hier.
@@ -115,7 +148,7 @@ pub struct AudioOutput {
 
 /// Zwischen Haupt- und Audio-Thread, nur Atomics.
 #[derive(Default)]
-struct StreamShared {
+pub(crate) struct StreamShared {
     /// Bitte den Kern zurückgeben und danach Stille ausgeben.
     give_back: AtomicBool,
     /// Der Stream meldete einen Fehler (z. B. Gerät entfernt).
@@ -166,10 +199,14 @@ impl AudioOutput {
 
 /// Namen aller Hosts, die in diesen Build einkompiliert sind.
 pub fn available_hosts() -> Vec<&'static str> {
-    cpal::available_hosts()
+    #[allow(unused_mut)]
+    let mut hosts: Vec<&'static str> = cpal::available_hosts()
         .into_iter()
         .map(|h| h.name())
-        .collect()
+        .collect();
+    #[cfg(windows)]
+    hosts.extend(crate::wasapi::Mode::ALL.iter().map(|m| m.host_name()));
+    hosts
 }
 
 impl PreparedOutput {
@@ -186,6 +223,80 @@ impl PreparedOutput {
     /// Wie [`Self::open`], mit Gerät, Abtastrate und Blockgröße aus `choice`. Ein genanntes
     /// Gerät, das es nicht (mehr) gibt, ist ein Fehler.
     pub fn open_with(choice: &DeviceChoice) -> Result<Self, String> {
+        #[cfg(windows)]
+        if let Some(mode) = choice
+            .host
+            .as_deref()
+            .and_then(crate::wasapi::Mode::from_host)
+        {
+            return Self::open_wasapi(choice, mode);
+        }
+        Self::open_cpal(choice)
+    }
+
+    /// Eigener WASAPI-Pfad. Lehnt das Gerät den Modus ab (belegt, Format, Richtlinie), geht es
+    /// eine Stufe zurück: exklusiv → geringe Latenz → gemeinsamer Modus über cpal. Der Grund
+    /// steht in [`OutputInfo::note`].
+    #[cfg(windows)]
+    fn open_wasapi(choice: &DeviceChoice, mode: crate::wasapi::Mode) -> Result<Self, String> {
+        use crate::wasapi::{Direction, Mode};
+        let host = host_by_name(choice.host.as_deref())?;
+        let device = match &choice.output {
+            None => host
+                .default_output_device()
+                .ok_or("Kein Audio-Ausgabegerät gefunden")?,
+            Some(name) => host
+                .output_devices()
+                .map_err(|e| format!("Ausgabegeräte: {e}"))?
+                .find(|d| device_name(d) == *name)
+                .ok_or_else(|| format!("Ausgabegerät „{name}“ nicht gefunden"))?,
+        };
+        let name = device_name(&device);
+        let id = device
+            .id()
+            .map_err(|e| format!("Gerät „{name}“: {e}"))?
+            .id()
+            .to_owned();
+        let rate = choice.sample_rate.unwrap_or(48_000);
+        let block = choice.block_frames.unwrap_or(DEFAULT_BLOCK_FRAMES);
+        let mut notes = Vec::new();
+        let mut modes = vec![mode];
+        if mode == Mode::Exclusive {
+            modes.push(Mode::LowLatency);
+        }
+        for m in modes {
+            match crate::wasapi::prepare(&id, Direction::Render, m, rate, block) {
+                Ok(prepared) => {
+                    let f = prepared.format;
+                    let info = OutputInfo {
+                        host: m.host_name().to_owned(),
+                        device: name,
+                        sample_rate: f.rate,
+                        channels: f.channels,
+                        block_frames: Some(f.period_frames),
+                        sample_format: f.sample.name().to_owned(),
+                        latency_frames: Some(f.latency_frames),
+                        note: (!notes.is_empty()).then(|| notes.join("; ")),
+                    };
+                    return Ok(Self {
+                        backend: Backend::Wasapi(prepared),
+                        info,
+                    });
+                }
+                Err(e) => notes.push(format!("{}: {e}", m.host_name())),
+            }
+        }
+        // Letzte Stufe: gemeinsamer Modus über cpal, gleiches Gerät.
+        let mut shared = Self::open_cpal(&DeviceChoice {
+            host: Some("WASAPI".into()),
+            output: Some(name),
+            ..choice.clone()
+        })?;
+        shared.info.note = Some(notes.join("; "));
+        Ok(shared)
+    }
+
+    fn open_cpal(choice: &DeviceChoice) -> Result<Self, String> {
         let host = host_by_name(choice.host.as_deref())?;
         let preferred_rate = choice.sample_rate.unwrap_or(48_000);
         let device = match &choice.output {
@@ -233,11 +344,17 @@ impl PreparedOutput {
             channels: config.channels,
             block_frames: block,
             sample_format: format.to_string(),
+            // cpal nennt die Latenz erst im laufenden Callback; im gemeinsamen Modus kommt
+            // der Windows-Mixer dazu. Lieber keine Zahl als eine zu kleine.
+            latency_frames: None,
+            note: None,
         };
         Ok(Self {
-            device,
-            config,
-            format,
+            backend: Backend::Cpal {
+                device,
+                config,
+                format,
+            },
             info,
         })
     }
@@ -246,32 +363,50 @@ impl PreparedOutput {
     /// den Audio-Thread, wenn der Stream läuft; scheitert der Start, kommt er mit dem Fehler
     /// zurück und wird nicht zerstört (Plugins, deren Fenster die Oberfläche hält).
     pub fn start(self, core: EngineCore) -> Result<AudioOutput, Box<(EngineCore, String)>> {
-        let Self {
-            device,
-            config,
-            format,
-            info,
-        } = self;
+        let Self { backend, info } = self;
         let shared = Arc::new(StreamShared::default());
         let (back_tx, handback) = rtrb::RingBuffer::new(1);
         let (mut inbound, inbound_rx) = rtrb::RingBuffer::new(1);
-        let parts = (inbound_rx, shared.clone(), back_tx);
-        let stream = match format {
-            SampleFormat::F32 => build::<f32>(&device, &config, parts),
-            SampleFormat::F64 => build::<f64>(&device, &config, parts),
-            SampleFormat::I16 => build::<i16>(&device, &config, parts),
-            SampleFormat::I32 => build::<i32>(&device, &config, parts),
-            SampleFormat::U16 => build::<u16>(&device, &config, parts),
-            SampleFormat::U8 => build::<u8>(&device, &config, parts),
-            other => Err(format!("Sampleformat {other} wird nicht unterstützt")),
+        let renderer = Renderer {
+            inbound: inbound_rx,
+            shared: shared.clone(),
+            back_tx,
+            core: None,
+            channels: usize::from(info.channels),
+            scratch: vec![0.0f32; SCRATCH_FRAMES * 2].into_boxed_slice(),
         };
-        let stream = match stream {
-            Ok(s) => s,
-            Err(e) => return Err(Box::new((core, e))),
+        let stream = match backend {
+            Backend::Cpal {
+                device,
+                config,
+                format,
+            } => {
+                let stream = match format {
+                    SampleFormat::F32 => build::<f32>(&device, &config, renderer),
+                    SampleFormat::F64 => build::<f64>(&device, &config, renderer),
+                    SampleFormat::I16 => build::<i16>(&device, &config, renderer),
+                    SampleFormat::I32 => build::<i32>(&device, &config, renderer),
+                    SampleFormat::U16 => build::<u16>(&device, &config, renderer),
+                    SampleFormat::U8 => build::<u8>(&device, &config, renderer),
+                    other => Err(format!("Sampleformat {other} wird nicht unterstützt")),
+                };
+                let stream = match stream {
+                    Ok(s) => s,
+                    Err(e) => return Err(Box::new((core, e))),
+                };
+                if let Err(e) = stream.play() {
+                    return Err(Box::new((core, format!("Stream-Start: {e}"))));
+                }
+                RunningStream::Cpal(stream)
+            }
+            #[cfg(windows)]
+            Backend::Wasapi(prepared) => {
+                match prepared.start(crate::wasapi::Job::Render(Box::new(renderer))) {
+                    Ok(running) => RunningStream::Wasapi(running),
+                    Err(e) => return Err(Box::new((core, e))),
+                }
+            }
         };
-        if let Err(e) = stream.play() {
-            return Err(Box::new((core, format!("Stream-Start: {e}"))));
-        }
         // Platz für genau einen Kern, der Ring ist leer: geht immer.
         if let Err(rtrb::PushError::Full(core)) = inbound.push(core) {
             return Err(Box::new((
@@ -319,77 +454,99 @@ fn mix_bus(
     }
 }
 
-type StreamParts = (
-    rtrb::Consumer<EngineCore>,
-    Arc<StreamShared>,
-    rtrb::Producer<EngineCore>,
-);
+/// Was der Audio-Callback braucht: Weg des Kerns hinein und zurück, Gerätekanäle und ein
+/// vorab angelegter Puffer. Gleich für cpal und den eigenen WASAPI-Pfad.
+pub(crate) struct Renderer {
+    inbound: rtrb::Consumer<EngineCore>,
+    shared: Arc<StreamShared>,
+    back_tx: rtrb::Producer<EngineCore>,
+    core: Option<EngineCore>,
+    channels: usize,
+    scratch: Box<[f32]>,
+}
 
-fn build<T>(device: &Device, config: &StreamConfig, parts: StreamParts) -> Result<Stream, String>
+impl Renderer {
+    /// Füllt einen verschachtelten Gerätepuffer. `latency_ns`: bis dieser Puffer hörbar ist.
+    /// Echtzeit: keine Allokation, kein Lock.
+    pub(crate) fn render<T>(&mut self, data: &mut [T], latency_ns: u64)
+    where
+        T: SizedSample + FromSample<f32>,
+    {
+        let channels = self.channels.max(1);
+        // Kern übernehmen, sobald er da ist (nach dem Start des Streams).
+        let giving_back = self.shared.give_back.load(Ordering::Acquire);
+        if self.core.is_none()
+            && !giving_back
+            && let Ok(c) = self.inbound.pop()
+        {
+            self.core = Some(c);
+        }
+        // Gerätewechsel: Kern zurückgeben (rtrb, vorab angelegt), danach Stille.
+        if giving_back
+            && let Some(c) = self.core.take()
+            && let Err(rtrb::PushError::Full(c)) = self.back_tx.push(c)
+        {
+            self.core = Some(c);
+        }
+        let Some(core) = self.core.as_mut() else {
+            data.fill(T::EQUILIBRIUM);
+            return;
+        };
+        core.set_block_played_at(crate::clock::now_nanos() + latency_ns);
+        for out in data.chunks_mut(SCRATCH_FRAMES * channels) {
+            let frames = out.len() / channels;
+            let block = &mut self.scratch[..frames * 2];
+            core.process(block);
+            // Hauptmix und weitere Ausgangsbusse auf ihre Gerätekanäle (Audio-
+            // Anschlüsse); überlappende Busse addieren sich.
+            let layout = core.output_layout();
+            let main = layout.first().copied().unwrap_or((0, true));
+            for (i, frame) in out.chunks_exact_mut(channels).enumerate() {
+                let mut acc = [0.0f32; MAX_DEVICE_CHANNELS];
+                let lr = [block[i * 2], block[i * 2 + 1]];
+                mix_bus(&mut acc, channels, main, lr, true);
+                for (k, &bus) in layout.iter().enumerate().skip(1) {
+                    let b = core.hw_block(k);
+                    if let Some(lr) = b.get(i * 2..i * 2 + 2) {
+                        mix_bus(&mut acc, channels, bus, [lr[0], lr[1]], false);
+                    }
+                }
+                for (s, a) in frame.iter_mut().zip(acc.iter()) {
+                    *s = T::from_sample(*a);
+                }
+                for s in frame.iter_mut().skip(MAX_DEVICE_CHANNELS) {
+                    *s = T::EQUILIBRIUM;
+                }
+            }
+        }
+    }
+
+    /// Das Gerät ist weg (Fehler des Streams).
+    #[cfg_attr(not(windows), allow(dead_code))]
+    pub(crate) fn mark_lost(&self) {
+        self.shared.lost.store(true, Ordering::Relaxed);
+    }
+}
+
+fn build<T>(
+    device: &Device,
+    config: &StreamConfig,
+    mut renderer: Renderer,
+) -> Result<Stream, String>
 where
     T: SizedSample + FromSample<f32>,
 {
-    let (mut inbound, shared, mut back_tx) = parts;
-    let mut core: Option<EngineCore> = None;
-    let lost = shared.clone();
-    let channels = usize::from(config.channels);
-    let mut scratch = vec![0.0f32; SCRATCH_FRAMES * 2].into_boxed_slice();
+    let lost = renderer.shared.clone();
     device
         .build_output_stream(
             *config,
             move |data: &mut [T], info: &cpal::OutputCallbackInfo| {
-                // Echtzeit-Callback: keine Allokation, kein Lock.
-                // Kern übernehmen, sobald er da ist (nach dem Start des Streams).
-                let giving_back = shared.give_back.load(Ordering::Acquire);
-                if core.is_none()
-                    && !giving_back
-                    && let Ok(c) = inbound.pop()
-                {
-                    core = Some(c);
-                }
-                // Gerätewechsel: Kern zurückgeben (rtrb, vorab angelegt), danach Stille.
-                if giving_back
-                    && let Some(c) = core.take()
-                    && let Err(rtrb::PushError::Full(c)) = back_tx.push(c)
-                {
-                    core = Some(c);
-                }
-                let Some(core) = core.as_mut() else {
-                    data.fill(T::EQUILIBRIUM);
-                    return;
-                };
                 let ts = info.timestamp();
                 let latency = ts
                     .playback
                     .saturating_duration_since(ts.callback)
                     .as_nanos() as u64;
-                core.set_block_played_at(crate::clock::now_nanos() + latency);
-                for out in data.chunks_mut(SCRATCH_FRAMES * channels) {
-                    let frames = out.len() / channels;
-                    let block = &mut scratch[..frames * 2];
-                    core.process(block);
-                    // Hauptmix und weitere Ausgangsbusse auf ihre Gerätekanäle (Audio-
-                    // Anschlüsse); überlappende Busse addieren sich.
-                    let layout = core.output_layout();
-                    let main = layout.first().copied().unwrap_or((0, true));
-                    for (i, frame) in out.chunks_exact_mut(channels).enumerate() {
-                        let mut acc = [0.0f32; MAX_DEVICE_CHANNELS];
-                        let lr = [block[i * 2], block[i * 2 + 1]];
-                        mix_bus(&mut acc, channels, main, lr, true);
-                        for (k, &bus) in layout.iter().enumerate().skip(1) {
-                            let b = core.hw_block(k);
-                            if let Some(lr) = b.get(i * 2..i * 2 + 2) {
-                                mix_bus(&mut acc, channels, bus, [lr[0], lr[1]], false);
-                            }
-                        }
-                        for (s, a) in frame.iter_mut().zip(acc.iter()) {
-                            *s = T::from_sample(*a);
-                        }
-                        for s in frame.iter_mut().skip(MAX_DEVICE_CHANNELS) {
-                            *s = T::EQUILIBRIUM;
-                        }
-                    }
-                }
+                renderer.render(data, latency);
             },
             move |err| {
                 lost.lost.store(true, Ordering::Relaxed);
@@ -452,5 +609,62 @@ mod tests {
             .map_err(|b| b.1)
             .unwrap();
         drop(core);
+    }
+
+    /// Eigener WASAPI-Pfad auf dem Standardgerät: beide Modi öffnen, kurz laufen lassen, den
+    /// Kern zurückholen. Braucht Windows mit Audiogerät:
+    /// `cargo test -p studiocraft-engine -- --ignored own_wasapi`.
+    #[cfg(windows)]
+    #[test]
+    #[ignore = "braucht ein Audiogerät unter Windows"]
+    fn own_wasapi_hosts_play_and_hand_the_core_back() {
+        for mode in crate::wasapi::Mode::ALL {
+            let prepared = PreparedOutput::open_with(&DeviceChoice {
+                host: Some(mode.host_name().into()),
+                block_frames: Some(128),
+                ..DeviceChoice::default()
+            })
+            .unwrap();
+            let info = prepared.info.clone();
+            eprintln!(
+                "{}: {} Hz, Block {:?}, Latenz {:?} ms, {}, Hinweis {:?}",
+                info.host,
+                info.sample_rate,
+                info.block_frames,
+                info.latency_ms(),
+                info.sample_format,
+                info.note
+            );
+            let (core, _ctl) =
+                crate::engine(info.sample_rate, studiocraft_project::TempoMap::default());
+            let out = prepared.start(core).map_err(|b| b.1).unwrap();
+            std::thread::sleep(Duration::from_millis(300));
+            assert!(!out.device_lost());
+            let core = out
+                .take_core(Duration::from_secs(1))
+                .map_err(|b| b.1)
+                .unwrap();
+            drop(core);
+        }
+    }
+
+    #[test]
+    fn latency_is_reported_in_milliseconds() {
+        let mut info = OutputInfo {
+            host: "x".into(),
+            device: "y".into(),
+            sample_rate: 48_000,
+            channels: 2,
+            block_frames: Some(128),
+            sample_format: "f32".into(),
+            latency_frames: Some(144),
+            note: None,
+        };
+        assert_eq!(info.latency_ms(), Some(3.0));
+        info.latency_frames = None;
+        assert_eq!(info.latency_ms(), None);
+        info.latency_frames = Some(10);
+        info.sample_rate = 0;
+        assert_eq!(info.latency_ms(), None);
     }
 }
