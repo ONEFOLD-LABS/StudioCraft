@@ -13,6 +13,13 @@ MIT OR Apache-2.0, with adjusted neutrals and StudioCraft's wine red accent.
 
 App icon: assets/app-icon is original StudioCraft artwork (see its README).
 
+Third-party components: StudioCraft builds on open-source libraries under MIT,
+Apache-2.0, BSD, ISC, Zlib, BSL-1.0, Unicode-3.0, MPL-2.0 (Symphonia, unmodified)
+and other permissive licences, and embeds fonts under the SIL Open Font Licence
+1.1 and the Ubuntu Font Licence 1.0. Their licence and copyright notices are in
+THIRD-PARTY-LICENSES.txt, which ships with every package and is shown in the app
+under Hilfe → Über StudioCraft.
+
 Window frame: crates/ui uses craft-window from storytold/craft-libs (MIT OR
 Apache-2.0) to decide per desktop whether StudioCraft draws its own title bar,
 in which order the window buttons sit, and to make the bar move the window.

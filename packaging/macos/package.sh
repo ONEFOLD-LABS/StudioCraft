@@ -134,7 +134,8 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 # (current_exe with --studiocraft-plugin-scan), so there is no wrapper script.
 cp "$WORK/bin/studiocraft" "$APP/Contents/MacOS/StudioCraft"
 cp "$ROOT/assets/app-icon/studiocraft.icns" "$APP/Contents/Resources/StudioCraft.icns"
-cp "$ROOT/NOTICE" "$ROOT/LICENSE-MIT" "$ROOT/LICENSE-APACHE" "$APP/Contents/Resources/"
+cp "$ROOT/NOTICE" "$ROOT/LICENSE-MIT" "$ROOT/LICENSE-APACHE" "$ROOT/THIRD-PARTY-LICENSES.txt" \
+  "$APP/Contents/Resources/"
 sed -e "s/@APP_ID@/$APP_ID/g" -e "s/@VERSION@/$VERSION/g" -e "s/@SHORT_VERSION@/$SHORT_VERSION/g" \
   -e "s/@BUILD_SHA@/${STUDIOCRAFT_BUILD_SHA:-unknown}/g" \
   "$HERE/Info.plist.in" >"$APP/Contents/Info.plist"
