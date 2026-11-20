@@ -12,7 +12,9 @@
 //! Sicherung an (ihr Pfad steht in `autosave/last.txt`).
 
 use std::path::{Path, PathBuf};
-use std::time::{Duration, Instant};
+use std::time::Duration;
+
+use web_time::Instant;
 
 use studiocraft_project::{Project, file};
 
@@ -162,6 +164,10 @@ impl ProjectWindow {
         let Some((dir, stem)) = self.backup_target() else {
             return;
         };
+        // Im Browser gibt es weder Dateisystem noch Threads: keine Sicherung.
+        if cfg!(target_arch = "wasm32") {
+            return;
+        }
         let json = self.backup_json(&dir);
         let keep = self.autosave.keep;
         self.autosave.last = Some(self.project.clone());

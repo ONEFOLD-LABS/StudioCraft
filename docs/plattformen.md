@@ -36,10 +36,10 @@ Hausregeln der Familie: nur Rust, kein Tauri, Electron oder handgeschriebenes JS
 ```
 apps/studiocraft        Desktop-App          (vorhanden)
 apps/studiocraft-cli    Kommandozeile        (vorhanden)
-apps/studiocraft-web    WASM-Build           (geplant)
+apps/studiocraft-web    WASM-Build           (vorhanden)
 crates/*                Bibliotheken         (vorhanden)
 xtask/                  cargo xtask ci, version, layers  (geplant)
-packaging/{linux,windows,macos,freebsd} vorhanden; web geplant
+packaging/{linux,windows,macos,freebsd,web} vorhanden
 .github/workflows/      ci.yml, release.yml über storytold/craft-common-actions  (geplant)
 ```
 
@@ -82,3 +82,9 @@ Der Release-Workflow installiert deb und rpm testweise unter Debian 13, Ubuntu 2
 ## FreeBSD
 
 `packaging/freebsd/package.sh` baut auf FreeBSD ein tar.gz für `/usr/local` und ein natives `pkg` (Abhängigkeiten alsa-lib und alsa-plugins). Ton läuft über ALSA, das alsa-plugins auf OSS (sound(4)) umleitet. MIDI fehlt auf FreeBSD vorerst: midir hat dort kein Backend (`crates/engine/src/midi_backend.rs` meldet das, statt den Build zu brechen). Der Workflow `.github/workflows/freebsd.yml` baut und testet über den gemeinsamen Craft-Workflow in einer FreeBSD-VM und prüft das Paket.
+
+## Web
+
+`apps/studiocraft-web` ist dasselbe Projektfenster im Browser (eframe-Web: WebGPU, sonst WebGL2). `packaging/web/package.sh` baut mit `trunk build --release` eine statische Seite und packt sie als `studiocraft-web-<version>.zip`. Ton gibt es über Web Audio; Browser erlauben ihn erst nach einer Eingabe, deshalb startet die Ausgabe beim ersten Klick oder Tastendruck im Fenster (aus Rust, ohne eigenes JavaScript). Im Browser fehlen Plugins (plugin-host stellt dort Platzhalter bereit), Aufnahme, MIDI und die automatische Sicherung; Rendern läuft ohne eigenen Thread. Öffnen und Speichern über die Datei-APIs des Browsers folgt (Issue #30).
+
+Zum lokalen Bauen: rustup mit dem Ziel `wasm32-unknown-unknown` und `trunk` (`cargo install trunk --locked`).

@@ -31,3 +31,7 @@ licensed under Apache-2.0.
 
 FreeBSD packaging: packaging/freebsd/package.sh is adapted from SoundCraft
 (storytold/soundcraft, packaging/freebsd), licensed under Apache-2.0.
+
+Web build: apps/studiocraft-web (Trunk.toml, index.html) and packaging/web/package.sh
+are adapted from SoundCraft (storytold/soundcraft, apps/soundcraft-web and
+packaging/web), licensed under Apache-2.0.
