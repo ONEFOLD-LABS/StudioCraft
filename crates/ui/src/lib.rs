@@ -501,7 +501,8 @@ impl ProjectWindow {
             .is_some_and(|t| t.status.state() != TransportState::Stopped)
     }
 
-    fn locate(&mut self, ticks: u64) {
+    /// Setzt den Cursor (und die Wiedergabeposition der Engine) auf `ticks`.
+    pub fn locate(&mut self, ticks: u64) {
         self.cursor = ticks;
         if let Some(t) = &mut self.transport {
             let f = t.frames(Position(ticks));
@@ -625,6 +626,16 @@ impl ProjectWindow {
     /// Wie viele Schritte Undo und Redo zurück- bzw. vorgehen können.
     pub fn history_depth(&self) -> (usize, usize) {
         (self.undo.len(), self.redo.len())
+    }
+
+    /// Position des Cursors in Ticks.
+    pub fn cursor(&self) -> u64 {
+        self.cursor
+    }
+
+    /// Ob eine Audio-Engine angeschlossen ist (sonst laufen Wiedergabe und Aufnahme nicht).
+    pub fn has_engine(&self) -> bool {
+        self.transport.is_some()
     }
 
     /// Linker und rechter Locator in Ticks.
@@ -772,7 +783,7 @@ impl ProjectWindow {
     }
 
     /// Wiedergabe ab dem Cursor; merkt die Startposition für das Stopp-Verhalten.
-    pub(crate) fn play(&mut self) {
+    pub fn play(&mut self) {
         self.send_programs();
         self.play_from = self.cursor;
         self.send(Command::Play);
@@ -780,7 +791,7 @@ impl ProjectWindow {
 
     /// Stopp (Spec „Stopp-Verhalten“): Läuft der Transport, hält er an und springt auf Wunsch
     /// zur Startposition zurück; steht er schon, springt Stopp zum Anfang bzw. linken Locator.
-    pub(crate) fn stop(&mut self) {
+    pub fn stop(&mut self) {
         if self.is_playing() || self.recording {
             self.stop_transport();
             if self.return_on_stop {

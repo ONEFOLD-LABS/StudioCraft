@@ -3,30 +3,50 @@
 
 use std::{io, path::PathBuf, process::ExitCode};
 
-use studiocraft_automation::{Roots, server};
+use studiocraft_automation::{Roots, connect, control::APP, server};
 
 pub const USAGE: &str = "\
 Aufruf: studiocraft-cli mcp --automation-read-root <ordner> --automation-write-root <ordner>
+                            [--connect [<port> | 127.0.0.1:<port>]]
 
   MCP-Server (Model Context Protocol) auf stdin/stdout für KI-Agenten.
   --automation-read-root   Ordner, aus dem der Agent lesen darf (mehrfach möglich)
   --automation-write-root  Ordner, in den der Agent schreiben darf (mehrfach möglich)
-  Beide sind Pflicht; Pfade außerhalb werden abgelehnt.";
+  Beide sind Pflicht; Pfade außerhalb werden abgelehnt.
+  --connect  die laufende App steuern (gestartet mit `studiocraft --control <port>`);
+             ohne Port der zuletzt gestartete Steuerkanal, sonst Port 7850";
 
-/// The folders given with the two flags (`--flag dir` or `--flag=dir`, each repeatable).
-fn parse(args: impl IntoIterator<Item = String>) -> Result<(Vec<PathBuf>, Vec<PathBuf>), String> {
+/// What the command line asks for.
+#[derive(Debug, Default, PartialEq)]
+struct Args {
+    read: Vec<PathBuf>,
+    write: Vec<PathBuf>,
+    /// `--connect`, with the address when one was given.
+    connect: Option<Option<String>>,
+}
+
+/// The two root flags (`--flag dir` or `--flag=dir`, each repeatable) and `--connect`.
+fn parse(args: impl IntoIterator<Item = String>) -> Result<Args, String> {
     const READ: &str = "--automation-read-root";
     const WRITE: &str = "--automation-write-root";
-    let (mut read, mut write) = (Vec::new(), Vec::new());
-    let mut it = args.into_iter();
+    let mut out = Args::default();
+    let mut it = args.into_iter().peekable();
     while let Some(a) = it.next() {
         let (flag, inline) = match a.split_once('=') {
             Some((f, v)) => (f.to_owned(), Some(v.to_owned())),
             None => (a.clone(), None),
         };
         let list = match flag.as_str() {
-            READ => &mut read,
-            WRITE => &mut write,
+            READ => &mut out.read,
+            WRITE => &mut out.write,
+            "--connect" => {
+                let addr = match inline {
+                    Some(v) => Some(v),
+                    None => it.next_if(|n| !n.starts_with('-')),
+                };
+                out.connect = Some(addr.map(|a| loopback(&a)).transpose()?);
+                continue;
+            }
             "-h" | "--help" => return Err(String::new()),
             _ => return Err(format!("Unbekanntes Argument: {a}")),
         };
@@ -39,13 +59,32 @@ fn parse(args: impl IntoIterator<Item = String>) -> Result<(Vec<PathBuf>, Vec<Pa
         }
         list.push(PathBuf::from(dir));
     }
-    Ok((read, write))
+    Ok(out)
+}
+
+/// `addr` as `host:port` on loopback: a bare port means `127.0.0.1`. The token never goes to
+/// another computer.
+fn loopback(addr: &str) -> Result<String, String> {
+    let (host, port) = match addr.rsplit_once(':') {
+        Some((h, p)) => (h.trim_start_matches('[').trim_end_matches(']'), p),
+        None => ("127.0.0.1", addr),
+    };
+    let port: u16 = port
+        .parse()
+        .ok()
+        .filter(|p| *p != 0)
+        .ok_or(format!("--connect: kein gültiger Port: {addr}"))?;
+    match host {
+        "127.0.0.1" | "localhost" => Ok(format!("127.0.0.1:{port}")),
+        "::1" => Ok(format!("[::1]:{port}")),
+        _ => Err(format!("--connect: nur lokal (127.0.0.1), nicht {host}")),
+    }
 }
 
 /// Runs the server until stdin closes.
 pub fn run(args: impl IntoIterator<Item = String>) -> ExitCode {
-    let roots = parse(args).and_then(|(read, write)| Roots::new(&read, &write));
-    let roots = match roots {
+    let parsed = parse(args).and_then(|a| Roots::new(&a.read, &a.write).map(|r| (a, r)));
+    let (args, roots) = match parsed {
         Ok(r) => r,
         Err(e) => {
             if !e.is_empty() {
@@ -60,7 +99,18 @@ pub fn run(args: impl IntoIterator<Item = String>) -> ExitCode {
         }
     };
     let stdin = io::stdin();
-    match server(roots).serve(stdin.lock(), io::stdout().lock()) {
+    let served = match args.connect {
+        None => server(roots).serve(stdin.lock(), io::stdout().lock()),
+        Some(addr) => {
+            let addr = addr.unwrap_or_else(|| {
+                let port = APP.read_current_port().unwrap_or(APP.default_port);
+                format!("127.0.0.1:{port}")
+            });
+            eprintln!("StudioCraft-Steuerkanal: {addr}");
+            connect(roots, &addr, None).serve(stdin.lock(), io::stdout().lock())
+        }
+    };
+    match served {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
             eprintln!("Fehler: {e}");
@@ -79,17 +129,38 @@ mod tests {
 
     #[test]
     fn both_flag_forms_repeat_and_misspellings_are_errors() {
-        let (r, w) = parse(args(&[
+        let a = parse(args(&[
             "--automation-read-root",
             "a",
             "--automation-read-root=b",
             "--automation-write-root=c",
         ]))
         .unwrap();
-        assert_eq!(r, [PathBuf::from("a"), PathBuf::from("b")]);
-        assert_eq!(w, [PathBuf::from("c")]);
+        assert_eq!(a.read, [PathBuf::from("a"), PathBuf::from("b")]);
+        assert_eq!(a.write, [PathBuf::from("c")]);
+        assert_eq!(a.connect, None);
         assert!(parse(args(&["--automation-read-roots", "a"])).is_err());
         assert!(parse(args(&["--automation-write-root"])).is_err());
         assert!(parse(args(&["--automation-write-root="])).is_err());
+    }
+
+    #[test]
+    fn connect_takes_an_optional_loopback_address() {
+        let c = |a: &[&str]| parse(args(a)).map(|a| a.connect);
+        assert_eq!(c(&["--connect"]), Ok(Some(None)));
+        assert_eq!(
+            c(&["--connect", "--automation-read-root", "a"]),
+            Ok(Some(None))
+        );
+        assert_eq!(
+            c(&["--connect", "7851"]),
+            Ok(Some(Some("127.0.0.1:7851".into())))
+        );
+        assert_eq!(
+            c(&["--connect=localhost:7851"]),
+            Ok(Some(Some("127.0.0.1:7851".into())))
+        );
+        assert!(c(&["--connect", "192.168.1.5:7851"]).is_err());
+        assert!(c(&["--connect", "0"]).is_err());
     }
 }

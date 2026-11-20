@@ -6,9 +6,16 @@ Clients mit `2025-03-26` und `2024-11-05` werden angenommen). So kann ein Agent 
 Claude Desktop, Codex, Cursor …) Projekte anlegen, bearbeiten, speichern und als Mixdown rendern.
 
 Der Server steckt in `crates/automation` (`studiocraft-automation`). Das Protokoll kommt aus
-`craft-mcp-server` (craft-libs), wie in den anderen Craft-Apps. Die Werkzeuge steuern ein
-`ProjectWindow` ohne Fenster und ohne Audiogerät. Damit laufen Undo-Verlauf, Import, Speichern
-und Mixdown über denselben Code wie in der App.
+`craft-mcp-server`, der Steuerkanal zur App aus `craft-control` (beide craft-libs), wie in den
+anderen Craft-Apps. Es gibt zwei Betriebsarten:
+
+| Betriebsart | Aufruf | Was gesteuert wird |
+|---|---|---|
+| **Kopflos** (Standard) | `studiocraft-cli mcp …` | Ein eigenes `ProjectWindow` ohne Fenster und ohne Audiogerät |
+| **Connect** | `studiocraft --control 7850` und `studiocraft-cli mcp … --connect 7850` | Das offene Fenster der laufenden App; zusätzlich `transport` und `ui_screenshot` |
+
+In beiden Fällen laufen die Werkzeuge über denselben Code (`exec.rs`) auf einem
+`ProjectWindow`. Undo-Verlauf, Import, Speichern und Mixdown verhalten sich also wie in der App.
 
 ## Start und Einbindung
 
@@ -33,6 +40,37 @@ Andere Clients (z. B. `claude_desktop_config.json`, `.mcp.json`) erwarten diesel
 ```
 
 Fehler und Hinweise gehen nach stderr, auf stdout stehen nur Protokollnachrichten.
+
+## Die laufende App steuern (`--connect`)
+
+```sh
+studiocraft --control 7850 &
+studiocraft-cli mcp --automation-read-root /arbeit/projekt --automation-write-root /arbeit/projekt \
+                    --connect 7850
+```
+
+- `studiocraft --control <port>` öffnet den Steuerkanal auf `127.0.0.1:<port>`, nie im Netz.
+  Jeder Start erzeugt ein neues Token (32 Zufallsbytes) und legt es in
+  `<Einstellungsordner>/control/<port>.token` ab, lesbar nur für den eigenen Benutzer. Ohne
+  dieses Token nimmt die App keine Anfrage an. `current.port` daneben nennt den zuletzt
+  geöffneten Port. Beim Beenden entfernt die App beide Dateien wieder.
+  `STUDIOCRAFT_CONTROL_DIR` legt einen anderen Ordner fest, `STUDIOCRAFT_CONTROL_TOKEN` ein festes
+  Token (für Testumgebungen).
+- `--connect` ohne Port nimmt den zuletzt geöffneten Steuerkanal, sonst Port 7850. Angegeben
+  werden darf ein Port oder `127.0.0.1:<port>`; andere Rechner werden abgelehnt. Der Server
+  verbindet sich erst beim ersten Aufruf, die App darf also später starten. Läuft sie nicht,
+  meldet das Werkzeug das als Fehler.
+- Die Ordnergrenzen gelten auch hier. Der MCP-Server prüft jeden Pfad, bevor er die Anfrage
+  schickt, und schickt ihn absolut. Speichert `save_project` ohne `path`, gilt das für den
+  Speicherort, den das offene Projekt in der App hat.
+- Die App führt jede Anfrage zwischen zwei Bildern aus. Die Person am Rechner sieht jede Änderung
+  sofort und kann sie mit Strg+Z zurücknehmen. `new_project` und `open_project` verwerfen
+  ungesicherte Änderungen nur mit `discard_changes: true`.
+- Eine Bearbeitung wird nie zweimal geschickt: Reißt die Verbindung mitten in einer Anfrage ab,
+  meldet das Werkzeug einen Fehler, und der Agent prüft mit `inspect_project`, ob sie angekommen
+  ist.
+- Die App selbst prüft keine Pfade. Wer die Token-Datei lesen kann (also derselbe Benutzer), kann
+  sie direkt steuern, wie bei den anderen Craft-Apps. Die Begrenzung gilt für den MCP-Server.
 
 ## Dateizugriff begrenzen
 
@@ -75,6 +113,8 @@ Ordner halten also den Agenten bei seinen Dateien, sie schützen nicht vor ander
 | `move_event`, `split_event`, `delete_events` | Events verschieben oder kopieren, teilen, löschen |
 | `set_tempo`, `add_marker`, `set_locators` | Tempo und Taktart, Positions- und Cycle-Marker, Locatoren |
 | `undo`, `redo` | Verlauf |
+| `transport` | Nur mit `--connect`: Play, Stopp, Cursor setzen |
+| `ui_screenshot` | Nur mit `--connect`: PNG des App-Fensters, wie es gerade aussieht |
 
 Ressource: `studiocraft://project` (wie `inspect_project`).
 
@@ -90,9 +130,10 @@ Konventionen:
 
 ## Grenzen (Stand dieser Version)
 
-- Nur der kopflose Betrieb: Der Server steuert nicht das laufende Fenster der App. Ein
-  Steuerkanal zur App (wie `--connect` bei anderen Craft-Apps, mit Screenshots) folgt getrennt.
-- Plugins werden nicht geladen und nicht gerendert. MIDI-Parts klingen im Mixdown nur, wenn ein
-  Instrument sie spielt, also in der App. Das Ergebnis von `export_mixdown` sagt das dazu.
-- Keine Wiedergabe, keine Aufnahme, kein MIDI-Gerät.
+- Kopflos werden Plugins nicht geladen und nicht gerendert, und es gibt keine Wiedergabe,
+  keine Aufnahme und kein MIDI-Gerät. Mit `--connect` spielt die App selbst ab.
+- Der Mixdown rendert in beiden Betriebsarten ohne Plugins. MIDI-Parts bleiben darin stumm; das
+  Ergebnis von `export_mixdown` sagt das dazu.
+- Klicks, Tastendrücke und das Auslesen der Bedienelemente (wie `ui_inspect` in anderen
+  Craft-Apps) gibt es noch nicht, ebenso wenig Aufnahme über den Agenten.
 - Mixer-Routing, Sends, Inserts, Automation und Spuren löschen fehlen noch als Werkzeuge.
