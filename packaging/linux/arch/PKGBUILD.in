@@ -27,4 +27,5 @@ package() {
   cp -R share/doc/studiocraft "$pkgdir/usr/share/doc/"
   install -Dm644 share/doc/studiocraft/LICENSE-MIT "$pkgdir/usr/share/licenses/studiocraft/LICENSE-MIT"
   install -Dm644 share/doc/studiocraft/LICENSE-APACHE "$pkgdir/usr/share/licenses/studiocraft/LICENSE-APACHE"
+  install -Dm644 share/doc/studiocraft/THIRD-PARTY-LICENSES.txt "$pkgdir/usr/share/licenses/studiocraft/THIRD-PARTY-LICENSES.txt"
 }

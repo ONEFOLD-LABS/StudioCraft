@@ -39,6 +39,9 @@
       <Component Id="LicenseApache">
         <File Id="LicenseApacheFile" Source="$(var.BinDir)\LICENSE-APACHE" KeyPath="yes" />
       </Component>
+      <Component Id="ThirdPartyLicenses">
+        <File Id="ThirdPartyLicensesFile" Source="$(var.BinDir)\THIRD-PARTY-LICENSES.txt" KeyPath="yes" />
+      </Component>
       <Component Id="App" Guid="0A62F5F3-0DD0-426F-973A-BD69609FB2B3">
         <File Id="StudioCraftExe" Source="$(var.BinDir)\studiocraft.exe" KeyPath="yes">
           <Shortcut Id="StartMenuShortcut" Directory="ProgramMenuFolder" Name="StudioCraft" Description="StudioCraft digital audio workstation" WorkingDirectory="INSTALLFOLDER" Advertise="yes" Icon="StudioCraftIcon.ico" IconIndex="0" />

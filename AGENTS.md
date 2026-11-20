@@ -23,14 +23,22 @@ house rules).
    docs, commits, issues, pull requests). Do not copy GPL/LGPL/AGPL code either; permissive
    sources (MIT, Apache-2.0, BSD) only, credited in `NOTICE`.
 4. **Licences.** Dependencies and assets must be MIT, Apache-2.0, BSD-2/3-Clause, ISC, Zlib,
-   OFL-1.1, CC0-1.0 or CC-BY-4.0. Anything else: stop and ask a maintainer. Every bundled asset is
-   original or openly licensed and credited (see `assets/app-icon/README.md`, `NOTICE`).
-5. **Report only what ran.** State which commands you ran and what you could not test (audio
+   OFL-1.1, CC0-1.0, CC-BY-4.0, BSL-1.0, Unicode-3.0 or Apache-2.0 WITH LLVM-exception (all
+   permissive). Also accepted, as decided by the maintainer: MPL-2.0 for
+   unmodified dependencies only (file-level copyleft; the source is named in the licence file),
+   and the Ubuntu Font Licence 1.0 for the default font egui embeds. Anything else: stop and ask a
+   maintainer. Every bundled asset is original or openly licensed and credited
+   (see `assets/app-icon/README.md`, `NOTICE`).
+5. **Third-party notices ship with every copy.** `THIRD-PARTY-LICENSES.txt` holds the licence
+   texts of all dependencies; packages include it and the app shows it under Hilfe → Über
+   StudioCraft. After changing dependencies run `cargo xtask licenses` and commit the file;
+   `cargo xtask ci` fails while it is out of date.
+6. **Report only what ran.** State which commands you ran and what you could not test (audio
    hardware, MIDI devices, plugin windows, other operating systems). Never claim a test passed
    that you did not run.
-6. **No secrets or personal data** in code, commits, logs, test fixtures or requests to external
+7. **No secrets or personal data** in code, commits, logs, test fixtures or requests to external
    services. Commit with an address you are happy to publish (e.g. your GitHub noreply address).
-7. **Stop and ask** before: adding a licence outside the list, publishing or releasing, adding a
+8. **Stop and ask** before: adding a licence outside the list, publishing or releasing, adding a
    remote, touching secrets, spending money, destructive git (force push, history rewrite,
    deleting branches others use), deleting user data. Otherwise keep working.
 
