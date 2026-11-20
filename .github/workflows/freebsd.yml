@@ -25,6 +25,6 @@ permissions:
 jobs:
   freebsd:
     # Tracked at @main like ci.yml's gate.
-    uses: storytold/craft-common-actions/.github/workflows/freebsd.yml@main
+    uses: storytold/craft-common-actions/.github/workflows/freebsd.yml@0bef64f155fcea81edbd9542381777358bfbdcf4 # main 2026-11-20
     with:
       run-package-check: true
