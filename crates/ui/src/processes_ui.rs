@@ -128,7 +128,9 @@ impl ProjectWindow {
             .map_err(|_| tr("Plugin-Bearbeitung abgebrochen").to_owned())?;
         #[cfg(target_arch = "wasm32")]
         let (inst, left, right) = work();
-        // Instanz im Hauptthread freigeben.
+        // Instanz im Hauptthread freigeben. Im Browser gibt es keine Plugins (der Typ dort hat
+        // kein Drop), daher dort ohne Wirkung.
+        #[allow(clippy::drop_non_drop)]
         drop(inst);
         for (k, f) in samples[a * 2..b * 2].chunks_exact_mut(2).enumerate() {
             let (l, r) = (left[k + latency], right[k + latency]);
