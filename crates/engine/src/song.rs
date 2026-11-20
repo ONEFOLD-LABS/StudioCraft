@@ -213,6 +213,23 @@ impl Song {
     /// Baut die Abspielliste aus dem Projekt. `clips` liefert die Samples je
     /// Clip, bereits in `rate`. Stumme Spuren und Events fallen weg; Solo wirkt.
     pub fn build(project: &Project, clips: &HashMap<ClipId, Arc<[f32]>>, rate: u32) -> Self {
+        Self::build_with(project, clips, rate, None)
+    }
+
+    /// Wie [`Self::build`], aber gedehntes Audio (Issue #55) entsteht im Hintergrund: Events,
+    /// deren Ergebnis noch fehlt, bleiben still, bis [`crate::stretch::take_ready`] meldet,
+    /// dass neu gebaut werden soll. Für die Wiedergabe im Projekt; Export wartet ([`Self::build`]).
+    pub fn build_live(project: &Project, clips: &HashMap<ClipId, Arc<[f32]>>, rate: u32) -> Self {
+        let generation = crate::stretch::new_generation();
+        Self::build_with(project, clips, rate, Some(generation))
+    }
+
+    fn build_with(
+        project: &Project,
+        clips: &HashMap<ClipId, Arc<[f32]>>,
+        rate: u32,
+        live: Option<u64>,
+    ) -> Self {
         let tempo = &project.tempo;
         // Benutzte MIDI-Ausgänge, je Name ein Platz (höchstens 64).
         let mut ports: Vec<String> = Vec::new();
@@ -250,9 +267,11 @@ impl Song {
                     let ev_start = tempo.frames(e.start.0, rate);
                     let env_length = tempo.frames(e.end(), rate) - ev_start;
                     // Folgt das Event dem Tempo, klingt ein gedehnter Ausschnitt ab Frame 0.
-                    let (samples, base) = match musical_render(tempo, e, samples, rate) {
-                        Some(s) => (s, 0),
-                        None => (samples.clone(), e.offset),
+                    let (samples, base) = match musical_render(tempo, e, samples, rate, live) {
+                        Ok(Some(s)) => (s, 0),
+                        Ok(None) => (samples.clone(), e.offset),
+                        // Wird noch gedehnt: bis dahin still.
+                        Err(()) => continue,
                     };
                     for &(a, b) in parts {
                         let (fa, fb) = (tempo.frames(a, rate), tempo.frames(b, rate));
@@ -587,23 +606,29 @@ fn tempo_key(tempo: &TempoMap) -> (u64, bool, Vec<(u64, u64, bool)>) {
 }
 
 /// Gedehnte Samples eines Audio-Events, das dem Projekttempo folgt (Issue #55), für die
-/// ganze Länge des Events ab dessen Anfang. `None`: nicht nötig (folgt nicht dem Tempo, oder
-/// das Tempo ist fest und gleich dem der Datei) – dann klingt der Clip 1:1.
+/// ganze Länge des Events ab dessen Anfang. `Ok(None)`: nicht nötig (folgt nicht dem Tempo,
+/// oder das Tempo ist fest und gleich dem der Datei) – dann klingt der Clip 1:1. `Err(())`:
+/// wird noch im Hintergrund gerechnet (nur mit `live`, der Generation aus
+/// [`crate::stretch::new_generation`]); das Event bleibt bis dahin still.
 fn musical_render(
     tempo: &TempoMap,
     e: &studiocraft_project::Event,
     samples: &Arc<[f32]>,
     rate: u32,
-) -> Option<Arc<[f32]>> {
-    let bpm = e.musical.filter(|b| b.is_finite() && *b > 0.0)?;
+    live: Option<u64>,
+) -> Result<Option<Arc<[f32]>>, ()> {
+    let Some(bpm) = e.musical.filter(|b| b.is_finite() && *b > 0.0) else {
+        return Ok(None);
+    };
     if !tempo.varies() && (tempo.bpm - bpm).abs() < 1e-9 {
-        return None;
+        return Ok(None);
     }
     let start = tempo.frames(e.start.0, rate);
     let frames = tempo
         .frames(e.end(), rate)
         .saturating_sub(start)
         .min(crate::stretch::MAX_RENDER_FRAMES);
+    let grain = e.stretch_mode.grain_48k();
     let key = crate::stretch::Key::new(
         samples,
         (
@@ -612,18 +637,26 @@ fn musical_render(
             e.length,
             bpm.to_bits(),
             rate,
+            grain,
             tempo_key(tempo),
         ),
     );
     let (offset, ev_tick) = (e.offset as f64, e.start.0 as f64);
     let r = f64::from(rate);
     let per_tick = 60.0 / bpm / studiocraft_project::TICKS_PER_QUARTER as f64 * r;
-    Some(crate::stretch::cached(key, || {
-        crate::stretch::render(samples, rate, frames as usize, |j| {
+    let (src, tempo) = (samples.clone(), tempo.clone());
+    let make = move || {
+        crate::stretch::render(&src, rate, grain, frames as usize, |j| {
             let tick = tempo.ticks_at_seconds((start as f64 + j) / r);
             offset + (tick - ev_tick) * per_tick
         })
-    }))
+    };
+    match live {
+        Some(generation) => crate::stretch::request(key, generation, make)
+            .map(Some)
+            .ok_or(()),
+        None => Ok(Some(crate::stretch::cached(key, make))),
+    }
 }
 
 impl PlayTrack {
@@ -799,6 +832,37 @@ mod tests {
         // Gleiches Projekt: dasselbe Ergebnis aus dem Zwischenspeicher.
         let again = Song::build(&p, &clips, 48_000);
         assert!(Arc::ptr_eq(&again.tracks[0].events[0].samples, &ev.samples));
+    }
+
+    #[test]
+    fn live_builds_stretch_in_the_background() {
+        let (mut p, clips, id) = musical_project(100.0);
+        p.event_mut(id).unwrap().stretch_mode = studiocraft_project::StretchMode::Rhythmic;
+        let first = Song::build_live(&p, &clips, 48_000);
+        // Solange gerechnet wird, ist die Spur still (und fällt ohne Events ganz weg).
+        assert!(first.tracks.iter().all(|t| t.events.is_empty()));
+        // Warten, bis der Arbeits-Thread fertig ist (höchstens 20 s).
+        let mut song = first;
+        for _ in 0..400 {
+            song = Song::build_live(&p, &clips, 48_000);
+            if song.tracks.first().is_some_and(|t| !t.events.is_empty()) {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        let ev = &song.tracks[0].events[0];
+        // 1 s bei 100 BPM sind 1600 Ticks, bei 120 BPM also 5/6 s.
+        assert_eq!(ev.length, 40_000);
+        // Export wartet nicht und nimmt dasselbe Ergebnis.
+        let export = Song::build(&p, &clips, 48_000);
+        assert!(Arc::ptr_eq(
+            &export.tracks[0].events[0].samples,
+            &ev.samples
+        ));
+        // Eine andere Stretch-Art ist ein anderes Ergebnis.
+        p.event_mut(id).unwrap().stretch_mode = studiocraft_project::StretchMode::Pad;
+        let pad = Song::build(&p, &clips, 48_000);
+        assert!(!Arc::ptr_eq(&pad.tracks[0].events[0].samples, &ev.samples));
     }
 
     fn ones(frames: usize, v: f32) -> Arc<[f32]> {

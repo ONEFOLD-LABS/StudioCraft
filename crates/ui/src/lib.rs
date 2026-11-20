@@ -913,7 +913,8 @@ impl ProjectWindow {
             .iter()
             .map(|(&id, c)| (id, c.samples.clone()))
             .collect();
-        let song = Song::build(&self.project, &samples, self.sample_rate);
+        // Gedehntes Audio rechnet im Hintergrund; bis dahin bleibt das Event still.
+        let song = Song::build_live(&self.project, &samples, self.sample_rate);
         // Latenzausgleich passend zum neuen Song (nur bei Änderung neu angelegt).
         self.sync_constrain();
         self.sync_delays(&song);
@@ -1132,6 +1133,14 @@ impl ProjectWindow {
         self.sync_tempo();
         let playing = self.is_playing();
         self.automation_write(ui.ctx(), playing);
+        // Gedehntes Audio aus dem Hintergrund ist fertig: Abspielliste neu bauen.
+        if studiocraft_engine::stretch::take_ready() {
+            self.dirty = true;
+        }
+        if studiocraft_engine::stretch::busy() > 0 {
+            ui.ctx()
+                .request_repaint_after(std::time::Duration::from_millis(100));
+        }
         if self.dirty {
             self.dirty = false;
             self.sync_monitor_input();
@@ -1791,6 +1800,13 @@ impl ProjectWindow {
                     }
                     if !self.midi_status.is_empty() {
                         parts.push(self.midi_status.clone());
+                    }
+                    let stretching = studiocraft_engine::stretch::busy();
+                    if stretching > 0 {
+                        parts.push(crate::i18n::trf(
+                            "Audio wird gedehnt … ({n})",
+                            &[("n", &stretching)],
+                        ));
                     }
                     let status = parts.join("  ·  ");
                     let text = match &self.message {
