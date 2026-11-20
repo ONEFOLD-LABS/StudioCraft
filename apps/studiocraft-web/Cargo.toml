@@ -1,0 +1,20 @@
+[package]
+name = "studiocraft-web"
+description = "StudioCraft im Browser (eframe-Web, WebGPU/WebGL2, Wiedergabe über Web Audio)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+# Nur das wasm32-Ziel hat Abhängigkeiten; nativ baut eine leere main (für `cargo xtask ci`).
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+studiocraft-engine.workspace = true
+studiocraft-project.workspace = true
+studiocraft-ui.workspace = true
+egui = "0.37"
+# `wgpu` bringt WebGPU mit WebGL2 als Rückfallebene.
+eframe = { version = "0.37", default-features = false, features = ["default_fonts", "wgpu", "accesskit"] }
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+web-sys = { version = "0.3", features = ["Window", "Document", "Element", "HtmlCanvasElement"] }

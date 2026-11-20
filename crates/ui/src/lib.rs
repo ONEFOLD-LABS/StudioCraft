@@ -23,6 +23,7 @@ mod colors;
 mod devices;
 mod eq_ui;
 mod fades_ui;
+mod file_dialog;
 mod focus;
 mod folders_ui;
 mod freeze;
@@ -931,7 +932,7 @@ impl ProjectWindow {
         self.sync_midi();
         // Automatische Sicherung nur in einer Sitzung der App (`begin_session`), nicht in Tests.
         if self.autosave.dir.is_some() {
-            self.tick_autosave(std::time::Instant::now());
+            self.tick_autosave(web_time::Instant::now());
         }
         self.poll_latency();
         if self.idle_plugins() {

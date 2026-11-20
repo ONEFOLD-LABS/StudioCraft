@@ -11,7 +11,9 @@ use std::sync::{
     Arc,
     atomic::{AtomicBool, Ordering},
 };
-use std::time::{Duration, Instant};
+use std::time::Duration;
+
+use web_time::Instant;
 
 use cpal::{
     BufferSize, Device, FromSample, Host, SampleFormat, SizedSample, Stream, StreamConfig,
@@ -132,6 +134,13 @@ impl AudioOutput {
     /// kommt mit dem Fehler zurück: so wird der Kern samt Plugins nie nebenbei zerstört.
     pub fn take_core(mut self, timeout: Duration) -> Result<EngineCore, Box<(Self, String)>> {
         self.shared.give_back.store(true, Ordering::Release);
+        // Im Browser läuft der Audio-Rückruf im selben Thread: Warten käme nie zum Ziel, und
+        // `thread::sleep` gibt es dort nicht. Der Kern kommt nur zurück, wenn er schon da ist.
+        #[cfg(target_arch = "wasm32")]
+        let timeout = {
+            let _ = timeout;
+            Duration::ZERO
+        };
         let deadline = Instant::now() + timeout;
         loop {
             if let Ok(core) = self.handback.pop() {
@@ -149,6 +158,7 @@ impl AudioOutput {
                     "Das Audiogerät antwortet nicht; der Wechsel gilt nach einem Neustart".into(),
                 )));
             }
+            #[cfg(not(target_arch = "wasm32"))]
             std::thread::sleep(Duration::from_millis(2));
         }
     }
