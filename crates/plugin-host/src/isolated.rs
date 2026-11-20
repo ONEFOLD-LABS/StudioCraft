@@ -386,6 +386,10 @@ pub fn scan_isolated(paths: &[PathBuf], opts: &ScanOptions) -> ScanReport {
     if opts.lv2 {
         report.plugins.extend(crate::lv2::scan());
     }
+    // Audio Units (macOS): die System-Registry lädt keinen Plugin-Code.
+    if opts.lv2 {
+        report.plugins.extend(crate::au::scan());
+    }
     for (f, outcome) in results {
         match outcome {
             Outcome::Plugins(list) => report.plugins.extend(list),
