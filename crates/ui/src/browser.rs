@@ -17,6 +17,7 @@ use studiocraft_project::file::EXTENSION;
 enum Kind {
     Open,
     Import,
+    ImportMidi,
 }
 
 struct Picked {
@@ -37,7 +38,7 @@ impl Pending {
             let dialog = rfd::AsyncFileDialog::new().add_filter(filter, &exts);
             let files = match kind {
                 Kind::Open => dialog.pick_file().await.into_iter().collect(),
-                Kind::Import => dialog.pick_files().await.unwrap_or_default(),
+                Kind::Import | Kind::ImportMidi => dialog.pick_files().await.unwrap_or_default(),
             };
             for f in files {
                 let bytes = f.read().await;
@@ -102,6 +103,18 @@ impl ProjectWindow {
                     .pick(ctx, Kind::Import, crate::i18n::tr("Audiodateien"), exts);
                 Ok(())
             }
+            Action::ImportMidi => {
+                let exts = crate::midi_file::EXTENSIONS
+                    .iter()
+                    .map(|e| (*e).to_owned())
+                    .collect();
+                self.browser
+                    .pick(ctx, Kind::ImportMidi, crate::i18n::tr("MIDI-Dateien"), exts);
+                Ok(())
+            }
+            Action::ExportMidi => self
+                .midi_file_bytes()
+                .and_then(|(name, bytes)| download(&name, &bytes, "audio/midi")),
             Action::ExportMixdown => self.mixdown_bytes("wav").and_then(|(name, bytes, peak)| {
                 if peak > 1.0 {
                     self.message = Some(crate::i18n::trf(
@@ -136,6 +149,11 @@ impl ProjectWindow {
                 Kind::Import => {
                     imported = true;
                     self.import_audio_bytes(&p.name, &p.bytes)
+                }
+                Kind::ImportMidi => {
+                    imported = true;
+                    let stem = p.name.rsplit_once('.').map_or(p.name.as_str(), |(s, _)| s);
+                    self.import_midi_bytes(stem, &p.bytes)
                 }
             };
             if let Err(e) = r {

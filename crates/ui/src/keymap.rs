@@ -157,9 +157,23 @@ pub(crate) const COMMANDS: &[CommandInfo] = &[
         []
     ),
     cmd!(
+        Cmd::File(Action::ImportMidi),
+        "file.import_midi",
+        "MIDI-Datei importieren",
+        "Datei",
+        []
+    ),
+    cmd!(
         Cmd::File(Action::ExportMixdown),
         "file.export_mixdown",
         "Audio-Mixdown exportieren",
+        "Datei",
+        []
+    ),
+    cmd!(
+        Cmd::File(Action::ExportMidi),
+        "file.export_midi",
+        "MIDI-Datei exportieren",
         "Datei",
         []
     ),

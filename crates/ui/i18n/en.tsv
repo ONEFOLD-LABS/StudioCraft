@@ -13,6 +13,20 @@ Audio-Mixdown exportieren …	Export Audio Mixdown…
 Audio-Spur hinzufügen	Add Audio Track
 Audiodatei importieren …	Import Audio File…
 Audiodateien	Audio files
+MIDI-Datei importieren …	Import MIDI File…
+MIDI-Datei exportieren …	Export MIDI File…
+MIDI-Datei importieren	Import MIDI File
+MIDI-Datei exportieren	Export MIDI File
+MIDI-Dateien	MIDI files
+MIDI-Datei	MIDI file
+keine MIDI-Datei	not a MIDI file
+MIDI-Datei beschädigt	MIDI file is damaged
+MIDI-Format 2 wird nicht unterstützt	MIDI format 2 is not supported
+SMPTE-Zeitbasis wird nicht unterstützt	SMPTE time base is not supported
+MIDI-Datei zu groß	MIDI file too large
+keine Noten	no notes
+Keine MIDI- oder Instrument-Spuren zum Exportieren	No MIDI or instrument tracks to export
+{name}: {fehler}	{name}: {fehler}
 Ausgleich: {zeit}	Compensation: {zeit}
 Ausschneiden	Cut
 Bearbeiten	Edit

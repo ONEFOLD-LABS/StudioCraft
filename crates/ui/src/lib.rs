@@ -43,6 +43,7 @@ mod layouts_ui;
 mod macros;
 mod markers_ui;
 mod menu;
+mod midi_file;
 mod midiout_ui;
 mod mixer;
 mod noteinfo;
@@ -4089,6 +4090,28 @@ mod tests {
         assert!(h.state().stems.chosen.contains(&None), "main mix added");
         h.get_by_label("Mit Kanalbearbeitung");
         h.get_by_label("Exportieren");
+    }
+
+    #[test]
+    fn the_file_menu_offers_midi_file_import_and_export() {
+        let w = ProjectWindow::new(Project::demo(4), None, "kein Audio (Test)".into());
+        let mut h = Harness::builder()
+            .with_size(egui::vec2(900.0, 520.0))
+            .with_step_dt(1.0 / 60.0)
+            .wgpu()
+            .build_ui_state(|ui, w: &mut ProjectWindow| w.ui(ui), w);
+        h.run_steps(2);
+        h.get_by_label("Datei").click();
+        h.run_steps(3);
+        // Ohne Tastenkürzel endet der Name mit einem Leerzeichen.
+        for label in ["MIDI-Datei importieren …", "MIDI-Datei exportieren …"] {
+            assert!(h.query_by_label_contains(label).is_some(), "{label}");
+        }
+        h.check_accessibility();
+        if let (Ok(img), Ok(dir)) = (h.render(), std::env::var("STUDIOCRAFT_SHOTS")) {
+            img.save(std::path::Path::new(&dir).join("file_menu.png"))
+                .unwrap();
+        }
     }
 
     #[test]

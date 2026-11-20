@@ -18,7 +18,9 @@ pub(crate) enum Action {
     SaveAs,
     SaveVersion,
     ImportAudio,
+    ImportMidi,
     ExportMixdown,
+    ExportMidi,
     Quit,
 }
 
@@ -40,14 +42,16 @@ impl ProjectWindow {
                     (tr("Speichern unter …"), Action::SaveAs),
                     (tr("Neue Version speichern"), Action::SaveVersion),
                     (tr("Audiodatei importieren …"), Action::ImportAudio),
+                    (tr("MIDI-Datei importieren …"), Action::ImportMidi),
                     (tr("Audio-Mixdown exportieren …"), Action::ExportMixdown),
+                    (tr("MIDI-Datei exportieren …"), Action::ExportMidi),
                     (tr("Beenden"), Action::Quit),
                 ];
-                for (i, (label, action)) in items.into_iter().enumerate() {
-                    if i == 5 {
+                for (label, action) in items {
+                    if action == Action::ImportAudio {
                         ui.separator();
                     }
-                    if i == 7 {
+                    if action == Action::Quit {
                         ui.separator();
                         self.autosave_menu(ui);
                         ui.separator();
@@ -309,7 +313,12 @@ impl ProjectWindow {
                 self.import_dialog();
                 Ok(())
             }
+            Action::ImportMidi => {
+                self.import_midi_dialog();
+                Ok(())
+            }
             Action::ExportMixdown => self.export_dialog(),
+            Action::ExportMidi => self.export_midi_dialog(),
             Action::Quit => {
                 self.allow_close = true;
                 ui.ctx().send_viewport_cmd(ViewportCommand::Close);
@@ -430,7 +439,7 @@ impl ProjectWindow {
     }
 }
 
-fn dialog() -> FileDialog {
+pub(crate) fn dialog() -> FileDialog {
     let start = std::env::var_os("HOME")
         .map(PathBuf::from)
         .map(|h| h.join("Musik"))
