@@ -138,7 +138,7 @@ fn text(v: Option<String>) -> Option<String> {
 }
 
 /// Ordner der Einstellungen (auch für die Tastaturbelegung).
-pub(crate) fn config_dir() -> Option<PathBuf> {
+pub fn config_dir() -> Option<PathBuf> {
     dir()
 }
 

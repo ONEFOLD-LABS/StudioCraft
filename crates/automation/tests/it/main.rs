@@ -3,7 +3,7 @@
 use std::path::{Path, PathBuf};
 
 use serde_json::{Value, json};
-use studiocraft_automation::{Roots, Studio, server};
+use studiocraft_automation::{Roots, Studio, connect, server};
 
 struct Agent {
     server: craft_mcp_server::Server<Studio>,
@@ -13,10 +13,17 @@ struct Agent {
 impl Agent {
     fn new(read: &Path, write: &Path) -> Self {
         let roots = Roots::new(&[read.to_path_buf()], &[write.to_path_buf()]).unwrap();
-        let mut a = Self {
-            server: server(roots),
-            next: 1,
-        };
+        Self::with(server(roots))
+    }
+
+    /// An agent on the app's control channel at `addr`.
+    fn connected(read: &Path, write: &Path, addr: &str, token: &str) -> Self {
+        let roots = Roots::new(&[read.to_path_buf()], &[write.to_path_buf()]).unwrap();
+        Self::with(connect(roots, addr, Some(token)))
+    }
+
+    fn with(server: craft_mcp_server::Server<Studio>) -> Self {
+        let mut a = Self { server, next: 1 };
         a.request("initialize", json!({"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "test", "version": "1"}}));
         a.server
             .handle_line(r#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#);
@@ -271,4 +278,168 @@ fn hostile_arguments_come_back_as_tool_errors() {
     let p = a.ok("inspect_project", json!({}));
     assert_eq!(p["tracks"][0]["events"][0]["notes"], 0);
     assert_eq!(p["tracks"].as_array().unwrap().len(), 1);
+}
+
+mod connected {
+    //! `--connect`: the tools run in an app's window, reached through its control channel.
+
+    use std::net::TcpListener;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::mpsc;
+    use std::time::Duration;
+
+    use studiocraft_automation::control::Control;
+    use studiocraft_project::Project;
+    use studiocraft_ui::ProjectWindow;
+
+    use super::*;
+
+    const TOKEN: &str = "0123456789abcdef0123456789abcdef0123456789abcdef";
+
+    /// An app with a headless window serving the control channel on its own thread, as the
+    /// desktop app does between frames. `setup` runs on the window first. Stops when dropped.
+    struct App {
+        addr: String,
+        stop: Arc<AtomicBool>,
+        thread: Option<std::thread::JoinHandle<()>>,
+    }
+
+    impl App {
+        fn start(setup: impl FnOnce(&mut ProjectWindow) + Send + 'static) -> Self {
+            let stop = Arc::new(AtomicBool::new(false));
+            let (tx, rx) = mpsc::channel();
+            let flag = Arc::clone(&stop);
+            let thread = std::thread::spawn(move || {
+                let mut window = ProjectWindow::new(Project::default(), None, String::new());
+                setup(&mut window);
+                let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+                let mut control = Control::serve(listener, TOKEN.into(), || {}).unwrap();
+                tx.send(control.port()).unwrap();
+                while !flag.load(Ordering::Relaxed) {
+                    control.poll(&mut window, None);
+                    std::thread::sleep(Duration::from_millis(2));
+                }
+            });
+            let port = rx.recv().unwrap();
+            Self {
+                addr: format!("127.0.0.1:{port}"),
+                stop,
+                thread: Some(thread),
+            }
+        }
+    }
+
+    impl Drop for App {
+        fn drop(&mut self) {
+            self.stop.store(true, Ordering::Relaxed);
+            if let Some(t) = self.thread.take() {
+                let _ = t.join();
+            }
+        }
+    }
+
+    #[test]
+    fn the_tools_edit_the_apps_window() {
+        let dir = temp("connect-edit");
+        let app = App::start(|_| {});
+        let mut a = Agent::connected(&dir, &dir, &app.addr, TOKEN);
+
+        let names: Vec<String> = a.request("tools/list", json!({}))["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|t| t["name"].as_str().unwrap().to_owned())
+            .collect();
+        assert!(names.iter().any(|n| n == "ui_screenshot"));
+        assert!(names.iter().any(|n| n == "transport"));
+
+        a.ok("add_track", json!({"kind": "midi", "name": "Bass"}));
+        let part = a.ok(
+            "create_part",
+            json!({"track": "Bass", "start": 0, "length": "1.0.0.0"}),
+        );
+        a.ok(
+            "add_notes",
+            json!({"event": part["id"], "notes": [{"pitch": 36, "start": 0, "length": 480}]}),
+        );
+        let p = a.ok("inspect_project", json!({}));
+        assert_eq!(p["tracks"][0]["name"], "Bass");
+        assert_eq!(p["tracks"][0]["events"][0]["notes"], 1);
+        a.ok("undo", json!({}));
+        assert_eq!(
+            a.ok("inspect_project", json!({}))["tracks"][0]["events"][0]["notes"],
+            0
+        );
+
+        // The window's own work is not thrown away unasked.
+        let e = a.call("new_project", json!({})).unwrap_err();
+        assert!(e.contains("unsaved changes"), "{e}");
+        a.ok("new_project", json!({"discard_changes": true}));
+
+        // Without an audio device and a window, playing and screenshots are refused, not faked.
+        let e = a.call("transport", json!({"action": "play"})).unwrap_err();
+        assert!(e.contains("no audio engine"), "{e}");
+        assert!(a.call("ui_screenshot", json!({})).is_err());
+        a.ok("transport", json!({"action": "locate", "at": "3.1.1.0"}));
+        assert_eq!(
+            a.ok("inspect_project", json!({}))["cursor_position"],
+            "3.1.1.000"
+        );
+    }
+
+    #[test]
+    fn paths_are_confined_before_they_reach_the_app() {
+        let dir = temp("connect-confined");
+        let (granted, other) = (dir.join("granted"), dir.join("other"));
+        std::fs::create_dir_all(&granted).unwrap();
+        std::fs::create_dir_all(&other).unwrap();
+        // The person saved the open project outside the agent's folders.
+        let saved = other.join("Theirs.studiocraft");
+        let in_app = saved.clone();
+        let app = App::start(move |w| {
+            w.project
+                .add_track(studiocraft_project::TrackKind::Midi, "Keys");
+            w.save_as(&in_app).unwrap();
+        });
+        let mut a = Agent::connected(&granted, &granted, &app.addr, TOKEN);
+
+        let e = a.call("save_project", json!({})).unwrap_err();
+        assert!(e.contains("outside the write root"), "{e}");
+        let e = a
+            .call("export_midi", json!({"path": other.join("x.mid")}))
+            .unwrap_err();
+        assert!(e.contains("outside the write root"), "{e}");
+        assert!(!other.join("x.mid").exists());
+
+        // Inside the granted folder it works, with the path made absolute here.
+        a.ok("export_midi", json!({"path": granted.join("x.mid")}));
+        assert!(granted.join("x.mid").exists());
+    }
+
+    #[test]
+    fn a_wrong_token_is_refused() {
+        let dir = temp("connect-token");
+        let app = App::start(|_| {});
+        let mut a = Agent::connected(
+            &dir,
+            &dir,
+            &app.addr,
+            "not-the-token-not-the-token-not-the-token",
+        );
+        assert!(a.call("inspect_project", json!({})).is_err());
+    }
+
+    #[test]
+    fn no_app_running_is_an_error_the_agent_can_read() {
+        let dir = temp("connect-none");
+        let port = TcpListener::bind("127.0.0.1:0")
+            .unwrap()
+            .local_addr()
+            .unwrap()
+            .port();
+        let mut a = Agent::connected(&dir, &dir, &format!("127.0.0.1:{port}"), TOKEN);
+        let e = a.call("inspect_project", json!({})).unwrap_err();
+        assert!(!e.is_empty());
+    }
 }

@@ -888,6 +888,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "craft-control"
+version = "0.1.0"
+source = "git+https://github.com/storytold/craft-libs?rev=56c3c833bb869a140271e2aceec2112322cacc58#56c3c833bb869a140271e2aceec2112322cacc58"
+dependencies = [
+ "getrandom 0.3.4",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "craft-mcp-server"
 version = "0.1.0"
 source = "git+https://github.com/storytold/craft-libs?rev=56c3c833bb869a140271e2aceec2112322cacc58#56c3c833bb869a140271e2aceec2112322cacc58"
@@ -3547,6 +3557,7 @@ dependencies = [
  "objc2 0.6.5",
  "objc2-app-kit 0.3.2",
  "objc2-foundation 0.3.2",
+ "studiocraft-automation",
  "studiocraft-engine",
  "studiocraft-project",
  "studiocraft-ui",
@@ -3558,7 +3569,10 @@ dependencies = [
 name = "studiocraft-automation"
 version = "0.7.0"
 dependencies = [
+ "craft-control",
  "craft-mcp-server",
+ "egui",
+ "png",
  "serde_json",
  "studiocraft-project",
  "studiocraft-ui",

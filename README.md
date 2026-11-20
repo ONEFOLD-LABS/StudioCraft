@@ -47,6 +47,7 @@ cargo run --release -p studiocraft -- --list-hosts          # audio hosts in thi
 cargo run -p studiocraft-cli -- file.wav --loop 1 5         # command-line player
 cargo run -p studiocraft-cli -- mcp --automation-read-root DIR --automation-write-root DIR
                                                             # MCP server for AI agents (docs/mcp.md)
+cargo run --release -p studiocraft -- --control 7850       # app with a control channel for --connect
 ```
 
 ## Layout
@@ -60,7 +61,7 @@ cargo run -p studiocraft-cli -- mcp --automation-read-root DIR --automation-writ
 | `crates/plugin-host` | Plugin hosting (CLAP, LV2) |
 | `crates/graph` | Signal-graph helpers |
 | `crates/ui` | Project window, mixer, editors, menus, theme, settings |
-| `crates/automation` | MCP server for AI agents on a headless project window |
+| `crates/automation` | MCP server for AI agents: headless, or driving the running app (`--connect`) |
 | `xtask` | `cargo xtask ci`, `cargo xtask version` |
 | `packaging/` | Package scripts per platform |
 

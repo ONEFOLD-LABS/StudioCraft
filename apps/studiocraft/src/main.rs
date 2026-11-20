@@ -1,6 +1,6 @@
 //! StudioCraft – Desktop-App (Prototyp des Projektfensters).
 //!
-//! Aufruf: `studiocraft [datei.wav …] [--tracks <n>] [--audio-host <name>]`
+//! Aufruf: `studiocraft [datei.wav …] [--tracks <n>] [--audio-host <name>] [--control <port>]`
 // Unter Windows ohne Konsolenfenster starten (die Kommandozeile ist studiocraft-cli).
 #![cfg_attr(all(windows, not(test)), windows_subsystem = "windows")]
 // Kein unwrap/expect/panic außerhalb von Tests (AGENTS.md „Robustness“, Issue #49).
@@ -22,6 +22,7 @@ mod macos_open;
 
 use std::{path::Path, process::ExitCode, time::Duration};
 
+use studiocraft_automation::control::Control;
 use studiocraft_engine::{
     AudioOutput, DeviceChoice, EngineCore, OutputInfo, PreparedOutput, engine,
 };
@@ -30,11 +31,14 @@ use studiocraft_ui::ProjectWindow;
 
 const USAGE: &str = "\
 Aufruf: studiocraft [projekt.studiocraft | datei.wav …] [--tracks <n>] [--audio-host <name>]
+                   [--control <port>]
 
   projekt.studiocraft  Projekt öffnen
   datei.wav     Audiodateien, jede auf eine eigene Audio-Spur ab Takt 1
                 (ohne Dateien: Demo-Projekt mit --tracks Spuren, Standard 100)
   --audio-host  Audio-Host wählen, z. B. PipeWire, ALSA, JACK, WASAPI, CoreAudio
+  --control     Steuerkanal für KI-Agenten auf 127.0.0.1:<port> öffnen
+                (`studiocraft-cli mcp --connect`, siehe docs/mcp.md)
 
 Weitere Dateien lassen sich ins Projektfenster ziehen.";
 
@@ -52,8 +56,11 @@ fn app_icon() -> egui::IconData {
 }
 
 struct App {
-    // Reihenfolge der Felder = Reihenfolge beim Aufräumen: erst das Fenster (es hält
-    // Plugin-Handles), dann der Kern mit den Plugin-Instanzen.
+    // Reihenfolge der Felder = Reihenfolge beim Aufräumen: erst der Steuerkanal (nimmt die
+    // Token-Datei weg), dann das Fenster (es hält Plugin-Handles), dann der Kern mit den
+    // Plugin-Instanzen.
+    /// Steuerkanal für KI-Agenten (`--control`).
+    control: Option<Control>,
     window: ProjectWindow,
     /// Hält den Audio-Stream am Leben.
     audio: Option<AudioOutput>,
@@ -67,6 +74,10 @@ impl eframe::App for App {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         #[cfg(target_os = "macos")]
         self.open_from_finder(ui.ctx());
+        // Anfragen von Agenten vor dem Zeichnen: ihre Änderungen sind im selben Bild zu sehen.
+        if let Some(control) = &mut self.control {
+            control.poll(&mut self.window, Some(ui.ctx()));
+        }
         self.window.ui(ui);
         if let Some(choice) = self.window.take_device_request() {
             self.switch_audio(&choice);
@@ -78,6 +89,8 @@ impl eframe::App for App {
     }
 
     fn on_exit(&mut self) {
+        // Token-Datei entfernen: ein Agent soll ein beendetes Fenster nicht mehr erreichen.
+        self.control = None;
         // Sauber beendet: keine Wiederherstellung beim nächsten Start.
         self.window.end_session();
     }
@@ -193,6 +206,7 @@ fn main() -> ExitCode {
     let mut files = Vec::new();
     let mut tracks = 100usize;
     let mut host = None;
+    let mut control_port: Option<u16> = None;
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
         match a.as_str() {
@@ -204,6 +218,13 @@ fn main() -> ExitCode {
                 }
             },
             "--audio-host" => host = args.next(),
+            "--control" => match args.next().and_then(|v| v.parse().ok()).filter(|p| *p != 0) {
+                Some(p) => control_port = Some(p),
+                None => {
+                    eprintln!("--control erwartet eine Portnummer");
+                    return ExitCode::from(2);
+                }
+            },
             "-V" | "--version" => {
                 println!("studiocraft {}", env!("CARGO_PKG_VERSION"));
                 return ExitCode::SUCCESS;
@@ -328,8 +349,24 @@ fn main() -> ExitCode {
     let eframe_app = eframe::create_native(
         "StudioCraft",
         options,
-        Box::new(move |_cc| {
+        Box::new(move |cc| {
+            let mut window = window;
+            let control = control_port.and_then(|port| {
+                let ctx = cc.egui_ctx.clone();
+                match Control::start(port, move || ctx.request_repaint()) {
+                    Ok(c) => Some(c),
+                    Err(e) => {
+                        eprintln!("Fehler: Steuerkanal: {e}");
+                        window.notify(studiocraft_ui::i18n::trf(
+                            "Steuerkanal: {fehler}",
+                            &[("fehler", &e)],
+                        ));
+                        None
+                    }
+                }
+            });
             Ok(Box::new(App {
+                control,
                 window,
                 audio,
                 parked: None,
