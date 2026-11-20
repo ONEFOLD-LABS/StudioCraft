@@ -345,6 +345,80 @@ fn marker_at(w: &ProjectWindow, g: &Geo, p: Pos2) -> Option<usize> {
 }
 
 /// Marker-Spur: Cycle-Marker als Balken, Positionsmarker als Linie mit Fähnchen und Name.
+/// Abstände der Beschriftung einer Lineal-Spur in Sekunden (von fein bis grob).
+const RULER_STEPS: [f64; 17] = [
+    0.001, 0.005, 0.01, 0.05, 0.1, 0.25, 0.5, 1.0, 2.0, 5.0, 10.0, 15.0, 30.0, 60.0, 120.0, 300.0,
+    600.0,
+];
+/// Mindestabstand zweier Beschriftungen einer Lineal-Spur in Pixeln.
+const RULER_LABEL_PX: f32 = 90.0;
+
+/// Lineal-Spur (Issue #44): Striche und Beschriftung im Format der Spur – Takte, Sekunden,
+/// Timecode oder Samples. Zeitformate folgen der Tempo-Map (Sekunden sind gleichmäßig, die
+/// Striche liegen also bei Tempowechseln ungleich weit auseinander).
+fn paint_ruler_track(w: &ProjectWindow, painter: &Painter, g: &Geo, row: usize) {
+    use studiocraft_project::RulerFormat;
+    let t = crate::theme::tokens(painter.ctx());
+    let top = g.row_top(row);
+    let h = g.row_height(row);
+    let format = w.project.tracks[row].ruler;
+    let tempo = &w.project.tempo;
+    let font = egui::FontId::proportional(10.0);
+    let t0 = g.ticks(g.lanes.left()).max(0.0);
+    let t1 = g.ticks(g.lanes.right()).max(t0 + 1.0);
+    let mark = |ticks: f64, label: String| {
+        let x = g.x(ticks);
+        if !g.lanes.x_range().contains(x) {
+            return;
+        }
+        painter.vline(x, top + h * 0.5..=top + h, Stroke::new(1.0, t.text_dim));
+        painter.text(
+            pos2(x + 3.0, top + h * 0.3),
+            egui::Align2::LEFT_CENTER,
+            label,
+            font.clone(),
+            t.text,
+        );
+    };
+    if format == RulerFormat::Bars {
+        let bars = tempo.bar_lines(t0 as u64, t1 as u64);
+        // Jeden n-ten Takt beschriften, damit die Zahlen sich nicht überlappen.
+        let bar_px = bars
+            .get(1)
+            .zip(bars.first())
+            .map_or(RULER_LABEL_PX, |(b, a)| g.x(b.0 as f64) - g.x(a.0 as f64));
+        let every = (RULER_LABEL_PX / bar_px.max(1.0)).ceil().max(1.0) as u64;
+        for (tick, bar, _) in bars {
+            if (bar - 1) % every == 0 {
+                mark(tick as f64, bar.to_string());
+            }
+        }
+        return;
+    }
+    let s0 = tempo.seconds(studiocraft_project::Position(t0 as u64));
+    let s1 = tempo.seconds(studiocraft_project::Position(t1 as u64));
+    let px_per_s = (g.lanes.width() / ((s1 - s0).max(1e-6)) as f32).max(1e-3);
+    let frame = format.fps().map_or(0.0, |f| 1.0 / f64::from(f));
+    let step = RULER_STEPS
+        .iter()
+        .copied()
+        .filter(|s| *s >= frame)
+        .find(|s| *s as f32 * px_per_s >= RULER_LABEL_PX)
+        .unwrap_or(600.0);
+    let mut k = (s0 / step).floor().max(0.0) as u64;
+    let mut n = 0;
+    while n < 1000 {
+        let s = k as f64 * step;
+        if s > s1 {
+            break;
+        }
+        let label = format.format_seconds(s, w.sample_rate);
+        mark(tempo.ticks_at_seconds(s), label);
+        k += 1;
+        n += 1;
+    }
+}
+
 fn paint_markers(w: &ProjectWindow, painter: &Painter, g: &Geo, row: usize) {
     let t = crate::theme::tokens(painter.ctx());
     let top = g.row_top(row);
@@ -1773,6 +1847,10 @@ fn click(w: &mut ProjectWindow, g: &Geo, p: Pos2, mods: egui::Modifiers) {
                 }
                 return;
             }
+            // Lineal-Spuren haben kein Mute/Solo (ein Solo schaltete sonst alles stumm).
+            if kind == TrackKind::Ruler && (m.contains(p) || s.contains(p)) {
+                return;
+            }
             let track = &mut w.project.tracks[row];
             if m.contains(p) {
                 track.mute = !track.mute;
@@ -2085,6 +2163,9 @@ fn paint_lanes(w: &ProjectWindow, painter: &Painter, g: &Geo) {
         }
         if w.project.tracks[row].kind == TrackKind::Tempo {
             tempo::paint(w, painter, g, row);
+        }
+        if w.project.tracks[row].kind == TrackKind::Ruler {
+            paint_ruler_track(w, painter, g, row);
         }
     }
     automation::paint(w, painter, g);
@@ -2581,8 +2662,19 @@ fn paint_headers(w: &ProjectWindow, painter: &Painter, g: &Geo) {
             paint_header_volume(painter, volume, track.volume_db, color, &visuals);
         }
         let flags = [
-            (Flag::Text("M"), track.mute, t.mute, true),
-            (Flag::Text("S"), track.solo, t.solo, true),
+            // Lineal-Spuren klingen nicht: kein Mute/Solo.
+            (
+                Flag::Text("M"),
+                track.mute,
+                t.mute,
+                track.kind != TrackKind::Ruler,
+            ),
+            (
+                Flag::Text("S"),
+                track.solo,
+                t.solo,
+                track.kind != TrackKind::Ruler,
+            ),
             (
                 Flag::Icon(Icon::Record),
                 track.record,

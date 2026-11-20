@@ -99,7 +99,7 @@ Der Spurtyp legt fest, welche Events eine Spur trägt und ob sie einen Mixer-Kan
 | Ordner | andere Spuren, ein-/ausklappbar | nein | Mute/Solo für alle enthaltenen | ja |
 | Marker | Marker und Cycle-Marker | nein | Marker-Liste | ja |
 | Tempo/Taktart | Tempo- und Taktart-Ereignisse | nein | Tempo-Modus fest/variabel | ja |
-| Lineal | zusätzliches Zeitlineal mit eigenem Format | nein | Anzeigeformat | später (#44, 0.8) |
+| Lineal | zusätzliches Zeitlineal mit eigenem Format (Takte, Sekunden, Timecode 25/30 fps, Samples); beliebig viele, Projekt → „Lineal-Spur hinzufügen“ | nein | Anzeigeformat | 0.8 |
 | Automation | Kurve eines Parameters, unter ihrer Spur | nein | Parameter-Auswahl, Modus | ja |
 | Video | Videoframes als Thumbnails | nein | Offset, Ton an/aus | später (#174; Codec-Lizenzen vorher prüfen) |
 

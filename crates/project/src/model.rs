@@ -29,6 +29,82 @@ pub enum TrackKind {
     Marker,
     /// Tempospur: zeigt und bearbeitet die Tempowechsel der Tempo-Map (eine je Projekt).
     Tempo,
+    /// Lineal-Spur: ein weiteres Zeitlineal mit eigenem Anzeigeformat (beliebig viele).
+    Ruler,
+}
+
+/// Anzeigeformat einer Lineal-Spur.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RulerFormat {
+    /// Takte und Zählzeiten.
+    #[default]
+    Bars,
+    /// Minuten:Sekunden.Millisekunden.
+    Seconds,
+    /// Timecode Stunden:Minuten:Sekunden:Frames mit 25 Bildern je Sekunde.
+    Timecode25,
+    /// Timecode mit 30 Bildern je Sekunde (ohne Drop-Frame).
+    Timecode30,
+    /// Samples bei der Abtastrate des Projekts.
+    Samples,
+}
+
+impl RulerFormat {
+    pub const ALL: [RulerFormat; 5] = [
+        Self::Bars,
+        Self::Seconds,
+        Self::Timecode25,
+        Self::Timecode30,
+        Self::Samples,
+    ];
+
+    pub fn is_bars(&self) -> bool {
+        *self == Self::Bars
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Bars => "Takte",
+            Self::Seconds => "Sekunden",
+            Self::Timecode25 => "Timecode 25 fps",
+            Self::Timecode30 => "Timecode 30 fps",
+            Self::Samples => "Samples",
+        }
+    }
+
+    /// Bilder je Sekunde der Timecode-Formate.
+    pub fn fps(self) -> Option<u32> {
+        match self {
+            Self::Timecode25 => Some(25),
+            Self::Timecode30 => Some(30),
+            _ => None,
+        }
+    }
+
+    /// Beschriftung einer Zeit in Sekunden (nicht für Takte).
+    pub fn format_seconds(self, secs: f64, rate: u32) -> String {
+        let secs = if secs.is_finite() { secs.max(0.0) } else { 0.0 };
+        match self {
+            Self::Bars | Self::Seconds => {
+                let ms = (secs * 1000.0).round() as u64;
+                format!("{}:{:02}.{:03}", ms / 60_000, ms / 1000 % 60, ms % 1000)
+            }
+            Self::Timecode25 | Self::Timecode30 => {
+                let fps = u64::from(self.fps().unwrap_or(25));
+                let frames = (secs * fps as f64).floor() as u64;
+                let s = frames / fps;
+                format!(
+                    "{:02}:{:02}:{:02}:{:02}",
+                    s / 3600,
+                    s / 60 % 60,
+                    s % 60,
+                    frames % fps
+                )
+            }
+            Self::Samples => format!("{}", (secs * f64::from(rate)).round() as u64),
+        }
+    }
 }
 
 impl TrackKind {
@@ -42,6 +118,7 @@ impl TrackKind {
             Self::Folder => "Ordner",
             Self::Marker => "Marker",
             Self::Tempo => "Tempo",
+            Self::Ruler => "Lineal",
         }
     }
 
@@ -387,6 +464,9 @@ pub struct Track {
     /// MIDI-Spuren: Ausgang zu einem externen Gerät (Name des MIDI-Ports).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub midi_port: Option<String>,
+    /// Lineal-Spuren: Anzeigeformat.
+    #[serde(default, skip_serializing_if = "RulerFormat::is_bars")]
+    pub ruler: RulerFormat,
     /// MIDI-Spuren: Kanal 1–16.
     #[serde(default = "default_channel", skip_serializing_if = "is_channel_one")]
     pub midi_channel: u8,
@@ -1061,6 +1141,7 @@ impl Project {
                 folded: false,
                 order: None,
                 midi_port: None,
+                ruler: RulerFormat::Bars,
                 midi_channel: 1,
                 program: None,
                 solo_defeat: false,
@@ -1684,6 +1765,7 @@ impl Project {
             folded: false,
             order: None,
             midi_port: None,
+            ruler: RulerFormat::Bars,
             midi_channel: 1,
             program: None,
             solo_defeat: false,
@@ -2022,7 +2104,11 @@ impl Project {
     /// Gruppen und FX-Kanäle sind solo-sicher (sonst fehlte bei Solo der Hall).
     /// Mute und Solo eines Ordners wirken auf alle Spuren darin.
     pub fn audible(&self, track: usize) -> bool {
-        let any_solo = self.tracks.iter().any(|t| t.solo);
+        // Lineal-Spuren klingen nicht; ihr Solo (etwa aus einer Datei) zählt nicht.
+        let any_solo = self
+            .tracks
+            .iter()
+            .any(|t| t.solo && t.kind != TrackKind::Ruler);
         self.tracks.get(track).is_some_and(|t| {
             !self.effective_mute(track)
                 && (!any_solo
@@ -2656,6 +2742,37 @@ mod tests {
         assert_eq!(bpm_in_name("Take 3bpm"), None, "zu langsam");
         assert_eq!(bpm_in_name("x9999bpm 100bpm"), Some(100.0));
         assert_eq!(bpm_in_name("Gesang"), None);
+    }
+
+    #[test]
+    fn ruler_formats_label_times() {
+        let t = 3723.5; // 1 h 2 min 3,5 s
+        assert_eq!(RulerFormat::Seconds.format_seconds(t, 48_000), "62:03.500");
+        assert_eq!(
+            RulerFormat::Timecode25.format_seconds(t, 48_000),
+            "01:02:03:12"
+        );
+        assert_eq!(
+            RulerFormat::Timecode30.format_seconds(t, 48_000),
+            "01:02:03:15"
+        );
+        assert_eq!(RulerFormat::Samples.format_seconds(1.5, 48_000), "72000");
+        assert_eq!(
+            RulerFormat::Seconds.format_seconds(f64::NAN, 48_000),
+            "0:00.000"
+        );
+        // Älteres Projekt ohne Feld: Takte.
+        let mut p = Project::default();
+        let i = p.add_track(TrackKind::Ruler, "Lineal");
+        p.tracks[i].ruler = RulerFormat::Timecode25;
+        let json = serde_json::to_string(&p).unwrap();
+        let back: Project = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.tracks[i].ruler, RulerFormat::Timecode25);
+        assert!(!TrackKind::Ruler.holds_events());
+        // Ein Solo auf dem Lineal schaltet nichts stumm.
+        let a = p.add_track(TrackKind::Audio, "A");
+        p.tracks[i].solo = true;
+        assert!(p.audible(a));
     }
 
     #[test]

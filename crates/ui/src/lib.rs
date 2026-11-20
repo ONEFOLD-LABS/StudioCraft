@@ -57,6 +57,7 @@ mod recording;
 mod render;
 mod rightzone;
 mod routing;
+mod ruler_ui;
 mod sampleeditor;
 mod session;
 pub mod settings;
@@ -1510,7 +1511,10 @@ impl ProjectWindow {
             });
         }
         // Marker- und Tempospur haben keinen Klang: keine Lautstärke, kein Panorama.
-        if !matches!(track.kind, TrackKind::Marker | TrackKind::Tempo) {
+        if !matches!(
+            track.kind,
+            TrackKind::Marker | TrackKind::Tempo | TrackKind::Ruler
+        ) {
             ui.horizontal(|ui| {
                 let r = ui.add(
                     egui::Slider::new(
@@ -1572,6 +1576,9 @@ impl ProjectWindow {
         }
         if kind == TrackKind::Tempo {
             inspector_section(ui, tr("Tempo"), true, |ui| self.tempo_track_ui(ui));
+        }
+        if kind == TrackKind::Ruler {
+            inspector_section(ui, tr("Lineal"), true, |ui| self.ruler_ui(ui, idx));
         }
         if channel {
             inspector_section(ui, tr("Pre"), false, |ui| self.pre_ui(ui, idx));
@@ -4353,6 +4360,44 @@ mod tests {
     #[test]
     fn render_about_dialog() {
         shot("about", |w| w.about = about::About::Licenses);
+    }
+
+    #[test]
+    fn the_project_menu_adds_ruler_tracks_and_the_inspector_sets_the_format() {
+        let (w, _) = one_event_window();
+        let mut h = window_harness(w);
+        h.get_by_label("Projekt").click();
+        h.run_steps(2);
+        h.get_by_label("Lineal-Spur hinzufügen").click();
+        h.run_steps(2);
+        let t = h.state().selected_track.unwrap();
+        assert_eq!(h.state().project.tracks[t].kind, TrackKind::Ruler);
+        h.state_mut().show_inspector = true;
+        h.run_steps(2);
+        h.get_by_label("Format").click();
+        h.run_steps(2);
+        h.get_by_label("Timecode 25 fps").click();
+        h.run_steps(2);
+        assert_eq!(
+            h.state().project.tracks[t].ruler,
+            studiocraft_project::RulerFormat::Timecode25
+        );
+    }
+
+    #[test]
+    fn render_ruler_tracks() {
+        shot("ruler-tracks", |w| {
+            use studiocraft_project::RulerFormat;
+            w.project = Project::default();
+            for f in RulerFormat::ALL {
+                let t = w.project.add_track(TrackKind::Ruler, tr(f.label()));
+                w.project.tracks[t].ruler = f;
+            }
+            w.project.add_track(TrackKind::Audio, "Audio");
+            // Ein Tempowechsel bei Takt 5: Zeitformate liegen danach enger.
+            w.project.tempo.set_event(4 * 3840, 180.0, false);
+            w.project.tempo.use_track = true;
+        });
     }
 
     #[test]

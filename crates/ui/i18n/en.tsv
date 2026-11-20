@@ -36,6 +36,11 @@ Position	Position
 Folgt dem Tempo	Follows Tempo
 Audio wird gedehnt, sodass es zum Projekttempo passt (Tonhöhe bleibt)	Audio is stretched to fit the project tempo (pitch stays)
 Datei-Tempo	File Tempo
+Lineal	Ruler
+Lineal-Spur hinzufügen	Add Ruler Track
+Takte	Bars
+Timecode 25 fps	Timecode 25 fps
+Timecode 30 fps	Timecode 30 fps
 Warp an Hitpoints	Warp at Hitpoints
 Jeder Anschlag rückt auf die nächste Sechzehntel	Every hit moves to the nearest sixteenth
 Warp löschen	Clear Warp
