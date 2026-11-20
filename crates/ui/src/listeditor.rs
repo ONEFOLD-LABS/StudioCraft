@@ -15,7 +15,7 @@ use crate::i18n::tr;
 /// Höhe einer Tabellenzeile.
 const ROW_H: f32 = 22.0;
 /// Spaltenbreiten: Typ, Position, Länge, Daten 1, Daten 2, Kanal.
-const COLS: [f32; 6] = [120.0, 100.0, 90.0, 80.0, 80.0, 50.0];
+const COLS: [f32; 6] = [120.0, 100.0, 90.0, 150.0, 80.0, 50.0];
 
 /// Welche Event-Typen die Tabelle zeigt.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -252,7 +252,7 @@ fn cell_number(
     value: u16,
     range: std::ops::RangeInclusive<u16>,
     label: egui::Id,
-    format: Option<fn(u16) -> String>,
+    format: Option<&dyn Fn(u16) -> String>,
 ) -> Option<u16> {
     let mut v = value;
     let mut d = DragValue::new(&mut v).range(range).speed(0.25);
@@ -265,6 +265,15 @@ fn cell_number(
 
 fn pitch_name(p: u16) -> String {
     crate::keyeditor::note_name(p.min(127) as u8)
+}
+
+/// Tonhöhe mit Drum-Namen, wenn die Map eine Zeile dafür hat: „Snare (D1)“.
+fn drum_name(map: &studiocraft_project::DrumMap, p: u16) -> String {
+    let pitch = p.min(127) as u8;
+    match map.row(pitch) {
+        Some(r) => format!("{} ({})", crate::i18n::tr_dyn(&r.name), pitch_name(p)),
+        None => pitch_name(p),
+    }
 }
 
 /// Zeichnet den List-Editor in die untere Zone.
@@ -284,6 +293,15 @@ pub(crate) fn show(w: &mut ProjectWindow, ui: &mut Ui) {
         .project
         .find(part)
         .map_or(1, |(t, _)| w.project.tracks[t].midi_channel);
+    // Spuren mit Drum-Map zeigen die Namen ihrer Zeilen (Issue #161).
+    let drums = w
+        .project
+        .find(part)
+        .and_then(|(t, _)| w.project.tracks[t].drum_map.clone());
+    let pitch_label = |p: u16| match &drums {
+        Some(m) => drum_name(m, p),
+        None => pitch_name(p),
+    };
 
     ui.horizontal(|ui| {
         ui.weak(tr("Zeigen:"));
@@ -378,7 +396,7 @@ pub(crate) fn show(w: &mut ProjectWindow, ui: &mut Ui) {
                                 u16::from(n.pitch),
                                 0..=127,
                                 ids[3],
-                                Some(pitch_name),
+                                Some(&pitch_label),
                             );
                             if let Some(p) = p {
                                 edits.push((row, Edit::Pitch(p as u8)));
@@ -546,6 +564,14 @@ mod tests {
         let starts: Vec<i64> = ev.notes[2..].iter().map(|n| n.start).collect();
         assert_eq!(starts, vec![1920, 0]);
         assert_eq!(w.key_editor.selection, vec![3]);
+    }
+
+    #[test]
+    fn drum_tracks_show_drum_names_in_the_pitch_column() {
+        let map = studiocraft_project::DrumMap::general_midi();
+        assert_eq!(drum_name(&map, 38), format!("Snare ({})", pitch_name(38)));
+        // Tonhöhen ohne Zeile zeigen den Tonnamen.
+        assert_eq!(drum_name(&map, 100), pitch_name(100));
     }
 
     #[test]

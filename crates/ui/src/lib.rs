@@ -25,6 +25,7 @@ mod browser;
 mod bundle;
 mod colors;
 mod devices;
+mod drummap_ui;
 mod eq_ui;
 mod fades_ui;
 mod file_dialog;
@@ -166,6 +167,8 @@ pub struct ProjectWindow {
     repeat_dialog: shortcuts::RepeatDialog,
     /// Dialog „Über StudioCraft“.
     about: about::About,
+    /// Fenster „Drum-Map bearbeiten“.
+    drum_map_editor: drummap_ui::DrumMapEditor,
     /// Sample-Editor in der unteren Zone.
     sample_editor: sampleeditor::SampleEditor,
     /// Globaler Quantisierungswert mit Swing und Stärke (Taste Q).
@@ -370,6 +373,7 @@ impl ProjectWindow {
             crossfade_editor: None,
             repeat_dialog: shortcuts::RepeatDialog::default(),
             about: about::About::Closed,
+            drum_map_editor: drummap_ui::DrumMapEditor::default(),
             sample_editor: sampleeditor::SampleEditor::default(),
             quantize: studiocraft_project::Quantize::default(),
             auto_writer: automation_write::AutomationWriter::default(),
@@ -1162,6 +1166,7 @@ impl ProjectWindow {
 
         self.confirm_dialog(ui);
         self.about_dialog(ui);
+        self.drum_map_window(ui.ctx());
         self.sync_title_bar(ui.ctx());
         let title = self.title();
         if title != self.last_title {
@@ -5250,6 +5255,69 @@ mod tests {
         h.get_by_label("Raster für Triangel offen");
         h.state_mut().undo();
         assert!(h.state().project.tracks[t].drum_map.is_none());
+    }
+
+    #[test]
+    fn drum_maps_are_copied_from_another_track_and_edited_in_their_window() {
+        let (mut w, part) = key_editor_window();
+        let t = w.project.find(part).unwrap().0;
+        let other = w.project.add_track(TrackKind::Midi, "Kit");
+        let mut kit = studiocraft_project::DrumMap::general_midi();
+        kit.name = "Studio-Kit".into();
+        w.project.tracks[other].drum_map = Some(kit);
+        w.selected_track = Some(t);
+        w.show_inspector = true;
+        w.clear_history();
+        let mut h = window_harness(w);
+        h.run_steps(2);
+        h.get_by_label("Drum-Map").click();
+        h.run_steps(2);
+        h.get_all_by_label("Drum-Map").last().unwrap().click();
+        h.run_steps(2);
+        h.get_by_label("Wie Spur „Kit“ (Studio-Kit)").click();
+        h.run_steps(2);
+        let map = h.state().project.tracks[t].drum_map.clone().unwrap();
+        assert_eq!(map.name, "Studio-Kit");
+        let rows = map.rows.len();
+        // Bearbeiten: eine Zeile hinzufügen ist ein Rückgängig-Schritt.
+        h.get_by_label("Bearbeiten …").click();
+        h.run_steps(2);
+        h.get_by_label("Zeile hinzufügen").click();
+        h.run_steps(3);
+        assert_eq!(
+            h.state().project.tracks[t]
+                .drum_map
+                .as_ref()
+                .unwrap()
+                .rows
+                .len(),
+            rows + 1
+        );
+        h.state_mut().undo();
+        assert_eq!(
+            h.state().project.tracks[t]
+                .drum_map
+                .as_ref()
+                .unwrap()
+                .rows
+                .len(),
+            rows
+        );
+        h.state_mut().undo();
+        assert!(h.state().project.tracks[t].drum_map.is_none());
+        // Die andere Spur behält ihre eigene Map.
+        assert!(h.state().project.tracks[other].drum_map.is_some());
+    }
+
+    #[test]
+    fn renders_drum_map_editor() {
+        shot("drum-map-editor", |w| {
+            let t = 0;
+            let mut map = studiocraft_project::DrumMap::general_midi();
+            map.rows[3].output = Some(40);
+            w.project.tracks[t].drum_map = Some(map);
+            w.open_drum_map_editor(t);
+        });
     }
 
     #[test]
