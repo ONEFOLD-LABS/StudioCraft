@@ -124,39 +124,61 @@ impl ProjectWindow {
         }
     }
 
-    /// Drum-Map der Spur im Inspector: keine (Key-Editor) oder General MIDI (Drum-Editor).
+    /// Drum-Map der Spur im Inspector: keine (Key-Editor), General MIDI oder die Map einer
+    /// anderen Spur (als Kopie); dazu „Bearbeiten …“ (Issue #161).
     pub(crate) fn drum_map_ui(&mut self, ui: &mut Ui, track: usize) {
-        let has = self
+        let current = self
             .project
             .tracks
             .get(track)
-            .is_some_and(|t| t.drum_map.is_some());
-        let mut choice = None;
+            .and_then(|t| t.drum_map.clone());
+        // Maps anderer Spuren zum Übernehmen.
+        let others: Vec<(String, DrumMap)> = self
+            .project
+            .tracks
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| *i != track)
+            .filter_map(|(_, t)| t.drum_map.clone().map(|m| (t.name.clone(), m)))
+            .collect();
+        let mut choice: Option<Option<DrumMap>> = None;
         ui.horizontal(|ui| {
             let l = ui.label(tr("Drum-Map"));
+            let shown = match &current {
+                None => tr("Keine").to_owned(),
+                Some(m) if m.name == "GM" => tr("GM-Schlagzeug").to_owned(),
+                Some(m) => m.name.clone(),
+            };
             egui::ComboBox::from_id_salt(("drum-map", track))
-                .selected_text(if has {
-                    tr("GM-Schlagzeug")
-                } else {
-                    tr("Keine")
-                })
+                .selected_text(shown)
                 .show_ui(ui, |ui| {
-                    if ui.selectable_label(!has, tr("Keine")).clicked() {
-                        choice = Some(false);
+                    if ui
+                        .selectable_label(current.is_none(), tr("Keine"))
+                        .clicked()
+                    {
+                        choice = Some(None);
                     }
-                    if ui.selectable_label(has, tr("GM-Schlagzeug")).clicked() {
-                        choice = Some(true);
+                    if ui.button(tr("GM-Schlagzeug")).clicked() {
+                        choice = Some(Some(DrumMap::general_midi()));
+                    }
+                    for (name, map) in &others {
+                        let label = crate::i18n::trf(
+                            "Wie Spur „{spur}“ ({map})",
+                            &[("spur", name), ("map", &map.name)],
+                        );
+                        if ui.button(label).clicked() {
+                            choice = Some(Some(map.clone()));
+                        }
                     }
                 })
                 .response
                 .labelled_by(l.id);
-        });
-        if let Some(on) = choice.filter(|&on| on != has) {
-            let before = self.project.clone();
-            if let Some(t) = self.project.tracks.get_mut(track) {
-                t.drum_map = on.then(DrumMap::general_midi);
+            if current.is_some() && ui.button(tr("Bearbeiten …")).clicked() {
+                self.open_drum_map_editor(track);
             }
-            self.checkpoint(before);
+        });
+        if let Some(map) = choice.filter(|m| *m != current) {
+            self.set_drum_map(track, map);
         }
     }
 }

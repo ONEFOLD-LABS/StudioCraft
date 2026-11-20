@@ -26,6 +26,9 @@ pub struct DrumRow {
     pub mute: bool,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub solo: bool,
+    /// Ausgangsnote: Die Zeile zeigt `pitch`, gespielt wird diese Tonhöhe (`None`: dieselbe).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output: Option<u8>,
 }
 
 fn is_zero(v: &u64) -> bool {
@@ -48,9 +51,15 @@ impl DrumRow {
             length: DEFAULT_DRUM_LENGTH,
             mute: false,
             solo: false,
+            output: None,
         }
     }
 }
+
+/// Dateiendung gespeicherter Drum-Maps.
+pub const DRUM_MAP_EXTENSION: &str = "drummap";
+/// Größte Drum-Map-Datei, die gelesen wird.
+pub const MAX_DRUM_MAP_FILE: usize = 1 << 20;
 
 /// Eine Drum-Map: Name und Zeilen in Anzeigereihenfolge (oben zuerst).
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -144,6 +153,74 @@ impl DrumMap {
         }
     }
 
+    /// Tonhöhe, die für Noten der Zeile `pitch` gespielt wird (Ausgangsnote).
+    pub fn output_of(&self, pitch: u8) -> u8 {
+        self.row(pitch).and_then(|r| r.output).unwrap_or(pitch)
+    }
+
+    /// Ob irgendeine Zeile eine andere Ausgangsnote hat.
+    pub fn remaps(&self) -> bool {
+        self.rows
+            .iter()
+            .any(|r| r.output.is_some_and(|o| o != r.pitch))
+    }
+
+    /// Fügt eine Zeile für die nächste freie Tonhöhe ab `near` (nach oben, dann nach unten)
+    /// am Anfang ein. Gibt ihren Index zurück, oder `None`, wenn alle 128 belegt sind.
+    pub fn add_row(&mut self, near: u8) -> Option<usize> {
+        let used = |p: u8| self.rows.iter().any(|r| r.pitch == p);
+        let pitch = (near..=127).chain((0..near).rev()).find(|&p| !used(p))?;
+        self.rows.insert(0, DrumRow::new(pitch, pitch.to_string()));
+        Some(0)
+    }
+
+    /// Verschiebt Zeile `i` um eine Stelle nach oben (`up`) oder unten.
+    pub fn move_row(&mut self, i: usize, up: bool) -> bool {
+        let j = if up { i.checked_sub(1) } else { Some(i + 1) };
+        match j.filter(|&j| j < self.rows.len() && i < self.rows.len()) {
+            Some(j) => {
+                self.rows.swap(i, j);
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Setzt die Tonhöhe von Zeile `i`, wenn keine andere Zeile sie hat.
+    pub fn set_pitch(&mut self, i: usize, pitch: u8) -> bool {
+        if pitch > 127
+            || self
+                .rows
+                .iter()
+                .enumerate()
+                .any(|(k, r)| k != i && r.pitch == pitch)
+        {
+            return false;
+        }
+        match self.rows.get_mut(i) {
+            Some(r) => {
+                r.pitch = pitch;
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Die Map als Text für eine Datei (JSON).
+    pub fn to_file_text(&self) -> Result<String, String> {
+        serde_json::to_string_pretty(self).map_err(|e| e.to_string())
+    }
+
+    /// Liest eine Map aus einer Datei (bereinigt; fremde Dateien gelten als feindlich).
+    pub fn from_file_text(text: &str) -> Result<Self, String> {
+        if text.len() > MAX_DRUM_MAP_FILE {
+            return Err("Datei zu groß".into());
+        }
+        let mut m: DrumMap = serde_json::from_str(text).map_err(|e| e.to_string())?;
+        m.sanitize();
+        Ok(m)
+    }
+
     /// Ob Mute/Solo irgendetwas stummschaltet (dann muss die Wiedergabe filtern).
     pub fn filters(&self) -> bool {
         self.rows.iter().any(|r| r.mute || r.solo)
@@ -166,9 +243,13 @@ impl DrumMap {
         for r in &mut self.rows {
             r.length = r.length.clamp(1, TICKS_PER_QUARTER * 16);
             r.quantize = r.quantize.min(TICKS_PER_QUARTER * 16);
+            r.output = r.output.filter(|&o| o < 128);
             if r.name.chars().count() > 64 {
                 r.name = r.name.chars().take(64).collect();
             }
+        }
+        if self.name.chars().count() > 64 {
+            self.name = self.name.chars().take(64).collect();
         }
         *self != before
     }
@@ -206,6 +287,51 @@ mod tests {
         // Mute wins over solo on the same row.
         m.rows.iter_mut().find(|r| r.pitch == 38).unwrap().mute = true;
         assert!(!m.audible(38));
+    }
+
+    #[test]
+    fn rows_are_added_moved_repitched_and_remapped() {
+        let mut m = DrumMap {
+            name: "Kit".into(),
+            rows: vec![DrumRow::new(36, "Kick"), DrumRow::new(38, "Snare")],
+        };
+        assert_eq!(m.add_row(36), Some(0));
+        assert_eq!(m.rows[0].pitch, 37, "next free pitch upwards");
+        assert!(m.move_row(0, false));
+        assert_eq!(m.rows[1].pitch, 37);
+        assert!(!m.move_row(0, true), "already on top");
+        assert!(!m.move_row(9, false));
+        assert!(!m.set_pitch(1, 38), "38 is taken");
+        assert!(m.set_pitch(1, 40));
+        assert!(!m.remaps());
+        m.rows[2].output = Some(40);
+        assert!(m.remaps());
+        assert_eq!(m.output_of(38), 40);
+        assert_eq!(m.output_of(36), 36);
+        assert_eq!(m.output_of(99), 99);
+        // Alle Tonhöhen belegt: keine Zeile mehr.
+        let mut full = DrumMap {
+            name: "voll".into(),
+            rows: (0..128).map(|p| DrumRow::new(p, "x")).collect(),
+        };
+        assert_eq!(full.add_row(60), None);
+    }
+
+    #[test]
+    fn maps_round_trip_through_files_and_bad_files_are_refused() {
+        let mut m = DrumMap::general_midi();
+        m.rows[0].output = Some(30);
+        m.rows[1].mute = true;
+        let text = m.to_file_text().unwrap();
+        assert_eq!(DrumMap::from_file_text(&text).unwrap(), m);
+        assert!(DrumMap::from_file_text("kein json").is_err());
+        assert!(DrumMap::from_file_text(&" ".repeat(MAX_DRUM_MAP_FILE + 1)).is_err());
+        // Doppelte Tonhöhen und falsche Ausgänge werden bereinigt.
+        let bad =
+            r#"{"name":"x","rows":[{"pitch":36,"name":"a","output":200},{"pitch":36,"name":"b"}]}"#;
+        let m = DrumMap::from_file_text(bad).unwrap();
+        assert_eq!(m.rows.len(), 1);
+        assert_eq!(m.rows[0].output, None);
     }
 
     #[test]

@@ -41,7 +41,7 @@ pub mod warp;
 pub use automation::{AutoParam, AutoPoint, AutomationLane};
 pub use click::{CLICK_DB, ClickSettings, ClickSound, MAX_PRECOUNT_BARS};
 pub use controllers::{CtrlKind, CtrlPoint};
-pub use drummap::{DrumMap, DrumRow};
+pub use drummap::{DRUM_MAP_EXTENSION, DrumMap, DrumRow};
 pub use eq::{BandKind, ChannelEq, EQ_FREQ, EQ_GAIN, EQ_Q, EqBand};
 pub use io::{AudioIo, IoBus, MAIN_OUT, MAX_IO_BUSES};
 pub use layout::{NamedLayout, WindowLayout};
