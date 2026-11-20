@@ -6,6 +6,11 @@
 //! Bearbeiten ist nicht-destruktiv: Das Ergebnis wird ein neuer Clip im Pool, auf den nur
 //! dieses Event zeigt; das Original bleibt, Rückgängig stellt den alten Zustand her. Ohne
 //! Auswahl wirkt eine Bearbeitung auf den Teil des Clips, den das Event nutzt.
+//!
+//! Hitpoints und Tempo (Issue #41, `studiocraft_engine::onsets`): „Hitpoints erkennen“ findet
+//! die Einsätze im Clip (Empfindlichkeit einstellbar) und zeigt sie als Linien; „In Slices
+//! teilen“ teilt das Event an jedem Hitpoint in seinem Bereich. „Tempo erkennen“ schätzt das
+//! Tempo der Auswahl bzw. des Events; „Als Projekttempo“ übernimmt es.
 
 use crate::i18n::tr;
 use egui::{Rect, Sense, Stroke, StrokeKind, Ui, vec2};
@@ -27,6 +32,13 @@ pub(crate) struct SampleEditor {
     drag_from: Option<u64>,
     /// Gain für „Gain anwenden“ in dB.
     pub gain_db: f32,
+    /// Erkannte Hitpoints in Frames des Clips und der Clip, für den sie gelten.
+    pub hitpoints: Vec<u64>,
+    hit_clip: Option<u32>,
+    /// Empfindlichkeit der Erkennung, 0–1.
+    pub sensitivity: f32,
+    /// Erkanntes Tempo in BPM (`Some(None)`: kein Puls gefunden).
+    pub tempo: Option<Option<f64>>,
 }
 
 impl Default for SampleEditor {
@@ -38,6 +50,10 @@ impl Default for SampleEditor {
             selection: None,
             drag_from: None,
             gain_db: 3.0,
+            hitpoints: Vec::new(),
+            hit_clip: None,
+            sensitivity: 0.5,
+            tempo: None,
         }
     }
 }
@@ -73,6 +89,7 @@ impl ProjectWindow {
         self.sample_editor = SampleEditor {
             event: Some(id),
             gain_db: self.sample_editor.gain_db,
+            sensitivity: self.sample_editor.sensitivity,
             ..SampleEditor::default()
         };
         self.show_lower = true;
@@ -148,31 +165,104 @@ impl ProjectWindow {
         let Some((a, b)) = self.sample_editor.selection.filter(|(a, b)| b > a) else {
             return;
         };
-        let Some(ev) = self.project.event(id).cloned() else {
-            return;
-        };
-        let Some(rate) = ev
-            .clip
-            .and_then(|c| self.project.pool.get(c as usize))
-            .map(|c| c.sample_rate)
+        let (Some(tb), Some(ta)) = (self.clip_frame_tick(id, b), self.clip_frame_tick(id, a))
         else {
             return;
         };
-        let tempo = self.project.tempo.clone();
-        // Tick eines Clip-Frames auf der Zeitachse.
+        let before = self.project.clone();
+        self.project.trim_end(id, tb);
+        self.project.trim_start(id, ta);
+        self.checkpoint(before);
+    }
+
+    /// Tick auf der Zeitachse, an dem Frame `f` des Clips von Event `id` klingt.
+    fn clip_frame_tick(&self, id: EventId, f: u64) -> Option<u64> {
+        let ev = self.project.event(id)?;
+        let rate = self.project.pool.get(ev.clip? as usize)?.sample_rate;
+        let tempo = &self.project.tempo;
         // Über die Zeitachse in Frames, damit Tempowechsel stimmen.
         let start_f = tempo.frames(ev.start.0, rate);
-        let tick_of = |f: u64| -> u64 {
-            if f >= ev.offset {
-                tempo.ticks(start_f.saturating_add(f - ev.offset), rate)
-            } else {
-                tempo.ticks(start_f.saturating_sub(ev.offset - f), rate)
-            }
+        Some(if f >= ev.offset {
+            tempo.ticks(start_f.saturating_add(f - ev.offset), rate)
+        } else {
+            tempo.ticks(start_f.saturating_sub(ev.offset - f), rate)
+        })
+    }
+
+    /// Sucht Hitpoints im ganzen Clip des Events.
+    pub(crate) fn detect_hitpoints(&mut self, id: EventId) {
+        let Some(clip) = self.project.event(id).and_then(|e| e.clip) else {
+            return;
         };
+        let Some(rate) = self.project.pool.get(clip as usize).map(|c| c.sample_rate) else {
+            return;
+        };
+        let Some(samples) = self.clip(clip).map(|c| c.samples.clone()) else {
+            return;
+        };
+        let ed = &mut self.sample_editor;
+        ed.hitpoints = studiocraft_engine::onsets::hitpoints(&samples, rate, ed.sensitivity);
+        ed.hit_clip = Some(clip);
+    }
+
+    /// Hitpoints, die im vom Event genutzten Teil liegen (ohne dessen Anfang).
+    fn hitpoints_in_event(&self, id: EventId) -> Vec<u64> {
+        let clip = self.project.event(id).and_then(|e| e.clip);
+        if clip.is_none() || clip != self.sample_editor.hit_clip {
+            return Vec::new();
+        }
+        let Some((a, b)) = self.event_frames(id) else {
+            return Vec::new();
+        };
+        self.sample_editor
+            .hitpoints
+            .iter()
+            .copied()
+            .filter(|&h| h > a && h < b)
+            .collect()
+    }
+
+    /// Teilt das Event an seinen Hitpoints (ein Rückgängig-Schritt). Gibt die Zahl der Slices
+    /// zurück.
+    pub(crate) fn slice_at_hitpoints(&mut self, id: EventId) -> usize {
+        let ticks: Vec<u64> = self
+            .hitpoints_in_event(id)
+            .into_iter()
+            .filter_map(|h| self.clip_frame_tick(id, h))
+            .collect();
+        if ticks.is_empty() {
+            return 1;
+        }
         let before = self.project.clone();
-        self.project.trim_end(id, tick_of(b));
-        self.project.trim_start(id, tick_of(a));
+        let mut current = id;
+        let mut slices = 1;
+        for t in ticks {
+            if let Some(right) = self.project.split(current, t) {
+                current = right;
+                slices += 1;
+            }
+        }
         self.checkpoint(before);
+        slices
+    }
+
+    /// Schätzt das Tempo der Auswahl bzw. des vom Event genutzten Teils.
+    pub(crate) fn detect_tempo(&mut self, id: EventId) {
+        let range = self.target_range(id);
+        let clip = self.project.event(id).and_then(|e| e.clip);
+        let rate = clip
+            .and_then(|c| self.project.pool.get(c as usize))
+            .map(|c| c.sample_rate);
+        let samples = clip.and_then(|c| self.clip(c)).map(|c| c.samples.clone());
+        let found = match (range, rate, samples) {
+            (Some((a, b)), Some(rate), Some(s)) => {
+                let n = s.len() / 2;
+                let (a, b) = ((a as usize).min(n), (b as usize).min(n));
+                studiocraft_engine::onsets::tempo(&s[a * 2..b * 2], rate)
+            }
+            _ => None,
+        };
+        self.sample_editor.tempo = Some(found);
     }
 
     /// Hört die Auswahl (ohne Auswahl den Teil des Events) vor.
@@ -214,6 +304,10 @@ pub(crate) fn show(w: &mut ProjectWindow, ui: &mut Ui) {
     let total = w.clip(clip_id).map_or(0, |c| c.samples.len() / 2) as f64;
     let mut action: Option<Process> = None;
     let mut to_event = false;
+    let mut detect = false;
+    let mut slice = false;
+    let mut find_tempo = false;
+    let mut use_tempo: Option<f64> = None;
     let mut play = false;
     let mut stop = false;
     ui.horizontal_wrapped(|ui| {
@@ -271,6 +365,57 @@ pub(crate) fn show(w: &mut ProjectWindow, ui: &mut Ui) {
                     ("b", &format!("{:.3}", b as f64 / f64::from(rate))),
                 ],
             ));
+        }
+    });
+    // Zweite Zeile: Hitpoints und Tempo.
+    let in_event = w.hitpoints_in_event(id).len();
+    ui.horizontal_wrapped(|ui| {
+        let l = ui.weak(tr("Empfindlichkeit"));
+        let r = ui
+            .add(egui::Slider::new(&mut w.sample_editor.sensitivity, 0.0..=1.0).show_value(false))
+            .labelled_by(l.id);
+        // Gibt es schon Hitpoints, folgen sie dem Regler.
+        if r.changed() && w.sample_editor.hit_clip.is_some() {
+            detect = true;
+        }
+        if ui.button(tr("Hitpoints erkennen")).clicked() {
+            detect = true;
+        }
+        if ui
+            .add_enabled(in_event > 0, egui::Button::new(tr("In Slices teilen")))
+            .on_hover_text(crate::i18n::trf(
+                "Teilt das Event an {n} Hitpoints",
+                &[("n", &in_event)],
+            ))
+            .clicked()
+        {
+            slice = true;
+        }
+        if w.sample_editor.hit_clip.is_some() {
+            ui.weak(crate::i18n::trf("{n} Hitpoints", &[("n", &in_event)]));
+        }
+        ui.separator();
+        if ui
+            .button(tr("Tempo erkennen"))
+            .on_hover_text(tr("Schätzt das Tempo der Auswahl bzw. des Events"))
+            .clicked()
+        {
+            find_tempo = true;
+        }
+        match w.sample_editor.tempo {
+            Some(Some(bpm)) => {
+                ui.label(crate::i18n::trf(
+                    "≈ {bpm} BPM",
+                    &[("bpm", &format!("{bpm:.1}"))],
+                ));
+                if ui.button(tr("Als Projekttempo")).clicked() {
+                    use_tempo = Some(bpm);
+                }
+            }
+            Some(None) => {
+                ui.weak(tr("kein Tempo gefunden"));
+            }
+            None => {}
         }
     });
     let (rect, resp) = ui.allocate_exact_size(
@@ -335,6 +480,21 @@ pub(crate) fn show(w: &mut ProjectWindow, ui: &mut Ui) {
     if to_event {
         w.event_to_selection(id);
     }
+    if detect {
+        w.detect_hitpoints(id);
+    }
+    if slice {
+        w.slice_at_hitpoints(id);
+    }
+    if find_tempo {
+        w.detect_tempo(id);
+    }
+    if let Some(bpm) = use_tempo {
+        let before = w.project.clone();
+        w.project.set_tempo((bpm * 100.0).round() / 100.0);
+        w.checkpoint(before);
+        w.dirty = true;
+    }
     if let Some(p) = action
         && let Err(e) = w.process_clip(id, p)
     {
@@ -367,6 +527,19 @@ fn paint(w: &ProjectWindow, ui: &Ui, rect: Rect, id: EventId, clip_id: u32) {
             Stroke::new(1.0, t.accent),
             StrokeKind::Inside,
         );
+    }
+    // Hitpoints als feine Linien über die ganze Höhe.
+    if ed.hit_clip == Some(clip_id) {
+        for &h in &ed.hitpoints {
+            let x = x_of(h);
+            if rect.x_range().contains(x) {
+                p.vline(
+                    x,
+                    rect.y_range(),
+                    Stroke::new(1.0, t.playhead.gamma_multiply(0.7)),
+                );
+            }
+        }
     }
     let mid = rect.center().y;
     let half = rect.height() * 0.45;

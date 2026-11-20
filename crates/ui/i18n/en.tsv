@@ -687,3 +687,13 @@ Drum-Editor – {map}	Drum editor – {map}
 {name} stumm	Mute {name}
 {name} solo	Solo {name}
 Raster für {name}	Grid for {name}
+Empfindlichkeit	Sensitivity
+Hitpoints erkennen	Detect hitpoints
+In Slices teilen	Slice at hitpoints
+Teilt das Event an {n} Hitpoints	Splits the event at {n} hitpoints
+{n} Hitpoints	{n} hitpoints
+Tempo erkennen	Detect tempo
+Schätzt das Tempo der Auswahl bzw. des Events	Estimates the tempo of the selection or the event
+≈ {bpm} BPM	≈ {bpm} BPM
+Als Projekttempo	Use as project tempo
+kein Tempo gefunden	no tempo found
