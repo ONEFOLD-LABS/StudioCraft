@@ -174,7 +174,7 @@ Die Positionsanzeige hat einen dunklen Hintergrund (`counter_bg`) mit heller Sch
 14. ✅ Automation (Issue #25): Kurven abspielen mit R, unter der Spur bearbeiten,
     schreiben mit W in Touch und Auto-Latch, Sends, Overwrite und Trim
 15. ✅ Statusanzeige der Transportleiste läuft nicht mehr über Tempo und Takt
-16. ✅ Titelleiste wie in den Craft-Apps: Symbol, Menü, Titel und Fensterknöpfe in einer Zeile,
+16. ✅ Eigene Titelleiste: Symbol, Menü, Titel und Fensterknöpfe in einer Zeile,
     `craft-window` entscheidet pro Desktop
 17. ✅ Comping: Comp-Werkzeug, Abschnitte eines Takes per Klick oder Ziehen hörbar machen
 18. ✅ Farben: Klick auf die Farbleiste im Spurkopf öffnet die Palette; Events folgen der Spurfarbe,

@@ -1,13 +1,13 @@
 # StudioCraft
 
-StudioCraft is a cross-platform digital audio workstation written in Rust. It is an independent
-personal project. Its operating concept follows the established DAW workflow described in
+StudioCraft is a cross-platform digital audio workstation written in Rust. It is a project of
+ONEFOLD LABS. Its operating concept follows the established DAW workflow described in
 [`docs/spec.md`](docs/spec.md) and is built clean-room: no code, assets or texts from other
 products, no decompiling or reverse engineering.
 
-The project follows the conventions inspired of the open Craft app family (pure Rust, egui, permissive
-licences, same packaging layout) and uses some of its shared libraries (`craft-audio`,
-`craft-window`) and CI actions. It is not an official part of that family.
+It is pure Rust with an egui user interface and uses permissively licensed libraries only. Some
+of them (`craft-audio`, `craft-window`, `craft-control`, `craft-mcp-server`) and the CI gate
+come from third-party repositories; see [`NOTICE`](NOTICE).
 
 > **Status:** early development, no release yet. Linux is the platform used day to day; Windows
 > and macOS builds are produced in CI but are not tested by hand. The user interface is German for

@@ -6,9 +6,8 @@ applies to agents as well.
 
 StudioCraft is a clean-room, pure-Rust digital audio workstation with the established
 operating concept of classic DAWs, as described in `docs/spec.md`, without code, assets or texts
-from any other product. It is an independent project, not part of the Craft family of open apps,
-but follows its conventions ([storytold/craft-contrib](https://github.com/storytold/craft-contrib)
-house rules).
+from any other product. It is a project of ONEFOLD LABS; the rules in this file apply to all
+ONEFOLD LABS projects.
 
 ## Rules that are never bent
 
@@ -19,9 +18,11 @@ house rules).
 3. **Clean room.** Learn from observed behaviour (running the product, its public manual and
    videos) and public specifications. Never decompile, disassemble or copy anything from other
    DAWs: no code, icons, images, sounds, presets, templates, wording beyond generic feature
-   names. Do not name other DAWs or their vendors anywhere in the project (UI, code, comments,
-   docs, commits, issues, pull requests). Do not copy GPL/LGPL/AGPL code either; permissive
-   sources (MIT, Apache-2.0, BSD) only, credited in `NOTICE`.
+   names. Do not name other DAWs, other proprietary products or their vendors anywhere in the
+   project (UI, code, comments, docs, commits, issues, pull requests). Technologies StudioCraft
+   works with (CLAP, ALSA, file formats, …) may be named where interoperability needs it. Do not
+   copy GPL/LGPL/AGPL code either; permissive sources (MIT, Apache-2.0, BSD) only, credited in
+   `NOTICE`.
 4. **Licences.** Dependencies and assets must be MIT, Apache-2.0, BSD-2/3-Clause, ISC, Zlib,
    OFL-1.1, CC0-1.0, CC-BY-4.0, BSL-1.0, Unicode-3.0 or Apache-2.0 WITH LLVM-exception (all
    permissive). Also accepted, as decided by the maintainer: MPL-2.0 for
@@ -131,7 +132,7 @@ A crash loses takes, so this outranks features.
 ## Platforms
 
 StudioCraft targets Linux (x86_64, aarch64, riscv64), Windows, macOS (universal), FreeBSD and the
-web (wasm), like every Craft app. Do not introduce platform-only dependencies without a `cfg`
+web (wasm), like every ONEFOLD LABS app. Do not introduce platform-only dependencies without a `cfg`
 fallback; check `docs/plattformen.md`. No Tauri, Electron, webviews or handwritten JS/TS.
 
 ## Commits and pull requests

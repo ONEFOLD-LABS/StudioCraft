@@ -381,7 +381,7 @@ Der MVP ist erreicht, wenn man ein Lied mit Audio- und Instrument-Spuren aufnehm
 | Audio-Backend | cpal: PipeWire, ALSA, JACK (Linux, FreeBSD), WASAPI (Windows; dazu eigene Hosts für WASAPI exklusiv und mit geringer Latenz), CoreAudio (macOS), Web Audio (WASM). ASIO nicht in den Paketen (SDK-Lizenz), nur als Feature im Code |
 | Lizenzierung | keine Aktivierung; eigener Code MIT oder Apache-2.0, Lizenzhinweise aller Komponenten in THIRD-PARTY-LICENSES.txt |
 | Projektformat | offenes, versioniertes Textformat plus Audio-Ordner; diff- und git-freundlich |
-| Plattform | Linux, Windows, macOS, FreeBSD und Web (WASM), Pakete nach den Konventionen der Craft-Apps |
+| Plattform | Linux, Windows, macOS, FreeBSD und Web (WASM), Pakete nach den Konventionen von ONEFOLD LABS (`docs/plattformen.md`) |
 
 **MVP-Umfang**
 
@@ -409,7 +409,7 @@ Clip (0.7), Pakete für alle Plattformen und den Browser (0.5), englische Oberfl
 **Offene Fragen**
 
 - [ ] Projektname: entschieden, StudioCraft (Repo unter Dokumente/GitHub/StudioCraft). Verworfen: SoundCraft (in der Familie vergeben), AudioCraft (Meta), MixCraft (bestehende DAW), RecordCraft (Rust-Recorder kaptaindieter/RecordCraft). Markenrecherche steht noch aus.
-- [x] GUI-Toolkit: entschieden, egui/eframe mit craft-ui wie die Craft-Apps (nativ und Web). Prototyp bestätigt: 0,15 ms CPU pro Frame bei 100 und 1000 Spuren (Release-Build)
+- [x] GUI-Toolkit: entschieden, egui/eframe (nativ und Web). Prototyp bestätigt: 0,15 ms CPU pro Frame bei 100 und 1000 Spuren (Release-Build)
 - [x] Plugin-GUIs unter Wayland (#175, 0.8): CLAP-Plugins öffnen zuerst ein eigenes
   Wayland-Fenster, sonst bettet StudioCraft den Editor über XWayland in ein eigenes Fenster ein
   (bleibt über dem Hauptfenster, merkt sich seine Position je Plugin-Fenster, solange die App

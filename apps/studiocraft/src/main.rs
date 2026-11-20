@@ -340,7 +340,7 @@ fn main() -> ExitCode {
     }
     window.clear_history();
 
-    // Titelleiste wie in den anderen Craft-Apps: craft-window entscheidet pro Desktop, ob die
+    // Eigene Titelleiste: craft-window entscheidet pro Desktop, ob die
     // App sie zeichnet; STUDIOCRAFT_TITLEBAR=system behält den Rahmen des Systems.
     let frame = studiocraft_ui::titlebar::decide_frame();
     let builder = egui::ViewportBuilder::default().with_title("StudioCraft");
