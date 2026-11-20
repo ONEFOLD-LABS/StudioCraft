@@ -1,6 +1,6 @@
 # Plattformen und Auslieferung
 
-StudioCraft ist ein eigenständiges Projekt, kein Teil der Craft-Familie. Es übernimmt aber deren Konventionen: Es soll auf denselben Systemen laufen und in denselben Formaten ausgeliefert werden. Vorbild ist [storytold/soundcraft](https://github.com/storytold/soundcraft) (Release v0.20.1, Stand 2026-11-18).
+StudioCraft ist ein Projekt von ONEFOLD LABS; Zielsysteme und Paketformate gelten für alle ONEFOLD-LABS-Projekte. Paketaufbau und Build-Skripte sind an [storytold/soundcraft](https://github.com/storytold/soundcraft) angelehnt (Apache-2.0, Release v0.20.1, Stand 2026-11-18, siehe `NOTICE`).
 
 ## Zielplattformen und Pakete
 
@@ -43,7 +43,7 @@ packaging/{linux,windows,macos,freebsd,web} vorhanden
 .github/workflows/      ci.yml, release.yml über storytold/craft-common-actions  (geplant)
 ```
 
-Releases laufen über den eigenen Workflow `.github/workflows/release.yml`: Ein Tag `v*` baut alle Pakete und legt einen Release-Entwurf an; nachts und auf Abruf läuft derselbe Bau als Probelauf ohne Veröffentlichung. Den gemeinsamen Release-Workflow der Craft-Familie nutzt StudioCraft nicht, weil er deren Branches, Umgebungen und App-Kennungen voraussetzt (Issue #31); CI-Gate und FreeBSD-Prüfung kommen weiter aus `storytold/craft-common-actions`.
+Releases laufen über den eigenen Workflow `.github/workflows/release.yml`: Ein Tag `v*` baut alle Pakete und legt einen Release-Entwurf an; nachts und auf Abruf läuft derselbe Bau als Probelauf ohne Veröffentlichung. Den gemeinsamen Release-Workflow aus `storytold/craft-common-actions` nutzt StudioCraft nicht, weil er dortige Branches, Umgebungen und App-Kennungen voraussetzt (Issue #31); CI-Gate und FreeBSD-Prüfung kommen weiter aus `storytold/craft-common-actions`.
 
 ## Audio-Hosts je System
 

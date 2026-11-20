@@ -371,7 +371,7 @@ Der MVP ist erreicht, wenn man ein Lied mit Audio- und Instrument-Spuren aufnehm
 | Audio-Backend | cpal: PipeWire, ALSA, JACK (Linux, FreeBSD), WASAPI (Windows; dazu eigene Hosts für WASAPI exklusiv und mit geringer Latenz), CoreAudio (macOS), Web Audio (WASM). ASIO nicht in den Paketen (SDK-Lizenz), nur als Feature im Code |
 | Lizenzierung | keine Aktivierung; eigener Code MIT oder Apache-2.0, Lizenzhinweise aller Komponenten in THIRD-PARTY-LICENSES.txt |
 | Projektformat | offenes, versioniertes Textformat plus Audio-Ordner; diff- und git-freundlich |
-| Plattform | Linux, Windows, macOS, FreeBSD und Web (WASM), Pakete nach den Konventionen der Craft-Apps |
+| Plattform | Linux, Windows, macOS, FreeBSD und Web (WASM), Pakete nach den Konventionen von ONEFOLD LABS (`docs/plattformen.md`) |
 
 **MVP-Umfang**
 
@@ -399,7 +399,7 @@ Clip (0.7), Pakete für alle Plattformen und den Browser (0.5), englische Oberfl
 **Offene Fragen**
 
 - [ ] Projektname: entschieden, StudioCraft (Repo unter Dokumente/GitHub/StudioCraft). Verworfen: SoundCraft (in der Familie vergeben), AudioCraft (Meta), MixCraft (bestehende DAW), RecordCraft (Rust-Recorder kaptaindieter/RecordCraft). Markenrecherche steht noch aus.
-- [x] GUI-Toolkit: entschieden, egui/eframe mit craft-ui wie die Craft-Apps (nativ und Web). Prototyp bestätigt: 0,15 ms CPU pro Frame bei 100 und 1000 Spuren (Release-Build)
+- [x] GUI-Toolkit: entschieden, egui/eframe (nativ und Web). Prototyp bestätigt: 0,15 ms CPU pro Frame bei 100 und 1000 Spuren (Release-Build)
 - [ ] Plugin-GUIs unter Wayland: Fremdfenster einbetten geht nur über X11/XWayland; als eigene Fenster öffnen? (#175, 0.8)
 - [x] Standard-MIDI-Dateien: entschieden, nicht im MVP, sondern in 0.6 (Issue #47). Datei → MIDI-Datei importieren legt je Spur und Kanal der Datei eine MIDI-Spur mit einem Part an (Noten, CC, Pitchbend, Aftertouch, erstes Programm); in einem Projekt ohne Events gelten danach Tempo und Taktarten der Datei, sonst beginnen die Parts am Takt des Cursors. Datei → MIDI-Datei exportieren schreibt Format 1 mit Tempospur und je MIDI- und Instrument-Spur einer Spur (stumme Parts und ausgeblendete Noten fehlen, Tempo-Rampen als Stufen je Sechzehntel). AAF/OMF-Import kommt später (Issue #154).
 - [ ] Wer übernimmt die Spec-Autor-Rolle, wer implementiert (Cleanroom-Trennung)?
