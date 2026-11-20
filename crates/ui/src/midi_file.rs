@@ -25,7 +25,7 @@ impl ProjectWindow {
     /// Importiert eine MIDI-Datei aus Bytes: je Spur und Kanal der Datei eine MIDI-Spur. In
     /// einem Projekt ohne Events gelten danach Tempo und Taktart der Datei und die Parts
     /// beginnen am Anfang; sonst bleibt das Tempo und die Parts beginnen am Takt des Cursors.
-    pub(crate) fn import_midi_bytes(&mut self, name: &str, bytes: &[u8]) -> Result<(), String> {
+    pub fn import_midi_bytes(&mut self, name: &str, bytes: &[u8]) -> Result<(), String> {
         let err = |e: SmfError| {
             trf(
                 "{name}: {fehler}",
@@ -54,7 +54,7 @@ impl ProjectWindow {
     }
 
     /// Die MIDI- und Instrument-Spuren als MIDI-Datei: (Dateiname, Bytes).
-    pub(crate) fn midi_file_bytes(&self) -> Result<(String, Vec<u8>), String> {
+    pub fn midi_file_bytes(&self) -> Result<(String, Vec<u8>), String> {
         let bytes = self.project.export_midi().map_err(|e| match e {
             SmfError::Empty => tr("Keine MIDI- oder Instrument-Spuren zum Exportieren").to_owned(),
             e => message(e).to_owned(),

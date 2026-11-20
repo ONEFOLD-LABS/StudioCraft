@@ -201,8 +201,9 @@ impl ProjectWindow {
         }
     }
 
-    /// Mixdown (Spec MVP: „Export als WAV, Mixdown der Locator-Range“), 24 Bit.
-    pub fn export_mixdown(&mut self, path: &Path) -> Result<(), String> {
+    /// Mixdown (Spec MVP: „Export als WAV, Mixdown der Locator-Range“), 24 Bit. Gibt die
+    /// Spitze (linear, vor dem Begrenzen) zurück.
+    pub fn export_mixdown(&mut self, path: &Path) -> Result<f32, String> {
         let samples: HashMap<u32, Arc<[f32]>> = self
             .clips
             .iter()
@@ -220,7 +221,7 @@ impl ProjectWindow {
                 &[("db", &format!("{:+.1}", 20.0 * peak.log10()))],
             )
         });
-        Ok(())
+        Ok(peak)
     }
 }
 

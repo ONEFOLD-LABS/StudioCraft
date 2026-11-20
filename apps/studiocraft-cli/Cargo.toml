@@ -1,6 +1,6 @@
 [package]
 name = "studiocraft-cli"
-description = "StudioCraft auf der Kommandozeile: Wiedergabe mit Transport und Cycle"
+description = "StudioCraft auf der Kommandozeile: Wiedergabe mit Transport und Cycle, MCP-Server für KI-Agenten"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -13,3 +13,4 @@ path = "src/main.rs"
 [dependencies]
 studiocraft-engine.workspace = true
 studiocraft-project.workspace = true
+studiocraft-automation.workspace = true
