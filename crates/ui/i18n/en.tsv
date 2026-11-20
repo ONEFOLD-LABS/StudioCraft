@@ -36,6 +36,21 @@ Position	Position
 Folgt dem Tempo	Follows Tempo
 Audio wird gedehnt, sodass es zum Projekttempo passt (Tonhöhe bleibt)	Audio is stretched to fit the project tempo (pitch stays)
 Datei-Tempo	File Tempo
+Hoch	Up
+Runter	Down
+Drum-Map: {spur}	Drum Map: {spur}
+Zeile hinzufügen	Add Row
+Auf GM zurücksetzen	Reset to GM
+Speichern …	Save…
+Laden …	Load…
+Gespielte Tonhöhe, wenn sie von der Zeile abweicht	Pitch that is played, if it differs from the row
+Werkzeugzeile	Toolbar
+Nach oben	Move Up
+Nach unten	Move Down
+Zeile löschen	Delete Row
+Datei zu groß	File too large
+Wie Spur „{spur}“ ({map})	Like track “{spur}” ({map})
+Bearbeiten …	Edit…
 Warp an Hitpoints	Warp at Hitpoints
 Jeder Anschlag rückt auf die nächste Sechzehntel	Every hit moves to the nearest sixteenth
 Warp löschen	Clear Warp

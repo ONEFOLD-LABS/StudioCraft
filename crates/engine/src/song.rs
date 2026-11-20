@@ -347,7 +347,11 @@ impl Song {
                             notes.push(PlayNote {
                                 start: tempo.frames(a, rate),
                                 end: tempo.frames(b, rate).max(tempo.frames(a, rate) + 1),
-                                key: n.pitch,
+                                // Drum-Map: die Ausgangsnote der Zeile.
+                                key: t
+                                    .drum_map
+                                    .as_ref()
+                                    .map_or(n.pitch, |m| m.output_of(n.pitch)),
                                 velocity: n.velocity,
                             });
                         }
@@ -1161,6 +1165,31 @@ mod tests {
             "Fade-In bei halber Länge: {}",
             out[0]
         );
+    }
+
+    #[test]
+    fn drum_map_rows_play_their_output_note() {
+        let mut p = Project::default();
+        let t = p.add_track(TrackKind::Instrument, "Drums");
+        p.tracks[t].instrument = Some(studiocraft_project::InsertSlot {
+            plugin_id: "x".into(),
+            name: "X".into(),
+            bypass: false,
+            params: Vec::new(),
+            state: None,
+        });
+        let id = p.create_event(t, 0, 3840).unwrap();
+        p.event_mut(id).unwrap().notes = vec![studiocraft_project::Note {
+            pitch: 38,
+            velocity: 100,
+            start: 0,
+            length: 120,
+        }];
+        let mut map = studiocraft_project::DrumMap::general_midi();
+        map.rows.iter_mut().find(|r| r.pitch == 38).unwrap().output = Some(40);
+        p.tracks[t].drum_map = Some(map);
+        let song = Song::build(&p, &HashMap::new(), 48_000);
+        assert_eq!(song.tracks[0].notes[0].key, 40);
     }
 
     #[test]
