@@ -52,7 +52,7 @@ impl ProjectWindow {
         self.saved = Some(self.project.clone());
     }
 
-    fn replace_project(
+    pub(crate) fn replace_project(
         &mut self,
         project: Project,
         clips: HashMap<u32, LoadedClip>,

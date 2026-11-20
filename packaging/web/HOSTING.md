@@ -11,5 +11,7 @@ python3 -m http.server 8080        # then open http://localhost:8080/
 - The page draws with WebGPU and falls back to WebGL2.
 - Browsers allow sound only after a user gesture: StudioCraft starts audio output at the first
   click or key press in the window.
-- In the browser there are no plugins and no audio recording yet, and opening or saving files
-  through the browser is still being worked on (issue #30).
+- Files go through the browser: *Speichern* downloads the project as `Name.studiocraft.zip`
+  (the project folder with its audio), *Öffnen* takes such a zip or a single `.studiocraft`
+  file, *Audio importieren* picks audio files and the mixdown export downloads a WAV.
+- In the browser there are no plugins, no audio recording, no MIDI and no autosave.

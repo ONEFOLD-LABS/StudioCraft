@@ -261,6 +261,11 @@ impl ProjectWindow {
     }
 
     fn run(&mut self, ui: &Ui, action: Action) {
+        // Im Browser: Datei-Auswahl und Downloads statt Dateisystem.
+        #[cfg(target_arch = "wasm32")]
+        if self.run_in_browser(ui.ctx(), action) {
+            return;
+        }
         let result = match action {
             Action::New => {
                 self.new_project();

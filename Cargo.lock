@@ -3599,14 +3599,20 @@ dependencies = [
  "craft-window",
  "egui",
  "egui_kittest",
+ "flate2",
  "image",
+ "js-sys",
  "rfd",
  "serde",
  "serde_json",
  "studiocraft-engine",
  "studiocraft-plugin-host",
  "studiocraft-project",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
  "web-time",
+ "zip",
 ]
 
 [[package]]
@@ -4047,6 +4053,12 @@ checksum = "cb30dbbd9036155e74adad6812e9898d03ec374946234fbcebd5dfc7b9187b90"
 dependencies = [
  "rustc-hash 2.1.3",
 ]
+
+[[package]]
+name = "typed-path"
+version = "0.12.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "54ec2755506471f54baf5e4bb5499d8e510cc1caf271270e778a736bd2d7336c"
 
 [[package]]
 name = "uds_windows"
@@ -5131,6 +5143,19 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.119",
+]
+
+[[package]]
+name = "zip"
+version = "7.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "268bf6f9ceb991e07155234071501490bb41fd1e39c6a588106dad10ae2a5804"
+dependencies = [
+ "crc32fast",
+ "flate2",
+ "indexmap",
+ "memchr",
+ "typed-path",
 ]
 
 [[package]]
