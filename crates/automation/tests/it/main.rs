@@ -566,3 +566,275 @@ mod connected {
         assert!(a.call("ui_click", json!({"x": 1, "y": 1})).is_err());
     }
 }
+
+#[path = "../../../project/tests/fuzzkit/mod.rs"]
+mod fuzzkit;
+
+/// The type a schema asks for; one of them when it names several.
+fn schema_type<'a>(rng: &mut fuzzkit::Rng, schema: &'a Value) -> &'a str {
+    match &schema["type"] {
+        Value::String(t) => t,
+        Value::Array(list) if !list.is_empty() => {
+            list[rng.below(list.len())].as_str().unwrap_or("")
+        }
+        _ => match schema["anyOf"].as_array().or(schema["oneOf"].as_array()) {
+            Some(branches) if !branches.is_empty() => {
+                let pick = rng.below(branches.len());
+                schema_type(rng, &branches[pick])
+            }
+            _ => "",
+        },
+    }
+}
+
+/// What the project holds right now, so that calls can name real tracks and events.
+#[derive(Default)]
+struct Known {
+    tracks: usize,
+    events: Vec<u64>,
+}
+
+impl Known {
+    /// Reads the project; an empty one first gets tracks of each kind and a part with notes,
+    /// so that calls naming tracks and events have something to work on.
+    fn read_or_fill(a: &mut Agent) -> Known {
+        let known = Known::read(a);
+        if !known.events.is_empty() {
+            return known;
+        }
+        for kind in ["midi", "instrument", "audio"] {
+            let _ = a.call("add_track", json!({"kind": kind}));
+        }
+        let fresh = Known::read(a);
+        for track in 0..fresh.tracks {
+            if let Ok(part) = a.call(
+                "create_part",
+                json!({"track": track, "start": 0, "length": 3840}),
+            ) {
+                let _ = a.call(
+                    "add_notes",
+                    json!({"event": part["id"], "notes": [
+                        {"pitch": 60, "start": 0, "length": 480},
+                        {"pitch": 64, "start": 480, "length": 480, "velocity": 90},
+                    ]}),
+                );
+            }
+        }
+        let _ = a.call(
+            "import_audio",
+            json!({"path": "a.wav", "track": fresh.tracks.saturating_sub(1)}),
+        );
+        Known::read(a)
+    }
+
+    fn read(a: &mut Agent) -> Known {
+        let p = a.call("inspect_project", json!({})).unwrap_or_default();
+        let tracks = p["tracks"].as_array().cloned().unwrap_or_default();
+        let events = tracks
+            .iter()
+            .flat_map(|t| t["events"].as_array().cloned().unwrap_or_default())
+            .filter_map(|e| e["id"].as_u64())
+            .collect();
+        Known {
+            tracks: tracks.len(),
+            events,
+        }
+    }
+}
+
+/// A value for the property `name` of `schema`: mostly a real track or event where the name
+/// asks for one, otherwise a hostile value of the right type, sometimes one of another type.
+fn fuzz_value(
+    rng: &mut fuzzkit::Rng,
+    name: &str,
+    schema: &Value,
+    known: &Known,
+    dir: &Path,
+    hostile: bool,
+) -> Value {
+    let kind = schema_type(rng, schema);
+    if !hostile {
+        return plausible_value(rng, name, kind, schema, known, dir);
+    }
+    if rng.below(4) != 0 {
+        if name.contains("event") && !known.events.is_empty() {
+            let id = json!(known.events[rng.below(known.events.len())]);
+            return if kind == "array" { json!([id]) } else { id };
+        }
+        if name.contains("track") && known.tracks > 0 {
+            return json!(rng.below(known.tracks));
+        }
+        if ["start", "at", "length", "position", "tick", "end"]
+            .iter()
+            .any(|n| name.contains(n))
+            && kind == "integer"
+        {
+            return json!([0, 240, 960, 3840, 7680][rng.below(5)]);
+        }
+    }
+    if let Some(choices) = schema["enum"].as_array().filter(|c| !c.is_empty())
+        && rng.below(3) != 0
+    {
+        return choices[rng.below(choices.len())].clone();
+    }
+    let kind = if rng.below(6) == 0 { "any" } else { kind };
+    match kind {
+        "integer" => [
+            json!(0),
+            json!(1),
+            json!(2),
+            json!(-1),
+            json!(60),
+            json!(127),
+            json!(3840),
+            json!(u32::MAX),
+            json!(i64::MIN),
+            json!(u64::MAX),
+        ][rng.below(10)]
+        .clone(),
+        "number" => [
+            json!(0.0),
+            json!(-1.5),
+            json!(1e308),
+            json!(-1e308),
+            json!(120.0),
+            json!(0.5),
+        ][rng.below(6)]
+        .clone(),
+        "string" => [
+            json!(""),
+            json!("1.1.1.0"),
+            json!("2.1.1.0"),
+            json!("999999.1.1.0"),
+            json!("audio"),
+            json!("x".repeat(5000)),
+            json!("../../etc/passwd"),
+            json!(dir.join("f.studiocraft")),
+            json!(dir.join("a.wav")),
+            json!("\u{0}\u{202e}"),
+        ][rng.below(10)]
+        .clone(),
+        "boolean" => json!(rng.below(2) == 0),
+        "array" => {
+            let n = [0, 1, 3, 200][rng.below(4)];
+            Value::Array(
+                (0..n)
+                    .map(|_| fuzz_value(rng, name, &schema["items"], known, dir, hostile))
+                    .collect(),
+            )
+        }
+        "object" => fuzz_args(rng, schema, known, dir, hostile),
+        _ => [json!(null), json!([]), json!({}), json!("x"), json!(-7)][rng.below(5)].clone(),
+    }
+}
+
+/// A value an agent would plausibly send: real tracks and events, ordinary numbers.
+fn plausible_value(
+    rng: &mut fuzzkit::Rng,
+    name: &str,
+    kind: &str,
+    schema: &Value,
+    known: &Known,
+    dir: &Path,
+) -> Value {
+    if let Some(choices) = schema["enum"].as_array().filter(|c| !c.is_empty()) {
+        return choices[rng.below(choices.len())].clone();
+    }
+    match kind {
+        "integer" if name.contains("event") && !known.events.is_empty() => {
+            json!(known.events[rng.below(known.events.len())])
+        }
+        "integer" if name.contains("track") && known.tracks > 0 => json!(rng.below(known.tracks)),
+        "integer" if name.contains("pitch") => json!(36 + rng.below(60)),
+        "integer" if name.contains("velocity") => json!(1 + rng.below(127)),
+        "integer" => json!([0, 1, 2, 240, 480, 960, 1920, 3840][rng.below(8)]),
+        "number" => json!([0.0, 0.5, -6.0, 3.0, 90.0, 120.0][rng.below(6)]),
+        "boolean" => json!(rng.below(2) == 0),
+        "string" if name.contains("path") || name.contains("file") => {
+            json!(
+                [
+                    dir.join("f.studiocraft"),
+                    dir.join("a.wav"),
+                    dir.join("x.mid")
+                ][rng.below(3)]
+            )
+        }
+        "string" => json!(["1.1.1.0", "2.1.1.0", "3.1.1.0", "Spur", "midi"][rng.below(5)]),
+        "array" => Value::Array(
+            (0..1 + rng.below(3))
+                .map(|_| {
+                    let item_kind = schema_type(rng, &schema["items"]);
+                    plausible_value(rng, name, item_kind, &schema["items"], known, dir)
+                })
+                .collect(),
+        ),
+        "object" => fuzz_args(rng, schema, known, dir, false),
+        _ => json!(null),
+    }
+}
+
+/// Arguments for a tool: its properties with fuzzed values; when hostile, sometimes one left
+/// out or one unknown added.
+fn fuzz_args(
+    rng: &mut fuzzkit::Rng,
+    schema: &Value,
+    known: &Known,
+    dir: &Path,
+    hostile: bool,
+) -> Value {
+    let mut args = serde_json::Map::new();
+    if let Some(props) = schema["properties"].as_object() {
+        for (name, prop) in props {
+            if !hostile || rng.below(6) != 0 {
+                args.insert(
+                    name.clone(),
+                    fuzz_value(rng, name, prop, known, dir, hostile),
+                );
+            }
+        }
+    }
+    if hostile && rng.below(8) == 0 {
+        args.insert("unbekannt".into(), json!(1));
+    }
+    Value::Object(args)
+}
+
+/// Agents send any arguments: every tool, called in random order with hostile values on one
+/// project, answers with a result or a tool error, never by crashing the server.
+#[test]
+fn fuzzed_tool_calls() {
+    let dir = temp("fuzz");
+    let mut a = Agent::new(&dir, &dir);
+    std::fs::write(dir.join("a.wav"), sine_wav()).unwrap();
+    let tools = a.request("tools/list", json!({}))["tools"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+    assert!(tools.len() > 10, "{} tools", tools.len());
+    let mut known = Known::default();
+    let mut ok = 0;
+    let mut calls = 0;
+    for seed in fuzzkit::cases(0x3c9, 600) {
+        let _case = fuzzkit::Case("tool-call", seed);
+        let mut rng = fuzzkit::Rng(seed | 1);
+        // A fresh project now and then, so later calls also see a small one.
+        if rng.below(200) == 0 {
+            a = Agent::new(&dir, &dir);
+        }
+        if rng.below(3) == 0 || known.events.is_empty() {
+            known = Known::read_or_fill(&mut a);
+        }
+        let tool = &tools[rng.below(tools.len())];
+        let name = tool["name"].as_str().unwrap_or("");
+        // Most calls are plausible, so they reach the code behind the argument checks.
+        let hostile = rng.below(4) == 0;
+        let args = fuzz_args(&mut rng, &tool["inputSchema"], &known, &dir, hostile);
+        calls += 1;
+        if a.call(name, args).is_ok() {
+            ok += 1;
+        }
+    }
+    // Enough calls get through to reach the code behind the argument checks.
+    assert!(ok * 10 > calls, "only {ok} of {calls} calls succeeded");
+    let _ = std::fs::remove_dir_all(&dir);
+}
