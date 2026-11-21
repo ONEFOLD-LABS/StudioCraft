@@ -54,6 +54,8 @@ pub use bridge::{
     BRIDGE_FLAG, BridgeArgs, BridgeHandle, BridgeInstance, BridgedAudio, BridgedMain, Hosted,
     run_bridge_child, run_bridge_child_with,
 };
+#[cfg(not(target_arch = "wasm32"))]
+pub use gui::{MainWindow, set_main_window};
 pub use info::{
     MAX_LATENCY, ParamInfo, PluginFormat, PluginInfo, Preset as PluginPreset, SCAN_FLAG,
     ScanOptions, ScanReport,
