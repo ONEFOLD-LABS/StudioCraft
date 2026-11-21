@@ -23,3 +23,12 @@ craft-audio = { version = "0.1.0", git = "https://github.com/storytold/craft-lib
 [profile.release]
 lto = "thin"
 codegen-units = 1
+
+# A crash loses takes (AGENTS.md, Robustness): code outside tests returns errors instead of
+# panicking. Tests may unwrap (clippy.toml).
+[workspace.lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"

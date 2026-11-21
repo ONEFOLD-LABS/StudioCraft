@@ -11,6 +11,10 @@
 //!   echoes host values as moves of parameter 1 and closes itself after 40 idle passes (as if
 //!   the user closed it); the title `refuse` makes opening fail
 
+// A test program with its own main (harness = false): it may unwrap and panic like any test
+// (Cargo.toml lints, clippy.toml).
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+
 use std::{
     path::PathBuf,
     sync::{

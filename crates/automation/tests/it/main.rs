@@ -1,5 +1,9 @@
 //! Drives the MCP server through JSON-RPC lines only, as an agent would.
 
+// A test program with its own main (harness = false): it may unwrap and panic like any test
+// (Cargo.toml lints, clippy.toml).
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+
 use std::path::{Path, PathBuf};
 
 use serde_json::{Value, json};

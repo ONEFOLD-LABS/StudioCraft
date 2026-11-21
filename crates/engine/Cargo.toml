@@ -54,3 +54,6 @@ pipewire = ["cpal/pipewire"]
 jack = ["cpal/jack"]
 # Windows: ASIO-Treiber (braucht das ASIO-SDK beim Bauen).
 asio = ["cpal/asio"]
+
+[lints]
+workspace = true

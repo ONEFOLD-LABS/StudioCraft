@@ -63,3 +63,6 @@ harness = false
 [[test]]
 name = "bridge_child"
 harness = false
+
+[lints]
+workspace = true

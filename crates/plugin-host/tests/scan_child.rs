@@ -3,6 +3,10 @@
 //! `absturz` oder `haengt` simulieren Plugins, die beim Laden abstürzen oder hängen;
 //! `entladen` eines, das seine Plugins vollständig meldet und erst beim Entladen abstürzt.
 
+// A test program with its own main (harness = false): it may unwrap and panic like any test
+// (Cargo.toml lints, clippy.toml).
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+
 use std::{path::PathBuf, time::Duration};
 
 use studiocraft_plugin_host::{
