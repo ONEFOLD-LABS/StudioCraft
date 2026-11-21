@@ -341,10 +341,6 @@ fn main() {
         };
         std::process::exit(code.unwrap_or(1));
     }
-    if !cfg!(unix) {
-        println!("plugin bridge: not available on this system yet");
-        return;
-    }
     gain_round_trip();
     offline_waits_for_every_block();
     window_through_the_bridge();

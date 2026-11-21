@@ -551,8 +551,8 @@ fn plugins(w: &mut ProjectWindow, ui: &mut Ui) {
                         if r.double_clicked() {
                             action = Some(p.clone());
                         }
-                        // Die Plugin-Bridge gibt es bisher nur unter Linux, macOS und FreeBSD.
-                        if cfg!(unix) {
+                        // Im Browser gibt es keine Plugin-Bridge.
+                        if cfg!(not(target_arch = "wasm32")) {
                             r.context_menu(|ui| {
                                 let hint = if forced {
                                     tr("Dieses Plugin stürzte beim Scan ab und läuft daher nur im eigenen Prozess")

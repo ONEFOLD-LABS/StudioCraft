@@ -2902,7 +2902,6 @@ mod tests {
 
     /// Plugin-Liste: „Immer in eigenem Prozess“ im Kontextmenü; neue Inserts übernehmen es,
     /// bestehende bleiben, wie sie sind. Ein Plugin von der Sperrliste ist fest so markiert.
-    #[cfg(unix)]
     #[test]
     fn the_plugin_list_sets_the_own_process_default() {
         let mut p = Project::default();
@@ -7547,7 +7546,6 @@ mod tests {
 
     /// Insert-Menü „…“: „In eigenem Prozess“ ist ein Undo-Schritt; ohne Helferprogramm (Tests)
     /// meldet das Laden das, statt abzustürzen; „Neu laden“ nach einem Absturz.
-    #[cfg(unix)]
     #[test]
     fn an_insert_can_be_switched_to_its_own_process() {
         let mut p = Project::default();
@@ -7592,7 +7590,6 @@ mod tests {
 
     /// Ein Plugin, dessen Datei beim Scan abstürzte, läuft nur im eigenen Prozess: Der Schalter
     /// steht fest an, das Laden geht über die Bridge, auch wenn der Slot es nicht verlangt.
-    #[cfg(unix)]
     #[test]
     fn a_plugin_blocked_by_the_scan_runs_only_in_its_own_process() {
         let mut p = Project::default();
