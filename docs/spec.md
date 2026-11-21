@@ -101,7 +101,7 @@ Der Spurtyp legt fest, welche Events eine Spur trägt und ob sie einen Mixer-Kan
 | Tempo/Taktart | Tempo- und Taktart-Ereignisse | nein | Tempo-Modus fest/variabel | ja |
 | Lineal | zusätzliches Zeitlineal mit eigenem Format (Takte, Sekunden, Timecode 25/30 fps, Samples); beliebig viele, Projekt → „Lineal-Spur hinzufügen“ | nein | Anzeigeformat | 0.8 |
 | Automation | Kurve eines Parameters, unter ihrer Spur | nein | Parameter-Auswahl, Modus | ja |
-| Video | Videoframes als Thumbnails | nein | Offset, Ton an/aus | später (#174; Codec-Lizenzen vorher prüfen) |
+| Video | Videoframes als Thumbnails | nein | Offset, Ton an/aus | später (#174; Codec-Lizenzen: `docs/video-dekodierung.md`) |
 
 **Spurkopf in der Spurliste:** links eine Farbleiste mit der Spurnummer, daneben zwei Zeilen. Oben: Automationspfeil, Mute, Solo, Name und ein Lautstärkeregler (Strg+Klick: 0 dB). Unten: Aufnahme bereit, Monitor, Automation lesen, Automation schreiben, Zeitbasis, Lanes ein/aus. Breite und sichtbare Elemente sind pro Spurtyp einstellbar.
 
