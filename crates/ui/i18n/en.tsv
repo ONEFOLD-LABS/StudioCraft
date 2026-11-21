@@ -859,3 +859,16 @@ Die gewählten Audio-Events einer Spur zu einem Part zusammenfassen	Group the se
 Audio-Part auflösen	Dissolve audio part
 Einen Audio-Part doppelklicken oder wählen, um seine Events hier zu bearbeiten	Double-click or select an audio part to edit its events here
 Part-Editor	Part editor
+AAF/OMF importieren …	Import AAF/OMF …
+AAF/OMF importieren	Import AAF/OMF
+AAF- und OMF-Dateien	AAF and OMF files
+Lautstärkekurven werden als fester Wert übernommen	Volume curves are imported as a fixed value
+Verschachtelte Sequenzen werden nicht übernommen	Nested sequences are not imported
+Nur die ersten {n} Clips übernommen	Only the first {n} clips imported
+keine AAF- oder OMF-Datei	not an AAF or OMF file
+keine Zeitleiste in der Datei	no timeline in the file
+Datei nicht lesbar ({e})	file not readable ({e})
+keine Audio-Clips in der Datei	no audio clips in the file
+Audiodatei fehlt: {name}	Audio file missing: {name}
+{n} Teile der Datei wurden nicht übernommen	{n} parts of the file were not imported
+Audio {n}	Audio {n}

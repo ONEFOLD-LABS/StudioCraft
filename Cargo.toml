@@ -17,7 +17,7 @@ studiocraft-plugin-host = { path = "crates/plugin-host" }
 studiocraft-ui = { path = "crates/ui" }
 
 # Gemeinsame Bibliotheken der Craft-Familie (gleiche Revision wie SoundCraft).
-craft-audio = { version = "0.1.0", git = "https://github.com/storytold/craft-libs", rev = "45a8e16669e70dadb780dfbc759c882dd5b7ea1c", features = ["decode", "lossless-encode"] }
+craft-audio = { version = "0.1.0", git = "https://github.com/storytold/craft-libs", rev = "56c3c833bb869a140271e2aceec2112322cacc58", features = ["decode", "lossless-encode"] }
 
 [profile.release]
 lto = "thin"

@@ -38,6 +38,7 @@ pub mod i18n;
 mod icons;
 mod infoline;
 mod inserts;
+mod interchange;
 mod io_ui;
 mod keyeditor;
 mod keymap;
@@ -558,14 +559,13 @@ impl ProjectWindow {
         self.import_clip(&name, Some(path.display().to_string()), clip, target)
     }
 
-    /// Wie [`Self::import_audio`], mit bereits geladenen Samples.
-    pub fn import_clip(
+    /// Legt Samples im Pool ab (auf die Abtastrate des Projekts umgerechnet), ohne Event.
+    pub(crate) fn add_pool_clip(
         &mut self,
         name: &str,
         path: Option<String>,
         clip: AudioClip,
-        target: Option<(usize, u64)>,
-    ) -> Result<EventId, String> {
+    ) -> studiocraft_project::ClipId {
         let clip = clip.resampled(self.sample_rate);
         let id = self.project.add_clip(PoolClip {
             name: name.to_owned(),
@@ -581,6 +581,18 @@ impl ProjectWindow {
                 peaks,
             },
         );
+        id
+    }
+
+    /// Wie [`Self::import_audio`], mit bereits geladenen Samples.
+    pub fn import_clip(
+        &mut self,
+        name: &str,
+        path: Option<String>,
+        clip: AudioClip,
+        target: Option<(usize, u64)>,
+    ) -> Result<EventId, String> {
+        let id = self.add_pool_clip(name, path, clip);
         let (track, start) = match target {
             Some((t, at))
                 if self
