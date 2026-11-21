@@ -399,7 +399,8 @@ pub(crate) fn show(w: &mut ProjectWindow, ui: &mut Ui) {
     }) else {
         return;
     };
-    ui.horizontal(|ui| {
+    // Umbrechend, damit in schmalen Fenstern nichts hinter dem Rand verschwindet.
+    ui.horizontal_wrapped(|ui| {
         ui.strong(&name);
         ui.separator();
         ui.label(tr("Anzeige-Quantisierung:"));
@@ -445,7 +446,7 @@ pub(crate) fn show(w: &mut ProjectWindow, ui: &mut Ui) {
         }
     });
     let any = !w.key_editor.selection.is_empty();
-    ui.horizontal(|ui| {
+    ui.horizontal_wrapped(|ui| {
         ui.label(tr("Notenwert:"));
         let mut value = w.score_view.value;
         for (ticks, name) in VALUES {

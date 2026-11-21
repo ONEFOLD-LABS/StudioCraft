@@ -318,7 +318,8 @@ pub(crate) fn show(w: &mut ProjectWindow, ui: &mut Ui) {
         .map(|(t, _)| w.project.tracks[t].color)
         .map_or(Color32::LIGHT_BLUE, |c| Color32::from_rgb(c[0], c[1], c[2]));
 
-    ui.horizontal(|ui| {
+    // Umbrechend, damit in schmalen Fenstern nichts hinter dem Rand verschwindet.
+    ui.horizontal_wrapped(|ui| {
         ui.toggle_value(&mut w.key_editor.feedback, tr("Akustisches Feedback"))
             .on_hover_text(tr("Angeklickte und verschobene Noten erklingen"));
         ui.toggle_value(&mut w.follow_playback, tr("Folgen (F)"))

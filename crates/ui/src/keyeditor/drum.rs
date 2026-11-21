@@ -193,7 +193,8 @@ pub(super) fn show(w: &mut ProjectWindow, ui: &mut Ui, part: EventId, track: usi
         w.project.tracks[track].color[1],
         w.project.tracks[track].color[2],
     );
-    ui.horizontal(|ui| {
+    // Umbrechend, damit in schmalen Fenstern nichts hinter dem Rand verschwindet.
+    ui.horizontal_wrapped(|ui| {
         ui.strong(crate::i18n::trf(
             "Drum-Editor – {map}",
             &[("map", &map.name)],
