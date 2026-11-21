@@ -505,9 +505,12 @@ pub(crate) fn now_secs() -> u64 {
         .map_or(0, |d| d.as_secs())
 }
 
-/// Ist eine tägliche Suche fällig?
+/// Ist eine tägliche Suche fällig? Eine Uhr, die zurückgestellt wurde, löst keine Suche bei
+/// jedem Start aus; liegt die letzte Suche aber mehr als einen Tag in der Zukunft (kaputte
+/// Einstellungen, eine Uhr, die vorging), ist sie fällig, sonst käme nie wieder eine.
 pub(crate) fn due(last: u64, now: u64) -> bool {
-    now.saturating_sub(last) >= 24 * 3600
+    const DAY: u64 = 24 * 3600;
+    now.saturating_sub(last) >= DAY || last.saturating_sub(now) > DAY
 }
 
 #[cfg(test)]
@@ -719,6 +722,89 @@ mod tests {
         assert!(lines == 0 || public_key().is_some());
     }
 
+    /// Release descriptions come from the network before anything is verified: changed at
+    /// random they are read or refused, never panic, and never point outside GitHub.
+    #[test]
+    fn fuzzed_release_descriptions() {
+        use crate::fuzzkit::{Case, Rng, cases, mutate_bytes};
+        let now = v("0.9.0");
+        let seed_doc: serde_json::Value =
+            serde_json::from_str(&release_json("v9.9.9", false)).unwrap_or_default();
+        for seed in cases(0x4e1, 1500) {
+            let _case = Case("release-json", seed);
+            let mut rng = Rng(seed | 1);
+            let mut doc = seed_doc.clone();
+            for _ in 0..1 + rng.below(3) {
+                crate::fuzzjson::mutate_json(&mut rng, &mut doc);
+            }
+            let mut bytes = serde_json::to_vec(&doc).unwrap_or_default();
+            if rng.below(4) == 0 {
+                mutate_bytes(&mut rng, &mut bytes);
+            }
+            if let Ok(Some(r)) = parse_release(&bytes, &now) {
+                assert!(r.version > now);
+                assert!(r.page.starts_with("https://github.com/"), "{}", r.page);
+                for os in ["linux", "windows", "macos"] {
+                    for install in [
+                        Install::Tarball("/x".into()),
+                        Install::Msi,
+                        Install::Managed,
+                    ] {
+                        let _ = assets_for(&r, &install, os, "x86_64");
+                    }
+                }
+            }
+        }
+    }
+
+    /// Archives are only opened after their signature checked out; still, a changed one must
+    /// fail cleanly and never yield a program under another name.
+    #[test]
+    fn fuzzed_archives() {
+        use crate::fuzzkit::{Case, Rng, cases, mutate_bytes};
+        let tarball = std::fs::read(format!("{TESTDATA}/payload.tar.gz")).unwrap_or_default();
+        assert!(
+            programs_from_tarball(&tarball).is_ok(),
+            "the seed tarball is good"
+        );
+        let mut zip = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+        let opts = zip::write::SimpleFileOptions::default();
+        for (name, body) in [
+            ("s/studiocraft.exe", b"app".as_slice()),
+            ("s/studiocraft-cli.exe", b"cli"),
+            ("s/README.md", b"readme"),
+        ] {
+            let _ = zip.start_file(name, opts);
+            let _ = zip.write_all(body);
+        }
+        let zipped = zip.finish().map(|c| c.into_inner()).unwrap_or_default();
+        assert!(programs_from_zip(&zipped).is_ok(), "the seed zip is good");
+        for seed in cases(0xa2c, 1500) {
+            let _case = Case("archive", seed);
+            let mut rng = Rng(seed | 1);
+            let zip_case = rng.below(2) == 0;
+            let mut bytes = if zip_case {
+                zipped.clone()
+            } else {
+                tarball.clone()
+            };
+            for _ in 0..1 + rng.below(3) {
+                mutate_bytes(&mut rng, &mut bytes);
+            }
+            let found = if zip_case {
+                programs_from_zip(&bytes)
+            } else {
+                programs_from_tarball(&bytes)
+            };
+            if let Ok(programs) = found {
+                for (name, _) in &programs {
+                    let plain = name.strip_suffix(".exe").unwrap_or(name);
+                    assert!(PROGRAMS.contains(&plain), "{name}");
+                }
+            }
+        }
+    }
+
     #[test]
     fn archives_without_the_program_are_refused() {
         assert!(programs_from_tarball(b"not a tarball").is_err());
@@ -799,6 +885,11 @@ mod tests {
         assert!(!due(1000, 1000 + 3600));
         // A clock set back does not check on every start.
         assert!(!due(10_000, 5_000));
+        // But a time far in the future (a broken settings file, a clock that was a week
+        // ahead) must not stop the daily check for good: due once, then daily again.
+        assert!(due(u64::MAX, 1_000_000));
+        assert!(due(1_000_000 + 7 * 24 * 3600, 1_000_000));
+        assert!(!due(1_000_000 + 3600, 1_000_000));
     }
 
     /// Die Suche gegen einen lokalen Server statt GitHub; ohne Verbindung ein Fehler, keine Panik.
