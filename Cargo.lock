@@ -3930,6 +3930,7 @@ dependencies = [
  "rfd",
  "serde",
  "serde_json",
+ "skrifa",
  "studiocraft-engine",
  "studiocraft-plugin-host",
  "studiocraft-project",

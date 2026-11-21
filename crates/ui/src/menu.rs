@@ -67,6 +67,12 @@ impl ProjectWindow {
                         self.open_stem_dialog();
                         ui.close();
                     }
+                    if action == Action::ExportMixdown
+                        && ui.button(tr("Noten exportieren …")).clicked()
+                    {
+                        self.open_score_export();
+                        ui.close();
+                    }
                 }
             });
             ui.menu_button(tr("Bearbeiten"), |ui| {
