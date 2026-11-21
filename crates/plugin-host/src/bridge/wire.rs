@@ -273,6 +273,11 @@ pub(crate) fn parse_hello(lines: &[String]) -> Result<Vec<ParamInfo>, String> {
         .collect()
 }
 
+/// Whether the helper's plugin has a window (`GUI\t1` in the opening lines).
+pub(crate) fn parse_gui(lines: &[String]) -> bool {
+    lines.iter().any(|l| l == "GUI\t1")
+}
+
 pub(crate) fn values_lines(values: &[(u32, f64)]) -> Vec<String> {
     values
         .iter()
