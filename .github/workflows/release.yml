@@ -223,13 +223,19 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v7
       - uses: actions/download-artifact@v8
         with:
-          path: dist
+          path: dist/release
           merge-multiple: true
-      - name: Checksums
-        run: cd dist && sha256sum * > SHA256SUMS.txt
+      - name: minisign
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends minisign
+      - name: Checksums and signatures
+        env:
+          MINISIGN_SECRET_KEY: ${{ secrets.MINISIGN_SECRET_KEY }}
+          MINISIGN_PASSWORD: ${{ secrets.MINISIGN_PASSWORD }}
+        run: packaging/sign-release.sh
       - name: Draft release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" --draft --generate-notes --title "StudioCraft ${GITHUB_REF_NAME#v}"
+        run: gh release create "$GITHUB_REF_NAME" dist/release/* --repo "$GITHUB_REPOSITORY" --draft --generate-notes --title "StudioCraft ${GITHUB_REF_NAME#v}"
