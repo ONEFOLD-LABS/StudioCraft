@@ -103,7 +103,7 @@ Der Spurtyp legt fest, welche Events eine Spur trägt und ob sie einen Mixer-Kan
 | Tempo/Taktart | Tempo- und Taktart-Ereignisse | nein | Tempo-Modus fest/variabel | ja |
 | Lineal | zusätzliches Zeitlineal mit eigenem Format (Takte, Sekunden, Timecode 25/30 fps, Samples); beliebig viele, Projekt → „Lineal-Spur hinzufügen“ | nein | Anzeigeformat | 0.8 |
 | Automation | Kurve eines Parameters, unter ihrer Spur | nein | Parameter-Auswahl, Modus | ja |
-| Video | Videoframes als Thumbnails; Projekt → „Videospur hinzufügen“. Dekodiert werden AV1, VP9, VP8 und MPEG-2 in WebM/MKV, MP4 und MOV (reines Rust, keine Patentlizenzen; H.264/HEVC nicht, siehe `docs/video-dekodierung.md`) | nein (Ton über Lautstärke/Pan der Spur) | Datei, Beginn (Offset, auch durch Verschieben des Events), Ton an/aus | 0.10 (#174; im Browser noch nicht) |
+| Video | Videoframes als Thumbnails; Projekt → „Videospur hinzufügen“. Dekodiert werden AV1, VP9, VP8 und MPEG-2 in WebM/MKV, MP4 und MOV (reines Rust, keine Patentlizenzen; H.264/HEVC nicht, siehe `docs/video-dekodierung.md`) | nein (Ton über Lautstärke/Pan der Spur) | Datei, Beginn (Offset, auch durch Verschieben des Events), Ton an/aus. Ansicht → „Videofenster“ zeigt das Bild an der Cursor-Position, beim Abspielen und Springen, mit der Zeit im Video (gewählte Videospur, sonst die erste; kommt das Dekodieren nicht nach, fallen Bilder aus) | 0.10 (#174, #219; im Browser noch nicht) |
 
 **Spurkopf in der Spurliste:** links eine Farbleiste mit der Spurnummer, daneben zwei Zeilen. Oben: Automationspfeil, Mute, Solo, Name und ein Lautstärkeregler (Strg+Klick: 0 dB). Unten: Aufnahme bereit, Monitor, Automation lesen, Automation schreiben, Zeitbasis, Lanes ein/aus. Breite und sichtbare Elemente sind pro Spurtyp einstellbar.
 
