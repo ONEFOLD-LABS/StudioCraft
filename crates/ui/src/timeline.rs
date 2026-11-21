@@ -620,6 +620,15 @@ pub(crate) fn show(w: &mut ProjectWindow, ui: &mut Ui) {
         w.videos.poll(ui.ctx(), &videos);
     }
     let (resp, painter) = ui.allocate_painter(ui.available_size(), Sense::click_and_drag());
+    // Für Screenreader: was die gezeichnete Fläche zeigt.
+    let events: usize = w.project.tracks.iter().map(|t| t.events.len()).sum();
+    ui.ctx().accesskit_node_builder(resp.id, |n| {
+        n.set_role(egui::accesskit::Role::Canvas);
+        n.set_label(crate::i18n::trf(
+            "Event-Anzeige: {tracks} Spuren, {events} Events",
+            &[("tracks", &w.project.tracks.len()), ("events", &events)],
+        ));
+    });
     let r = resp.rect;
     let header = Rect::from_min_max(
         pos2(r.left(), r.top() + RULER_H),

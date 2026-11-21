@@ -907,3 +907,7 @@ Release-Seite	Release page
 Später	Later
 Neustart nicht möglich: {e}	Cannot restart: {e}
 {taste} war doppelt belegt; sie gilt jetzt nur für „{befehl}“, nicht mehr für „{anderer}“	{taste} was bound twice; it now works only for “{befehl}”, no longer for “{anderer}”
+Event-Anzeige: {tracks} Spuren, {events} Events	Event display: {tracks} tracks, {events} events
+Notenraster: {name}, {n} Noten	Note grid: {name}, {n} notes
+Drum-Raster: {map}, {n} Noten	Drum grid: {map}, {n} notes
+Kanal {name} wählen	Select channel {name}

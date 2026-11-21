@@ -706,6 +706,10 @@ impl Strip<'_> {
             ui.make_persistent_id(("kanalzug", self.id)),
             Sense::click(),
         );
+        let label = crate::i18n::trf("Kanal {name} wählen", &[("name", &self.name)]);
+        select.widget_info(|| {
+            egui::WidgetInfo::selected(egui::Role::Button, true, self.selected, &label)
+        });
         let fill = if self.selected {
             crate::theme::tokens(ui.ctx()).row_selected
         } else {
