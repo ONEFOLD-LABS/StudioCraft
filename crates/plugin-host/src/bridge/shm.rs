@@ -1,6 +1,6 @@
 //! The memory both processes share: one block of audio in each direction, the events of the
 //! block and a few counters. It is a file in the runtime folder mapped by both processes
-//! (`MAP_SHARED`), removed again once the helper has mapped it.
+//! (`MAP_SHARED`; a file mapping on Windows), removed again once the helper has mapped it.
 //!
 //! Who may touch what (the protocol that makes the raw access sound): the app writes `input`,
 //! `events`, `frames` and `count`, then publishes the block with `req` (release). The helper
@@ -143,9 +143,47 @@ impl Shared {
         })
     }
 
-    #[cfg(not(unix))]
+    #[cfg(windows)]
+    fn map(file: File) -> Result<Self, String> {
+        use std::os::windows::io::AsRawHandle;
+        use windows_sys::Win32::{
+            Foundation::CloseHandle,
+            System::Memory::{
+                CreateFileMappingW, FILE_MAP_ALL_ACCESS, MapViewOfFile, PAGE_READWRITE,
+            },
+        };
+        let err = || format!("shared memory: {}", std::io::Error::last_os_error());
+        // SAFETY: the handle of the open file; a mapping of its full size (0, 0), unnamed and
+        // with default security. The result is checked.
+        let mapping = unsafe {
+            CreateFileMappingW(
+                file.as_raw_handle(),
+                ptr::null(),
+                PAGE_READWRITE,
+                0,
+                0,
+                ptr::null(),
+            )
+        };
+        if mapping.is_null() {
+            return Err(err());
+        }
+        // SAFETY: a view of the whole mapping (the file has exactly `size()` bytes).
+        let view = unsafe { MapViewOfFile(mapping, FILE_MAP_ALL_ACCESS, 0, 0, size()) };
+        // SAFETY: the mapping handle is no longer needed; the view keeps the mapping alive.
+        unsafe { CloseHandle(mapping) };
+        if view.Value.is_null() {
+            return Err(err());
+        }
+        Ok(Self {
+            ptr: view.Value.cast(),
+            _file: file,
+        })
+    }
+
+    #[cfg(not(any(unix, windows)))]
     fn map(_file: File) -> Result<Self, String> {
-        Err("the plugin bridge is not available on this system yet".into())
+        Err("the plugin bridge is not available on this system".into())
     }
 
     pub fn region(&self) -> &Region {
@@ -248,6 +286,15 @@ impl Drop for Shared {
         unsafe {
             libc::munmap(self.ptr.cast(), size());
         }
+        #[cfg(windows)]
+        // SAFETY: the view made in `map`, unmapped exactly once.
+        unsafe {
+            windows_sys::Win32::System::Memory::UnmapViewOfFile(
+                windows_sys::Win32::System::Memory::MEMORY_MAPPED_VIEW_ADDRESS {
+                    Value: self.ptr.cast(),
+                },
+            );
+        }
     }
 }
 
@@ -255,7 +302,7 @@ fn size() -> usize {
     std::mem::size_of::<Region>()
 }
 
-#[cfg(all(test, unix))]
+#[cfg(all(test, any(unix, windows)))]
 mod tests {
     use super::*;
 
@@ -266,7 +313,8 @@ mod tests {
         let _ = std::fs::remove_file(&path);
         let app = Shared::create(&path).unwrap();
         let helper = Shared::open(&path).unwrap();
-        std::fs::remove_file(&path).unwrap();
+        // Windows may refuse while the file is mapped; it goes at the end then.
+        let _ = std::fs::remove_file(&path);
 
         app.write_input(&[0.5; 4], &[-0.5; 4]);
         app.write_events(&[Event {
@@ -304,6 +352,7 @@ mod tests {
         let f = OpenOptions::new().write(true).open(&path).unwrap();
         f.set_len(size() as u64).unwrap();
         assert!(Shared::open(&path).is_err(), "zero magic");
+        drop(f);
         std::fs::remove_file(&path).unwrap();
     }
 }

@@ -46,23 +46,13 @@ fn parse(args: &[String]) -> Result<BridgeArgs, String> {
     })
 }
 
-#[cfg(unix)]
-fn connect(path: &std::path::Path) -> Result<Stream, String> {
-    Stream::connect(path).map_err(|e| format!("{}: {e}", path.display()))
-}
-
-#[cfg(not(unix))]
-fn connect(_: &std::path::Path) -> Result<Stream, String> {
-    Err("the plugin bridge is not available on this system yet".into())
-}
-
 pub(super) fn run(
     args: &[String],
     load: impl FnOnce(&BridgeArgs) -> Result<Hosted, String>,
 ) -> Result<(), String> {
     let a = parse(args)?;
-    let control = connect(&a.socket)?;
-    let wake = connect(&a.socket)?;
+    let control = wire::connect(&a.socket)?;
+    let wake = wire::connect(&a.socket)?;
     let shm = Shared::open(&a.shm)?;
     let mut out = control.try_clone().map_err(|e| e.to_string())?;
     let (params, audio, mut main) = match load(&a) {
