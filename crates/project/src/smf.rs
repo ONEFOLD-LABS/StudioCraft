@@ -467,6 +467,7 @@ impl Project {
                 musical: None,
                 stretch_mode: crate::StretchMode::Standard,
                 warp: Vec::new(),
+                score_quantize: None,
             });
             added.push(i);
         }

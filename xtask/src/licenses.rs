@@ -5,7 +5,8 @@
 //!
 //! Die Texte kommen aus den Quellen der Crates selbst (LICENSE-, COPYING-, NOTICE-Dateien,
 //! auch eine Ebene tiefer, z. B. für eingebettete Schriften). Gleiche Texte erscheinen einmal
-//! mit allen Crates, die sie nutzen. `--check` vergleicht nur und schlägt fehl, wenn die
+//! mit allen Crates, die sie nutzen. Dazu kommen die Lizenzen der Schriften unter
+//! `assets/fonts`. `--check` vergleicht nur und schlägt fehl, wenn die
 //! Datei veraltet ist (Teil von `cargo xtask ci`).
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
@@ -180,6 +181,28 @@ pub fn generate(root: &Path) -> Result<String, String> {
                 .entry(text.trim().to_owned())
                 .or_default()
                 .insert(label.clone());
+        }
+    }
+    // Mitgelieferte Schriften (assets/fonts/<name>/): ihre Lizenztexte wie die der Crates.
+    if let Ok(entries) = std::fs::read_dir(root.join("assets/fonts")) {
+        let mut dirs: Vec<PathBuf> = entries.flatten().map(|e| e.path()).collect();
+        dirs.sort();
+        for dir in dirs.into_iter().filter(|d| d.is_dir()) {
+            let name = dir
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            let label = format!("font {name} (assets/fonts/{name})");
+            let found = texts(&dir);
+            if found.is_empty() {
+                return Err(format!("assets/fonts/{name}: keine Lizenzdatei"));
+            }
+            for (_, text) in found {
+                groups
+                    .entry(text.trim().to_owned())
+                    .or_default()
+                    .insert(label.clone());
+            }
         }
     }
     let mut ordered: Vec<(&String, &BTreeSet<String>)> = groups.iter().collect();

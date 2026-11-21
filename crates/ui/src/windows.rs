@@ -17,6 +17,7 @@ use crate::{LowerZone, ProjectWindow};
 pub(crate) enum EditorWindow {
     Key,
     Sample,
+    Score,
 }
 
 /// Zustand der eigenen Fenster.
@@ -91,6 +92,16 @@ impl ProjectWindow {
         self.windows.open_editor = self.windows.rects.editor;
     }
 
+    /// Noten-Editor des aktiven bzw. gewählten MIDI-Parts im eigenen Fenster.
+    pub(crate) fn open_score_window(&mut self) {
+        if self.list_part().is_none() {
+            self.message = Some(tr("Erst einen MIDI-Part auswählen").into());
+            return;
+        }
+        self.windows.editor = Some(EditorWindow::Score);
+        self.windows.open_editor = self.windows.rects.editor;
+    }
+
     /// Steht `zone` gerade im eigenen Fenster?
     pub(crate) fn in_own_window(&self, zone: LowerZone) -> bool {
         match zone {
@@ -98,6 +109,7 @@ impl ProjectWindow {
             LowerZone::Editor => self.windows.editor == Some(EditorWindow::Key),
             LowerZone::SampleEditor => self.windows.editor == Some(EditorWindow::Sample),
             LowerZone::List => false,
+            LowerZone::Score => self.windows.editor == Some(EditorWindow::Score),
         }
     }
 
@@ -136,6 +148,7 @@ impl ProjectWindow {
             let (title, zone) = match kind {
                 EditorWindow::Key => (tr("Key-Editor"), LowerZone::Editor),
                 EditorWindow::Sample => (tr("Sample-Editor"), LowerZone::SampleEditor),
+                EditorWindow::Score => (tr("Noten-Editor"), LowerZone::Score),
             };
             let b = builder(title, self.windows.open_editor, EDITOR_SIZE);
             let (open, rect) = ctx.show_viewport_immediate(
@@ -180,6 +193,7 @@ impl ProjectWindow {
                 LowerZone::Editor => crate::keyeditor::show(w, ui),
                 LowerZone::SampleEditor => crate::sampleeditor::show(w, ui),
                 LowerZone::List => crate::listeditor::show(w, ui),
+                LowerZone::Score => crate::score::show(w, ui),
             }
         };
         if class == ViewportClass::EmbeddedWindow {

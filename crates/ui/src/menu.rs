@@ -258,6 +258,20 @@ impl ProjectWindow {
                     self.show_lower = true;
                     self.lower = crate::LowerZone::List;
                 }
+                if ui
+                    .selectable_label(
+                        self.show_lower && self.lower == crate::LowerZone::Score,
+                        tr("Noten-Editor"),
+                    )
+                    .clicked()
+                {
+                    self.show_lower = true;
+                    self.lower = crate::LowerZone::Score;
+                }
+                if ui.button(tr("Noten-Editor im eigenen Fenster")).clicked() {
+                    self.open_score_window();
+                    ui.close();
+                }
                 ui.checkbox(&mut self.show_lower, tr("Untere Zone"));
                 ui.separator();
                 ui.menu_button(tr("Erscheinungsbild"), |ui| {

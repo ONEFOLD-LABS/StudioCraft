@@ -33,6 +33,7 @@ pub mod processing;
 pub mod quantize;
 pub mod recording;
 pub mod sanitize;
+pub mod score;
 pub mod shapes;
 pub mod smf;
 pub mod time;
@@ -56,6 +57,7 @@ pub use model::{
 pub use processing::{ClipProcess, Derived, ProcessKind};
 pub use quantize::{Feel, NoteValue, Quantize, QuantizeValue};
 pub use recording::{CycleRecordMode, MidiRecordMode, RecordSettings, TakeNote};
+pub use score::{DEFAULT_SCORE_QUANTIZE, KeySignature, SCORE_QUANTIZE, score_quantize};
 pub use shapes::DrawShape;
 pub use time::{
     BPM_RANGE, Position, SignatureEvent, TICKS_PER_QUARTER, TempoEvent, TempoMap, TimeSignature,

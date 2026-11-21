@@ -96,7 +96,7 @@ pub(crate) fn rows(ev: &studiocraft_project::Event, filter: ListFilter) -> Vec<R
 impl ProjectWindow {
     /// Part des List-Editors: der aktive Part des Key-Editors, sonst der erste gewählte
     /// MIDI-Part (er wird dann auch im Key-Editor aktiv).
-    fn list_part(&mut self) -> Option<EventId> {
+    pub(crate) fn list_part(&mut self) -> Option<EventId> {
         if let Some(p) = self
             .key_editor
             .part

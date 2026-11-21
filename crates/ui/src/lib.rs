@@ -60,6 +60,7 @@ mod rightzone;
 mod routing;
 mod ruler_ui;
 mod sampleeditor;
+mod score;
 mod session;
 pub mod settings;
 mod shortcuts;
@@ -290,6 +291,8 @@ pub struct ProjectWindow {
     key_editor: keyeditor::KeyEditor,
     /// Filter des List-Editors (welche Event-Typen die Tabelle zeigt).
     list_filter: listeditor::ListFilter,
+    /// Noten-Editor: Schrift und gemerkter Satz.
+    score_view: score::ScoreView,
     midi_inputs: Option<studiocraft_engine::midi::MidiInputs>,
     /// Anzeige der MIDI-Eingänge für die Statuszeile.
     midi_status: String,
@@ -334,6 +337,8 @@ pub(crate) enum LowerZone {
     SampleEditor,
     /// List-Editor: Events des aktiven Parts als Tabelle.
     List,
+    /// Noten-Editor: der aktive Part als Partitur.
+    Score,
 }
 
 impl ProjectWindow {
@@ -454,6 +459,7 @@ impl ProjectWindow {
             lower: LowerZone::Mixer,
             key_editor: keyeditor::KeyEditor::default(),
             list_filter: listeditor::ListFilter::default(),
+            score_view: score::ScoreView::default(),
             midi_inputs: None,
             midi_status: String::new(),
             midi_target_sent: None,
@@ -1105,6 +1111,11 @@ impl ProjectWindow {
                                 LowerZone::List,
                                 tr("List-Editor"),
                             );
+                            ui.selectable_value(
+                                &mut self.lower,
+                                LowerZone::Score,
+                                tr("Noten-Editor"),
+                            );
                             if self.lower == LowerZone::Editor
                                 && let Some(ev) =
                                     self.key_editor.part.and_then(|p| self.project.event(p))
@@ -1128,6 +1139,7 @@ impl ProjectWindow {
                                 LowerZone::Editor => keyeditor::show(self, ui),
                                 LowerZone::SampleEditor => sampleeditor::show(self, ui),
                                 LowerZone::List => listeditor::show(self, ui),
+                                LowerZone::Score => score::show(self, ui),
                             }
                         });
                     });
@@ -4442,6 +4454,88 @@ mod tests {
             w.show_lower = true;
             w.lower = LowerZone::List;
         });
+    }
+
+    /// Ein Part mit Melodie (Achtel, Sechzehntel, punktierte Werte, Vorzeichen, Bindung über
+    /// den Taktstrich) und Bass: Klaviersystem.
+    fn score_part(w: &mut ProjectWindow) -> studiocraft_project::EventId {
+        w.project = Project::default();
+        w.project.key = studiocraft_project::KeySignature {
+            fifths: 1,
+            minor: false,
+        };
+        let t = w.project.add_track(TrackKind::Instrument, "Klavier");
+        let part = w.project.create_event(t, 0, 4 * 3840).unwrap();
+        let n = |start: i64, length: u64, pitch: u8| studiocraft_project::Note {
+            start,
+            length,
+            pitch,
+            velocity: 100,
+        };
+        let q = 960i64;
+        let mut notes = vec![
+            n(0, 480, 67),
+            n(q / 2, 480, 69),
+            n(q, 240, 71),
+            n(q + 240, 240, 72),
+            n(q + 480, 480, 74),
+            n(2 * q, 1440, 76),
+            n(3 * q + q / 2, 480, 77),
+            n(4 * q, 960, 79),
+            n(5 * q, 1920, 78),
+            n(7 * q, 1920, 74),
+            n(12 * q, 3840, 67),
+            n(12 * q, 3840, 71),
+            n(12 * q, 3840, 74),
+        ];
+        for b in 0..4 {
+            notes.push(n(b * 4 * q, 1920, 43));
+            notes.push(n(b * 4 * q + 2 * q, 1920, 50));
+        }
+        w.project.event_mut(part).unwrap().notes = notes;
+        w.selection = vec![part];
+        w.key_editor.part = Some(part);
+        part
+    }
+
+    #[test]
+    fn renders_the_score_editor() {
+        shot("score", |w| {
+            score_part(w);
+            w.cursor = 5 * 960;
+            w.show_lower = true;
+            w.lower = LowerZone::Score;
+            w.project.layout.lower_height = 520.0;
+            w.apply_layout(w.project.layout.clone());
+        });
+    }
+
+    #[test]
+    fn the_score_editor_sets_quantize_and_key_as_undo_steps() {
+        let mut w = ProjectWindow::new(Project::default(), None, "kein Audio (Test)".into());
+        let part = score_part(&mut w);
+        w.show_lower = true;
+        w.lower = LowerZone::Score;
+        let mut h = window_harness(w);
+        h.run_steps(2);
+        h.get_by_label("Partitur: Part, 4 Takte");
+        h.get_by_label("Anzeige-Quantisierung").click();
+        h.run_steps(2);
+        h.get_by_label("1/8").click();
+        h.run_steps(2);
+        assert_eq!(
+            h.state().project.event(part).unwrap().score_quantize,
+            Some(480)
+        );
+        h.get_by_label("Tonart").click();
+        h.run_steps(2);
+        h.get_by_label("3 Be").click();
+        h.run_steps(2);
+        assert_eq!(h.state().project.key.fifths, -3);
+        h.state_mut().undo();
+        assert_eq!(h.state().project.key.fifths, 1);
+        h.state_mut().undo();
+        assert_eq!(h.state().project.event(part).unwrap().score_quantize, None);
     }
 
     #[test]
