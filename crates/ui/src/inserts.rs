@@ -73,6 +73,9 @@ pub(crate) struct PluginState {
     /// Plugin-Ids aus gesperrten Dateien (Absturz beim Scan nach vollständiger Meldung): Sie
     /// laufen nur im eigenen Prozess.
     pub own_process: std::collections::HashSet<String>,
+    /// Plugin-Ids, deren neue Inserts im eigenen Prozess laufen (Voreinstellung aus der
+    /// Plugin-Liste, in den Einstellungen gemerkt).
+    pub preferred: std::collections::BTreeSet<String>,
 }
 
 impl ProjectWindow {
@@ -142,6 +145,35 @@ impl ProjectWindow {
     /// Das Plugin stürzte beim Scan ab und lässt sich nur im eigenen Prozess laden.
     pub(crate) fn needs_own_process(&self, id: &str) -> bool {
         self.plugins.own_process.contains(id)
+    }
+
+    /// Neue Inserts dieses Plugins laufen im eigenen Prozess (Voreinstellung oder Sperrliste).
+    pub(crate) fn own_process_default(&self, id: &str) -> bool {
+        cfg!(unix) && (self.plugins.preferred.contains(id) || self.needs_own_process(id))
+    }
+
+    /// Voreinstellung der Plugin-Liste setzen und für den nächsten Start merken.
+    pub(crate) fn set_own_process_default(&mut self, id: &str, on: bool) {
+        let changed = if on {
+            self.plugins.preferred.insert(id.to_owned())
+        } else {
+            self.plugins.preferred.remove(id)
+        };
+        if changed {
+            self.save_settings();
+        }
+    }
+
+    /// Ein neuer Slot für `p` mit der Voreinstellung für den eigenen Prozess.
+    pub(crate) fn new_slot(&self, p: &PluginInfo) -> InsertSlot {
+        InsertSlot {
+            plugin_id: p.id.clone(),
+            name: p.name.clone(),
+            bypass: false,
+            params: Vec::new(),
+            state: None,
+            isolated: self.own_process_default(&p.id),
+        }
     }
 
     fn find_plugin(&mut self, id: &str) -> Option<PluginInfo> {
@@ -473,14 +505,7 @@ impl ProjectWindow {
         let t = self
             .project
             .add_track(studiocraft_project::TrackKind::Instrument, name);
-        self.project.tracks[t].instrument = info.map(|p| InsertSlot {
-            plugin_id: p.id,
-            name: p.name,
-            bypass: false,
-            params: Vec::new(),
-            state: None,
-            isolated: false,
-        });
+        self.project.tracks[t].instrument = info.map(|p| self.new_slot(&p));
         self.selected_track = Some(t);
         self.checkpoint(before);
     }
@@ -488,6 +513,7 @@ impl ProjectWindow {
     /// Ersetzt das Instrument einer Instrument-Spur durch `p` (Ziehen aus der rechten Zone).
     pub(crate) fn replace_instrument(&mut self, track: usize, p: &PluginInfo) {
         let before = self.project.clone();
+        let slot = self.new_slot(p);
         let Some(t) = self
             .project
             .tracks
@@ -497,14 +523,7 @@ impl ProjectWindow {
             return;
         };
         // Automation des alten Instruments passt nicht zum neuen und fällt weg.
-        t.set_instrument(Some(InsertSlot {
-            plugin_id: p.id.clone(),
-            name: p.name.clone(),
-            bypass: false,
-            params: Vec::new(),
-            state: None,
-            isolated: false,
-        }));
+        t.set_instrument(Some(slot));
         self.selected_track = Some(track);
         self.checkpoint(before);
     }
@@ -547,14 +566,8 @@ impl ProjectWindow {
 
     fn set_instrument(&mut self, track: usize, info: Option<PluginInfo>) {
         let before = self.project.clone();
-        self.project.tracks[track].set_instrument(info.map(|p| InsertSlot {
-            plugin_id: p.id,
-            name: p.name,
-            bypass: false,
-            params: Vec::new(),
-            state: None,
-            isolated: false,
-        }));
+        let slot = info.map(|p| self.new_slot(&p));
+        self.project.tracks[track].set_instrument(slot);
         self.checkpoint(before);
     }
 
@@ -819,17 +832,11 @@ impl ProjectWindow {
     /// Hängt `p` als neuen Insert an die Spur `track` (ein Undo-Schritt).
     pub(crate) fn add_insert(&mut self, track: usize, p: &PluginInfo) {
         let before = self.project.clone();
+        let slot = self.new_slot(p);
         let Some(t) = self.project.tracks.get_mut(track) else {
             return;
         };
-        t.inserts.push(InsertSlot {
-            plugin_id: p.id.clone(),
-            name: p.name.clone(),
-            bypass: false,
-            params: Vec::new(),
-            state: None,
-            isolated: false,
-        });
+        t.inserts.push(slot);
         self.checkpoint(before);
     }
 

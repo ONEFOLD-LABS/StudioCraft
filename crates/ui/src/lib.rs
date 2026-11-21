@@ -482,6 +482,7 @@ impl ProjectWindow {
                 Err(e) => w.message = Some(e),
             }
         }
+        w.plugins.preferred = prefs.own_process.into_iter().collect();
         w.saved = Some(w.project.clone());
         w.send_locators();
         w
@@ -779,6 +780,7 @@ impl ProjectWindow {
             autosave_minutes: self.autosave.minutes,
             autosave_keep: self.autosave.keep,
             language: i18n::language(),
+            own_process: self.plugins.preferred.iter().cloned().collect(),
         };
         if let Err(e) = s.save() {
             self.message = Some(crate::i18n::trf(
@@ -2896,6 +2898,48 @@ mod tests {
         }
         h.event(button(to, false));
         h.run_steps(2);
+    }
+
+    /// Plugin-Liste: „Immer in eigenem Prozess“ im Kontextmenü; neue Inserts übernehmen es,
+    /// bestehende bleiben, wie sie sind. Ein Plugin von der Sperrliste ist fest so markiert.
+    #[cfg(unix)]
+    #[test]
+    fn the_plugin_list_sets_the_own_process_default() {
+        let mut p = Project::default();
+        let audio = p.add_track(TrackKind::Audio, "Gesang");
+        let mut w = ProjectWindow::new(p, None, String::new());
+        w.plugins.list = Some(vec![
+            fake_plugin("test.hall", "Hall", false),
+            fake_plugin("test.blocked", "Gesperrt", false),
+        ]);
+        w.plugins.own_process.insert("test.blocked".into());
+        let hall = fake_plugin("test.hall", "Hall", false);
+        w.add_insert(audio, &hall);
+        w.show_inspector = false;
+        w.show_right = true;
+        w.right.tab = rightzone::Tab::Plugins;
+        let mut h = window_harness(w);
+        h.get_by_label("Gesperrt  ·  eigener Prozess");
+        h.get_by_label("Hall").click_secondary();
+        h.run_steps(2);
+        h.get_by_label("Immer in eigenem Prozess").click();
+        h.run_steps(2);
+        assert!(h.state().plugins.preferred.contains("test.hall"));
+        h.get_by_label("Hall  ·  eigener Prozess");
+        let w = h.state_mut();
+        w.add_insert(audio, &hall);
+        let isolated: Vec<bool> = w.project.tracks[audio]
+            .inserts
+            .iter()
+            .map(|s| s.isolated)
+            .collect();
+        assert_eq!(isolated, [false, true], "only the new insert");
+        w.set_own_process_default("test.hall", false);
+        w.add_insert(audio, &hall);
+        assert!(!w.project.tracks[audio].inserts[2].isolated);
+        let blocked = fake_plugin("test.blocked", "Gesperrt", false);
+        w.add_insert(audio, &blocked);
+        assert!(w.project.tracks[audio].inserts[3].isolated);
     }
 
     #[test]
