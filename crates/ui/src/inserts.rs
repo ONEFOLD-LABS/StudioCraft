@@ -70,24 +70,27 @@ pub(crate) struct PluginState {
     pub sent: Vec<SentChain>,
     /// Isolierte Plugins, deren Prozess abgestürzt ist (Spur, Slot); einmal gemeldet.
     pub crashed: std::collections::HashSet<(usize, usize)>,
+    /// Plugin-Ids aus gesperrten Dateien (Absturz beim Scan nach vollständiger Meldung): Sie
+    /// laufen nur im eigenen Prozess.
+    pub own_process: std::collections::HashSet<String>,
 }
 
 impl ProjectWindow {
     pub(crate) fn plugin_list(&mut self) -> &[PluginInfo] {
         if self.plugins.list.is_none() {
             let paths = studiocraft_plugin_host::default_paths();
-            let (list, errors, blocked) = match PLUGIN_SCANNER.get() {
+            let (list, errors, blocked, own) = match PLUGIN_SCANNER.get() {
                 // Im Programm: jede Datei in einem eigenen Prozess (Absturzschutz).
                 Some(exe) => {
                     let cache = crate::settings::config_dir().map(|d| d.join(SCAN_CACHE));
                     let opts = studiocraft_plugin_host::ScanOptions::new(exe.clone(), cache);
                     let r = studiocraft_plugin_host::scan_isolated(&paths, &opts);
-                    (r.plugins, r.errors, r.blocked.len())
+                    (r.plugins, r.errors, r.blocked.len(), r.own_process)
                 }
                 // Tests und Werkzeuge ohne Scan-Programm: im eigenen Prozess.
                 None => {
                     let (list, errors) = studiocraft_plugin_host::scan(&paths);
-                    (list, errors, 0)
+                    (list, errors, 0, Vec::new())
                 }
             };
             let mut notes = Vec::new();
@@ -103,9 +106,16 @@ impl ProjectWindow {
                     &[("blocked", &blocked)],
                 ));
             }
+            if !own.is_empty() {
+                notes.push(crate::i18n::trf(
+                    "{n} Plugin(s) daraus laufen nur im eigenen Prozess",
+                    &[("n", &own.len())],
+                ));
+            }
             if !notes.is_empty() {
                 self.message = Some(notes.join(" · "));
             }
+            self.plugins.own_process = own.into_iter().collect();
             self.plugins.list = Some(list);
         }
         self.plugins.list.as_deref().unwrap_or_default()
@@ -127,6 +137,11 @@ impl ProjectWindow {
         if self.message.is_none() {
             self.message = Some(crate::i18n::trf("{n} Plugins gefunden", &[("n", &n)]));
         }
+    }
+
+    /// Das Plugin stürzte beim Scan ab und lässt sich nur im eigenen Prozess laden.
+    pub(crate) fn needs_own_process(&self, id: &str) -> bool {
+        self.plugins.own_process.contains(id)
     }
 
     fn find_plugin(&mut self, id: &str) -> Option<PluginInfo> {
@@ -165,7 +180,7 @@ impl ProjectWindow {
         let info = self.find_plugin(&slot.plugin_id).ok_or_else(|| {
             crate::i18n::trf("{name}: nicht installiert", &[("name", &slot.name)])
         })?;
-        let mut inst = if slot.isolated {
+        let mut inst = if slot.isolated || self.needs_own_process(&slot.plugin_id) {
             // Eigener Prozess: dasselbe Programm wie für den Plugin-Scan.
             let exe = PLUGIN_SCANNER
                 .get()
@@ -738,14 +753,26 @@ impl ProjectWindow {
             return;
         }
         let menu = ui.menu_button("…", |ui| {
-            let Some(mut isolated) = self.slot(track, k).map(|s| s.isolated) else {
+            let Some((mut isolated, id)) = self
+                .slot(track, k)
+                .map(|s| (s.isolated, s.plugin_id.clone()))
+            else {
                 return;
             };
+            let forced = self.needs_own_process(&id);
+            isolated |= forced;
+            let hint = if forced {
+                tr("Dieses Plugin stürzte beim Scan ab und läuft daher nur im eigenen Prozess")
+            } else {
+                tr("Stürzt das Plugin ab oder hängt es, verstummt nur dieser Insert (ein Block mehr Latenz)")
+            };
             if ui
-                .checkbox(&mut isolated, tr("In eigenem Prozess"))
-                .on_hover_text(tr(
-                    "Stürzt das Plugin ab oder hängt es, verstummt nur dieser Insert (ein Block mehr Latenz)",
-                ))
+                .add_enabled(
+                    !forced,
+                    egui::Checkbox::new(&mut isolated, tr("In eigenem Prozess")),
+                )
+                .on_hover_text(hint)
+                .on_disabled_hover_text(hint)
                 .changed()
             {
                 let before = self.project.clone();

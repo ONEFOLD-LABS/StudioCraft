@@ -93,18 +93,34 @@ pub fn find_all(paths: &[PathBuf]) -> Vec<PathBuf> {
 
 /// Liest die Beschreibungen aller Plugins einer Datei, im eigenen Prozess.
 pub fn scan_bundle(bundle: &Path) -> Result<Vec<PluginInfo>, String> {
+    scan_bundle_then(bundle, |r| r)
+}
+
+/// Wie [`scan_bundle`], gibt das Ergebnis aber an `f`, bevor die Bibliothek entladen wird:
+/// Der Scan-Prozess meldet so die Plugins auch dann, wenn das Entladen abstürzt.
+pub(crate) fn scan_bundle_then<R>(
+    bundle: &Path,
+    f: impl FnOnce(Result<Vec<PluginInfo>, String>) -> R,
+) -> R {
     if crate::vst3::is_vst3(bundle) {
-        return crate::vst3::descriptors(bundle);
+        // VST3-Module bleiben bis zum Prozessende geladen.
+        return f(crate::vst3::descriptors(bundle));
     }
-    let lib = Library::load(bundle)?;
-    Ok(lib
+    let lib = match Library::load(bundle) {
+        Ok(lib) => lib,
+        Err(e) => return f(Err(e)),
+    };
+    let list = lib
         .descriptors()
         .into_iter()
         .map(|d| PluginInfo {
             path: bundle.to_path_buf(),
             ..d
         })
-        .collect())
+        .collect();
+    let out = f(Ok(list));
+    drop(lib);
+    out
 }
 
 /// Nach Name sortieren (ohne Groß-/Kleinschreibung), bei Gleichstand nach Id.
