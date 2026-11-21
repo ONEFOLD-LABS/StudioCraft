@@ -633,19 +633,18 @@ mod tests {
     }
 
     /// The panel beside the project window, after a short exchange with a tool call and an
-    /// error. With `STUDIOCRAFT_SHOTS=<folder>` the picture is saved (dark and light).
+    /// error. With `STUDIOCRAFT_SHOTS=<folder>` the picture is saved.
     #[test]
     fn the_panel_renders_and_every_widget_is_labelled() {
-        for dark in [true, false] {
-            let mut window = ProjectWindow::new(Project::demo(8), None, String::new());
-            studiocraft_ui::i18n::set_language(studiocraft_ui::i18n::Language::German);
-            window.enable_assistant();
-            window.set_assistant_open(true);
-            let mut a = Assistant::with_settings(Settings::default());
-            a.show_settings = true;
-            a.conversation
-                .user("Lege eine Bass-Spur an und mach sie leiser.");
-            a.conversation.reply(
+        let mut window = ProjectWindow::new(Project::demo(8), None, String::new());
+        studiocraft_ui::i18n::set_language(studiocraft_ui::i18n::Language::German);
+        window.enable_assistant();
+        window.set_assistant_open(true);
+        let mut a = Assistant::with_settings(Settings::default());
+        a.show_settings = true;
+        a.conversation
+            .user("Lege eine Bass-Spur an und mach sie leiser.");
+        a.conversation.reply(
                 &json!({"tool_calls": [
                     {"id": "1", "function": {"name": "add_track", "arguments": r#"{"kind": "midi", "name": "Bass"}"#}},
                     {"id": "2", "function": {"name": "set_track", "arguments": r#"{"track": "Bass", "volume_db": -6}"#}},
@@ -654,39 +653,28 @@ mod tests {
                 &mut window,
                 None,
             );
-            a.conversation.reply(
-                &json!({"content": "Ich habe die Spur „Bass“ angelegt und auf −6 dB gestellt."}),
-                &mut window,
-                None,
-            );
-            a.conversation
-                .failed("Endpunkt nicht erreichbar (läuft der Server?).");
-            let mut harness = Harness::builder()
-                .with_size(egui::vec2(1400.0, 860.0))
-                .wgpu()
-                .build_ui(move |ui| {
-                    ui.ctx().set_theme(if dark {
-                        egui::Theme::Dark
-                    } else {
-                        egui::Theme::Light
-                    });
-                    a.window_ui(ui, &mut window);
-                });
-            harness.run_steps(4);
-            harness.check_accessibility();
-            let Ok(img) = harness.render() else {
-                eprintln!("kein GPU-Renderer verfügbar, Bild übersprungen");
-                continue;
-            };
-            if let Ok(dir) = std::env::var("STUDIOCRAFT_SHOTS") {
-                let name = if dark {
-                    "assistant-dark"
-                } else {
-                    "assistant-light"
-                };
-                img.save(std::path::Path::new(&dir).join(format!("{name}.png")))
-                    .unwrap();
-            }
+        a.conversation.reply(
+            &json!({"content": "Ich habe die Spur „Bass“ angelegt und auf −6 dB gestellt."}),
+            &mut window,
+            None,
+        );
+        a.conversation
+            .failed("Endpunkt nicht erreichbar (läuft der Server?).");
+        let mut harness = Harness::builder()
+            .with_size(egui::vec2(1400.0, 860.0))
+            .wgpu()
+            .build_ui(move |ui| {
+                a.window_ui(ui, &mut window);
+            });
+        harness.run_steps(4);
+        harness.check_accessibility();
+        let Ok(img) = harness.render() else {
+            eprintln!("kein GPU-Renderer verfügbar, Bild übersprungen");
+            return;
+        };
+        if let Ok(dir) = std::env::var("STUDIOCRAFT_SHOTS") {
+            img.save(std::path::Path::new(&dir).join("assistant.png"))
+                .unwrap();
         }
     }
 

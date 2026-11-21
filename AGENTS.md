@@ -119,7 +119,8 @@ A crash loses takes, so this outranks features.
   inspector, track list, event display, lower zone (mixer, key editor), toolbar tools on keys 1–0,
   transport bar, the same shortcuts where the spec lists them.
 - Colours come from `crates/ui/src/theme.rs` tokens (`theme::tokens(ctx)`); do not hard-code
-  `Color32` values except user track colours. Check dark and light theme.
+  `Color32` values except user track colours. Check the dark theme (StudioCraft has only a dark
+  theme).
 - Draw only what is visible (virtualised rows and strips); keep a frame well under 2 ms for
   1000 tracks.
 - Every interactive widget has an accessible label; render tests run `check_accessibility`.

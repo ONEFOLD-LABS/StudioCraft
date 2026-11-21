@@ -377,6 +377,7 @@ Der MVP ist erreicht, wenn man ein Lied mit Audio- und Instrument-Spuren aufnehm
 | Thema | Entscheidung |
 | --- | --- |
 | Fensternamen | allgemeine Begriffe: Mixer, Browser, Inspector |
+| Erscheinungsbild | nur ein dunkles Theme, auch im Browser; keine Wahl zwischen hell und dunkel (2026-11-21) |
 | Plugin-Formate | CLAP zuerst, dann VST3, AU (nur macOS) und LV2; kein VST2 |
 | Audio-Backend | cpal: PipeWire, ALSA, JACK (Linux, FreeBSD), WASAPI (Windows; dazu eigene Hosts für WASAPI exklusiv und mit geringer Latenz), CoreAudio (macOS), Web Audio (WASM). ASIO nicht in den Paketen (SDK-Lizenz), nur als Feature im Code |
 | Lizenzierung | keine Aktivierung; eigener Code MIT oder Apache-2.0, Lizenzhinweise aller Komponenten in THIRD-PARTY-LICENSES.txt |

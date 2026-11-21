@@ -1,19 +1,18 @@
-//! StudioCraft's look: design tokens for dark and light, egui visuals built from them, and the
-//! choice between Dark, Light and System.
+//! StudioCraft's look: the design tokens of its dark theme and the egui visuals built from them.
+//! StudioCraft has only a dark theme.
 //!
 //! The token set follows SoundCraft's DAW theme (`crates/ui-egui/src/theme.rs` in
 //! storytold/soundcraft, MIT OR Apache-2.0). The colours come from the ONEFOLD LABS brand book
 //! (ONEFOLD-LABS/brand, MIT): surfaces, lines and text from its neutrals (`paper`, `surface`,
-//! `surface-sunken`, `line`, `ink`, `ink-muted`), the accent from `apps/palette.json` (light:
-//! wine red `app-studiocraft` with white text; dark: a lighter wine with near-black text) and the
+//! `surface-sunken`, `line`, `ink`, `ink-muted`), the accent from `apps/palette.json` (a lighter
+//! wine than `app-studiocraft`, with near-black text) and the
 //! semantic colours (success, warning, danger, info) from the same file. The DAW's own colours
 //! (lanes, grid, ruler, keys) are mixed from those neutrals; record, solo, mute, monitor and the
 //! meters keep their conventional hues. Because a DAW already uses red for recording, `rec` is a
 //! brighter orange red and the playhead is neutral, so the accent and a recording are never
 //! mistaken for one another.
 //!
-//! Use: call [`install`] once at start-up with the saved [`ThemePreference`] (egui then follows the
-//! system for `System`), and read colours with [`tokens`] wherever the UI paints.
+//! Use: call [`install`] once at start-up and read colours with [`tokens`] wherever the UI paints.
 
 use egui::{Color32, Context, CornerRadius, Stroke, Theme, ThemePreference, Visuals};
 
@@ -167,81 +166,9 @@ impl Tokens {
         info: rgb(0x258bd2),
     };
 
-    pub const LIGHT: Tokens = Tokens {
-        window_bg: rgb(0xeceeeb),
-        panel_bg: rgb(0xffffff),
-        panel_bg2: rgb(0xf6f7f5),
-        toolbar_bg: rgb(0xf6f7f5),
-        border: rgb(0xc9d0cf),
-        border_light: rgb(0x56636a),
-        text: rgb(0x111719),
-        text_dim: rgb(0x56636a),
-        text_on_accent: rgb(0xffffff),
-        accent: rgb(0x9e2343),
-        brand_light: rgb(0xd9587a),
-        brand_dark: rgb(0x8e1f3c),
-        accent_dark: rgb(0x82002f),
-        button: rgb(0xeceeeb),
-        button_hi: rgb(0xc9d0cf),
-        ruler_bg: rgb(0xeceeeb),
-        ruler_text: rgb(0x56636a),
-        ruler_tick: rgb(0x9ba4a7),
-        lane_bg: rgb(0xffffff),
-        lane_alt: rgb(0xf6f7f5),
-        grid_line: rgb(0xe7eae9),
-        bar_line: rgb(0xc9d0cf),
-        selection: rgba(0x9e2343, 46),
-        row_selected: rgb(0xe1e6e5),
-        cycle_fill: rgba(0x9e2343, 40),
-        punch_fill: rgba(0xd1321c, 56),
-        playhead: rgb(0x111719),
-        event_text: rgb(0x0a0a0a),
-        event_text_muted: rgb(0xf6f7f5),
-        event_muted: rgb(0x9ba4a7),
-        event_shade: rgb(0x2c3438),
-        event_selected: rgb(0x111719),
-        handle: rgb(0xffffff),
-        rec: rgb(0xd1321c),
-        solo: rgb(0xb2911a),
-        mute: rgb(0xc26a16),
-        monitor: rgb(0x24a03a),
-        counter_bg: rgb(0xeceeeb),
-        counter_text: rgb(0x82002f),
-        meter_green: rgb(0x24a03a),
-        meter_yellow: rgb(0xc9ad1c),
-        meter_red: rgb(0xd1321c),
-        fader_track: rgb(0x9aa8ae),
-        bus_input: rgb(0x9cc296),
-        bus_output: rgb(0xaab2c4),
-        strip_bg: rgb(0xf6f7f5),
-        key_white: rgb(0xffffff),
-        key_black: rgb(0x1f272a),
-        key_line: rgb(0x9aa8ae),
-        key_pressed: rgb(0x9e2343),
-        key_row: rgb(0xffdfe2),
-        note_selected: rgb(0x111719),
-        key_black_row: rgba(0x111719, 18),
-        outside_part: rgba(0x111719, 28),
-        success: rgb(0x017b37),
-        warning: rgb(0x906106),
-        danger: rgb(0xb24840),
-        info: rgb(0x006fb1),
-    };
-
-    pub const fn of(theme: Theme) -> &'static Tokens {
-        match theme {
-            Theme::Dark => &Tokens::DARK,
-            Theme::Light => &Tokens::LIGHT,
-        }
-    }
-
-    /// egui visuals for this token set; `dark` picks egui's matching base.
-    pub fn visuals(&self, dark: bool) -> Visuals {
-        let mut v = if dark {
-            Visuals::dark()
-        } else {
-            Visuals::light()
-        };
+    /// egui visuals for this token set, on egui's dark base.
+    pub fn visuals(&self) -> Visuals {
+        let mut v = Visuals::dark();
         v.panel_fill = self.panel_bg;
         v.window_fill = self.panel_bg2;
         v.window_stroke = Stroke::new(1.0, self.border_light);
@@ -280,25 +207,18 @@ impl Tokens {
     }
 }
 
-/// Set StudioCraft's dark and light visuals and follow `preference` (System tracks the OS).
-pub fn install(ctx: &Context, preference: ThemePreference) {
-    ctx.set_visuals_of(Theme::Dark, Tokens::DARK.visuals(true));
-    ctx.set_visuals_of(Theme::Light, Tokens::LIGHT.visuals(false));
-    ctx.set_theme(preference);
+/// Install StudioCraft's visuals. StudioCraft is always dark, also when the system asks for a
+/// light theme: egui's light slot gets the dark visuals too.
+pub fn install(ctx: &Context) {
+    let visuals = Tokens::DARK.visuals();
+    ctx.set_visuals_of(Theme::Dark, visuals.clone());
+    ctx.set_visuals_of(Theme::Light, visuals);
+    ctx.set_theme(ThemePreference::Dark);
 }
 
-/// The tokens for the theme egui is showing right now.
-pub fn tokens(ctx: &Context) -> &'static Tokens {
-    Tokens::of(ctx.theme())
-}
-
-/// German label for the settings menu.
-pub fn label(preference: ThemePreference) -> &'static str {
-    match preference {
-        ThemePreference::Dark => crate::i18n::tr("Dunkel"),
-        ThemePreference::Light => crate::i18n::tr("Hell"),
-        ThemePreference::System => crate::i18n::tr("Wie das System"),
-    }
+/// The colours to paint with (the dark theme; `ctx` keeps call sites free to change later).
+pub fn tokens(_ctx: &Context) -> &'static Tokens {
+    &Tokens::DARK
 }
 
 #[cfg(test)]
@@ -313,15 +233,14 @@ mod tests {
 
     #[test]
     fn accent_and_recording_stay_apart() {
-        for t in [Tokens::DARK, Tokens::LIGHT] {
-            assert!(
-                distance(t.accent, t.rec) > 60,
-                "accent {:?} too close to rec {:?}",
-                t.accent,
-                t.rec
-            );
-            assert!(distance(t.playhead, t.rec) > 200);
-        }
+        let t = Tokens::DARK;
+        assert!(
+            distance(t.accent, t.rec) > 60,
+            "accent {:?} too close to rec {:?}",
+            t.accent,
+            t.rec
+        );
+        assert!(distance(t.playhead, t.rec) > 200);
     }
 
     /// WCAG relative luminance.
@@ -346,77 +265,73 @@ mod tests {
     /// control borders, the playhead and the accent as a mark hold 3:1 (brand book).
     #[test]
     fn text_and_state_colours_are_readable() {
-        for (theme, t) in [("dark", Tokens::DARK), ("light", Tokens::LIGHT)] {
-            let grounds = [
-                ("panel", t.panel_bg),
-                ("toolbar", t.toolbar_bg),
-                ("lane", t.lane_bg),
-                ("lane_alt", t.lane_alt),
-            ];
-            for (ground, bg) in grounds {
-                for (name, fg, min) in [
-                    ("text", t.text, 4.5),
-                    ("text_dim", t.text_dim, 4.5),
-                    ("success", t.success, 4.5),
-                    ("warning", t.warning, 4.5),
-                    ("danger", t.danger, 4.5),
-                    ("info", t.info, 4.5),
-                    ("accent", t.accent, 3.0),
-                    ("border_light", t.border_light, 3.0),
-                    ("playhead", t.playhead, 3.0),
-                ] {
-                    let c = contrast(fg, bg);
-                    assert!(c >= min, "{theme}: {name} on {ground}: {c:.2}");
-                }
-            }
-            for (name, fg, bg) in [
-                ("text on accent", t.text_on_accent, t.accent),
-                ("text on selected row", t.text, t.row_selected),
-                ("text on raised panel", t.text, t.panel_bg2),
-                ("ruler text", t.ruler_text, t.ruler_bg),
-                ("counter", t.counter_text, t.counter_bg),
+        let t = Tokens::DARK;
+        let grounds = [
+            ("panel", t.panel_bg),
+            ("toolbar", t.toolbar_bg),
+            ("lane", t.lane_bg),
+            ("lane_alt", t.lane_alt),
+        ];
+        for (ground, bg) in grounds {
+            for (name, fg, min) in [
+                ("text", t.text, 4.5),
+                ("text_dim", t.text_dim, 4.5),
+                ("success", t.success, 4.5),
+                ("warning", t.warning, 4.5),
+                ("danger", t.danger, 4.5),
+                ("info", t.info, 4.5),
+                ("accent", t.accent, 3.0),
+                ("border_light", t.border_light, 3.0),
+                ("playhead", t.playhead, 3.0),
             ] {
                 let c = contrast(fg, bg);
-                assert!(c >= 4.5, "{theme}: {name}: {c:.2}");
+                assert!(c >= min, "{name} on {ground}: {c:.2}");
             }
+        }
+        for (name, fg, bg) in [
+            ("text on accent", t.text_on_accent, t.accent),
+            ("text on selected row", t.text, t.row_selected),
+            ("text on raised panel", t.text, t.panel_bg2),
+            ("ruler text", t.ruler_text, t.ruler_bg),
+            ("counter", t.counter_text, t.counter_bg),
+        ] {
+            let c = contrast(fg, bg);
+            assert!(c >= 4.5, "{name}: {c:.2}");
         }
     }
 
     /// The neutrals are the brand's (ONEFOLD-LABS/brand `tokens/tokens.json`).
     #[test]
     fn surfaces_and_text_are_the_brand_neutrals() {
-        assert_eq!(Tokens::LIGHT.panel_bg, rgb(0xffffff)); // surface
-        assert_eq!(Tokens::LIGHT.toolbar_bg, rgb(0xf6f7f5)); // paper
-        assert_eq!(Tokens::LIGHT.window_bg, rgb(0xeceeeb)); // surface-sunken
-        assert_eq!(Tokens::LIGHT.text, rgb(0x111719)); // ink
         assert_eq!(Tokens::DARK.panel_bg, rgb(0x171d20));
         assert_eq!(Tokens::DARK.toolbar_bg, rgb(0x101416));
         assert_eq!(Tokens::DARK.window_bg, rgb(0x0b0e10));
         assert_eq!(Tokens::DARK.text, rgb(0xeef2f1));
-        assert_eq!(Tokens::LIGHT.accent, APP_COLOR);
     }
 
     /// egui draws `strong` text (headings in lists and dialogs) in the pressed widget's text
     /// colour: it must be readable on the panels.
     #[test]
     fn strong_text_is_readable() {
-        for (dark, t) in [(true, Tokens::DARK), (false, Tokens::LIGHT)] {
-            let v = t.visuals(dark);
-            for bg in [t.panel_bg, t.panel_bg2] {
-                let c = contrast(v.strong_text_color(), bg);
-                assert!(c >= 4.5, "strong text: {c:.2}");
-            }
+        let t = Tokens::DARK;
+        let v = t.visuals();
+        for bg in [t.panel_bg, t.panel_bg2] {
+            let c = contrast(v.strong_text_color(), bg);
+            assert!(c >= 4.5, "strong text: {c:.2}");
         }
     }
 
     #[test]
-    fn install_follows_the_preference() {
+    fn install_is_always_dark() {
         let ctx = Context::default();
-        install(&ctx, ThemePreference::Light);
-        assert_eq!(ctx.theme(), Theme::Light);
-        assert_eq!(tokens(&ctx).accent, APP_COLOR);
-        install(&ctx, ThemePreference::Dark);
+        // Even a system that prefers light shows StudioCraft's dark visuals.
+        ctx.set_theme(ThemePreference::Light);
+        install(&ctx);
         assert_eq!(ctx.theme(), Theme::Dark);
         assert_eq!(tokens(&ctx).panel_bg, Tokens::DARK.panel_bg);
+        assert_eq!(
+            ctx.style_of(Theme::Light).visuals.panel_fill,
+            Tokens::DARK.panel_bg
+        );
     }
 }

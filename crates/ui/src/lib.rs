@@ -339,8 +339,6 @@ pub struct ProjectWindow {
     metronome: bool,
     /// Bereichsauswahl (Werkzeug 2): erste/letzte Spur, Anfang/Ende in Ticks.
     range: Option<(usize, usize, u64, u64)>,
-    /// Erscheinungsbild (Dunkel/Hell/System); installiert beim ersten Frame.
-    theme: egui::ThemePreference,
     /// Stopp-Verhalten (Einstellungen): zurück zur Startposition, Ziel von zweimal Stopp.
     return_on_stop: bool,
     stop_twice: settings::StopTarget,
@@ -510,7 +508,6 @@ impl ProjectWindow {
             audio_recording: false,
             metronome: false,
             range: None,
-            theme: prefs.theme,
             return_on_stop: prefs.return_on_stop,
             stop_twice: prefs.stop_twice,
             play_from: 0,
@@ -817,13 +814,6 @@ impl ProjectWindow {
         self.dirty = true;
     }
 
-    /// Erscheinungsbild wählen und für den nächsten Start merken.
-    pub(crate) fn set_theme(&mut self, ctx: &egui::Context, pref: egui::ThemePreference) {
-        self.theme = pref;
-        theme::install(ctx, pref);
-        self.save_settings();
-    }
-
     /// Einstellungen für den nächsten Start merken (nur in der App, nicht in Tests: dort ist
     /// `persist` aus, wie bei der Tastaturbelegung).
     pub(crate) fn save_settings(&mut self) {
@@ -831,7 +821,6 @@ impl ProjectWindow {
             return;
         }
         let s = settings::Settings {
-            theme: self.theme,
             return_on_stop: self.return_on_stop,
             stop_twice: self.stop_twice,
             audio: self.audio_choice.clone(),
@@ -1089,7 +1078,7 @@ impl ProjectWindow {
     /// unterer Zone.
     pub fn ui_with(&mut self, ui: &mut Ui, side: &mut dyn FnMut(&mut Ui, &mut ProjectWindow)) {
         if !self.theme_installed {
-            theme::install(ui.ctx(), self.theme);
+            theme::install(ui.ctx());
             self.theme_installed = true;
         }
         self.panel_edit_start(ui.ctx());
@@ -2188,14 +2177,13 @@ mod tests {
     use egui_kittest::{Harness, kittest::Queryable};
     use studiocraft_project::TempoMap;
 
-    /// Rendert das Projektfenster headless. Mit `STUDIOCRAFT_SHOTS=<ordner>`
-    /// werden die Bilder gespeichert (dazu jede Ansicht ein zweites Mal im hellen Theme als
-    /// `<name>-hell.png`), sonst wird nur geprüft, dass es rendert.
+    /// Rendert das Projektfenster headless. Mit `STUDIOCRAFT_SHOTS=<ordner>` werden die Bilder
+    /// gespeichert, sonst wird nur geprüft, dass es rendert.
     fn shot(name: &str, setup: impl Fn(&mut ProjectWindow)) {
         shot_sized(name, egui::vec2(1400.0, 860.0), setup);
     }
 
-    /// Wie [`shot`], nur dunkel: für Einrichtungen, die etwas verbrauchen (eine Engine).
+    /// Wie [`shot`], für Einrichtungen, die etwas verbrauchen (eine Engine).
     fn shot_once(name: &str, setup: impl FnOnce(&mut ProjectWindow)) {
         let mut w = ProjectWindow::new(Project::demo(100), None, "kein Audio (Test)".into());
         setup(&mut w);
@@ -2217,38 +2205,24 @@ mod tests {
     }
 
     fn shot_sized(name: &str, size: egui::Vec2, setup: impl Fn(&mut ProjectWindow)) {
-        let dir = std::env::var("STUDIOCRAFT_SHOTS").ok();
-        let light_too = dir.is_some() && !name.ends_with("hell");
-        for light in [false, true] {
-            if light && !light_too {
-                break;
-            }
-            let mut w = ProjectWindow::new(Project::demo(100), None, "kein Audio (Test)".into());
-            setup(&mut w);
-            if light {
-                w.theme = egui::ThemePreference::Light;
-            }
-            let mut harness = Harness::builder()
-                .with_size(size)
-                .with_step_dt(1.0 / 60.0)
-                .wgpu()
-                .build_ui(move |ui| w.ui(ui));
-            // Pegelanzeigen klingen ab und fordern weitere Frames an: feste Schrittzahl,
-            // danach die Barrierefreiheit ausdrücklich prüfen.
-            harness.run_steps(4);
-            harness.check_accessibility();
-            let Ok(img) = harness.render() else {
-                eprintln!("kein GPU-Renderer verfügbar, Bild übersprungen");
-                return;
-            };
-            if let Some(dir) = &dir {
-                let file = if light {
-                    format!("{name}-hell.png")
-                } else {
-                    format!("{name}.png")
-                };
-                img.save(std::path::Path::new(dir).join(file)).unwrap();
-            }
+        let mut w = ProjectWindow::new(Project::demo(100), None, "kein Audio (Test)".into());
+        setup(&mut w);
+        let mut harness = Harness::builder()
+            .with_size(size)
+            .with_step_dt(1.0 / 60.0)
+            .wgpu()
+            .build_ui(move |ui| w.ui(ui));
+        // Pegelanzeigen klingen ab und fordern weitere Frames an: feste Schrittzahl,
+        // danach die Barrierefreiheit ausdrücklich prüfen.
+        harness.run_steps(4);
+        harness.check_accessibility();
+        let Ok(img) = harness.render() else {
+            eprintln!("kein GPU-Renderer verfügbar, Bild übersprungen");
+            return;
+        };
+        if let Ok(dir) = std::env::var("STUDIOCRAFT_SHOTS") {
+            img.save(std::path::Path::new(&dir).join(format!("{name}.png")))
+                .unwrap();
         }
     }
 
@@ -3267,16 +3241,6 @@ mod tests {
                 .map(|e| e.id)
                 .collect();
             w.selection = ids;
-        });
-        shot("info-mehrfach-hell", |w| {
-            let ids: Vec<EventId> = w.project.tracks[0]
-                .events
-                .iter()
-                .take(3)
-                .map(|e| e.id)
-                .collect();
-            w.selection = ids;
-            w.theme = egui::ThemePreference::Light;
         });
     }
 
@@ -4365,17 +4329,10 @@ mod tests {
 
     #[test]
     fn render_frozen_track() {
-        for (name, theme) in [
-            ("eingefroren", egui::ThemePreference::Dark),
-            ("eingefroren-hell", egui::ThemePreference::Light),
-        ] {
-            shot(name, |w| {
-                w.theme = theme;
-                w.project.tracks[3].frozen =
-                    Some(studiocraft_project::Frozen { clip: 0, start: 0 });
-                w.selected_track = Some(3);
-            });
-        }
+        shot("eingefroren", |w| {
+            w.project.tracks[3].frozen = Some(studiocraft_project::Frozen { clip: 0, start: 0 });
+            w.selected_track = Some(3);
+        });
     }
 
     #[test]
@@ -9392,23 +9349,6 @@ mod tests {
         let evs = &h.state().project.tracks[0].events;
         assert_eq!(evs.len(), 1);
         assert_eq!(evs[0].length, 6 * q);
-    }
-
-    #[test]
-    fn renders_light_theme() {
-        shot("hell", |w| {
-            w.theme = egui::ThemePreference::Light;
-            w.project = Project::default();
-            w.import_clip("Gesang", None, tone_clip(8.0, 330.0), None)
-                .unwrap();
-            w.add_instrument_track(None);
-            melody(w, 1, 4 * TICKS_PER_QUARTER);
-            w.project.tracks[0].solo = true;
-            w.project.tracks[1].mute = true;
-            w.cycle = true;
-            w.cursor = 3 * TICKS_PER_QUARTER;
-            w.meter_levels = vec![[0.8, 0.7], [0.0, 0.0]];
-        });
     }
 
     #[test]
