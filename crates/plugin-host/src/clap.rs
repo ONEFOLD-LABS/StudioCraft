@@ -518,6 +518,32 @@ impl ClapHandle {
 // ---------------------------------------------------------------------------
 // Instanz.
 
+/// Höchstens so viele Anschlüsse je Richtung und Kanäle je Anschluss (wie bei VST3): Die
+/// Zahlen kommen vom Plugin, und für jeden Kanal wird ein Puffer angelegt.
+const MAX_PORTS: u32 = 16;
+const MAX_PORT_CHANNELS: u32 = 32;
+
+/// Kanäle je Anschluss und der Hauptanschluss aus dem, was das Plugin meldet: `count`
+/// Anschlüsse, `info(i)` mit (Kanäle, Flags) oder `None`, wenn das Plugin den Anschluss nicht
+/// beschreibt (dann ohne Kanäle). Hauptanschluss ist der erste mit dem Main-Flag, sonst der
+/// erste. Anzahl und Kanäle sind begrenzt.
+fn port_layout(
+    count: u32,
+    mut info: impl FnMut(u32) -> Option<(u32, u32)>,
+) -> (Vec<u32>, Option<usize>) {
+    let mut channels = Vec::new();
+    let mut main = None;
+    for i in 0..count.min(MAX_PORTS) {
+        let (ch, flags) = info(i).unwrap_or((0, 0));
+        if main.is_none() && flags & CLAP_AUDIO_PORT_IS_MAIN != 0 {
+            main = Some(channels.len());
+        }
+        channels.push(ch.min(MAX_PORT_CHANNELS));
+    }
+    let main = main.or((!channels.is_empty()).then_some(0));
+    (channels, main)
+}
+
 /// Puffer für alle Audio-Anschlüsse einer Richtung. Laut CLAP muss der Host
 /// für jeden gemeldeten Anschluss Puffer liefern (auch Sidechains). Alles wird
 /// beim Erzeugen angelegt; die Zeiger bleiben gültig, weil die Daten auf dem
@@ -677,20 +703,10 @@ impl ClapInstance {
             let (Some(count), Some(get)) = (ports.count, ports.get) else {
                 return (vec![2], Some(0));
             };
-            let mut channels = Vec::new();
-            let mut main = None;
-            for i in 0..count(self.plugin, is_input) {
+            port_layout(count(self.plugin, is_input), |i| {
                 let mut info: clap_audio_port_info = std::mem::zeroed();
-                if !get(self.plugin, i, is_input, &mut info) {
-                    info.channel_count = 0;
-                }
-                if main.is_none() && info.flags & CLAP_AUDIO_PORT_IS_MAIN != 0 {
-                    main = Some(channels.len());
-                }
-                channels.push(info.channel_count);
-            }
-            let main = main.or((!channels.is_empty()).then_some(0));
-            (channels, main)
+                get(self.plugin, i, is_input, &mut info).then_some((info.channel_count, info.flags))
+            })
         };
         let (ic, im) = list(true);
         let (oc, om) = list(false);
@@ -981,6 +997,60 @@ impl Drop for ClapInstance {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    const MAIN: u32 = CLAP_AUDIO_PORT_IS_MAIN;
+
+    /// Ein Effekt mit Sidechain: Jeder Anschluss bekommt eigene Puffer mit seiner Kanalzahl
+    /// (CLAP verlangt Puffer auch für Sidechains), der Haupteingang ist der mit dem Flag.
+    #[test]
+    fn every_port_gets_buffers_including_side_chains() {
+        let ports = [(1, 0), (2, MAIN), (2, 0)]; // Mono-Sidechain vorn, Main, Stereo-Sidechain
+        let (channels, main) = port_layout(3, |i| ports.get(i as usize).copied());
+        assert_eq!((channels.as_slice(), main), (&[1, 2, 2][..], Some(1)));
+        let set = PortSet::new(&channels, main, 512);
+        assert_eq!(set.clap.len(), 3);
+        assert_eq!(set.main_channels(), 2);
+        let mut seen = std::collections::HashSet::new();
+        for (k, buf) in set.clap.iter().enumerate() {
+            assert_eq!(buf.channel_count, channels[k]);
+            assert!(buf.data64.is_null());
+            assert_eq!(set.bufs[k].len(), buf.channel_count as usize);
+            for (c, data) in set.bufs[k].iter().enumerate() {
+                // SAFETY: `data32` zeigt auf `channel_count` Kanalzeiger (PortSet::new).
+                let ch = unsafe { *buf.data32.add(c) };
+                assert!(!ch.is_null() && seen.insert(ch), "eigener Puffer je Kanal");
+                assert_eq!(ch.cast_const(), data.as_ptr());
+                assert_eq!(data.len(), 512);
+            }
+        }
+    }
+
+    #[test]
+    fn the_main_port_falls_back_to_the_first() {
+        assert_eq!(port_layout(2, |_| Some((2, 0))), (vec![2, 2], Some(0)));
+        assert_eq!(port_layout(0, |_| Some((2, MAIN))), (vec![], None));
+        // Ein Anschluss, den das Plugin nicht beschreibt, hat keine Kanäle.
+        assert_eq!(
+            port_layout(2, |i| (i == 1).then_some((2, MAIN))),
+            (vec![0, 2], Some(1))
+        );
+    }
+
+    /// Unsinnige Zahlen eines Plugins legen keine riesigen Puffer an (sonst Absturz beim
+    /// Anlegen): höchstens 16 Anschlüsse mit je 32 Kanälen, wie bei VST3.
+    #[test]
+    fn port_and_channel_counts_from_the_plugin_are_capped() {
+        let mut asked = 0;
+        let (channels, main) = port_layout(u32::MAX, |_| {
+            asked += 1;
+            Some((u32::MAX, MAIN))
+        });
+        assert_eq!(asked, MAX_PORTS);
+        assert_eq!(channels, vec![MAX_PORT_CHANNELS; MAX_PORTS as usize]);
+        assert_eq!(main, Some(0));
+        let set = PortSet::new(&channels, main, 64);
+        assert_eq!(set.bufs.iter().map(Vec::len).sum::<usize>(), 16 * 32);
+    }
     use crate::scan::{default_paths, scan};
 
     /// Testet gegen echte, auf dem System installierte Plugins (falls vorhanden).
