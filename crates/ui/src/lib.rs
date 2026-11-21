@@ -6651,6 +6651,40 @@ mod tests {
     }
 
     #[test]
+    fn sample_editor_keeps_gain_label_and_value_on_one_row() {
+        // Über einen Bereich von Breiten: „dB“, das Wertfeld und „Gain“ stehen immer in
+        // derselben Zeile, auch wenn die Werkzeugzeile umbricht.
+        for width in (800..=1400).step_by(20) {
+            let width = width as f32;
+            let mut w = ProjectWindow::new(Project::default(), None, String::new());
+            let id = w
+                .import_clip("Gesang", None, tone_clip(4.0, 220.0), Some((usize::MAX, 0)))
+                .unwrap();
+            w.open_sample_editor(id);
+            let mut h = Harness::builder()
+                .with_size(egui::vec2(width, 600.0))
+                .with_step_dt(1.0 / 60.0)
+                .build_ui_state(|ui, w: &mut ProjectWindow| w.ui(ui), w);
+            h.run_steps(3);
+            // Das Wertfeld trägt „dB“ als Beschriftung; die Beschriftung steht direkt davor.
+            let value = h
+                .get_by(|n| {
+                    n.label().as_deref() == Some("dB") && n.value().as_deref() == Some("3.0")
+                })
+                .rect();
+            let gain = h.get_by_label("Gain").rect();
+            assert!(
+                (value.center().y - gain.center().y).abs() < 4.0,
+                "Gain left its value at {width} px: {value:?} {gain:?}"
+            );
+            assert!(
+                value.left() > 24.0,
+                "dB stayed in the row above its value at {width} px: {value:?}"
+            );
+        }
+    }
+
+    #[test]
     fn toolbar_symbols_pick_tools_and_toggle_zones() {
         let (w, _) = one_event_window();
         let mut h = window_harness(w);

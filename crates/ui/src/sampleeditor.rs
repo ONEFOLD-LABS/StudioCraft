@@ -321,6 +321,17 @@ pub(crate) fn show(w: &mut ProjectWindow, ui: &mut Ui) {
                 action = Some(p);
             }
         }
+        // „dB“, Wert und „Gain“ gehören zusammen und brechen nur gemeinsam um.
+        let gap = ui.spacing().item_spacing.x;
+        let pad = ui.spacing().button_padding.x * 2.0;
+        crate::infoline::keep_together(
+            ui,
+            crate::infoline::text_width(ui, tr("dB"))
+                + ui.spacing().interact_size.x
+                + crate::infoline::text_width(ui, tr("Gain"))
+                + pad
+                + 2.0 * gap,
+        );
         let l = ui.weak(tr("dB"));
         ui.add(
             egui::DragValue::new(&mut w.sample_editor.gain_db)
