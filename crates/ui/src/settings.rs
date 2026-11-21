@@ -265,8 +265,14 @@ impl Settings {
     pub fn load() -> Self {
         dir()
             .and_then(|d| std::fs::read_to_string(d.join("settings.json")).ok())
-            .and_then(|text| serde_json::from_str::<File>(&text).ok())
-            .map_or_else(Self::default, Self::from_file)
+            .and_then(|text| Self::from_text(&text))
+            .unwrap_or_default()
+    }
+
+    /// Liest den Inhalt einer Einstellungsdatei (fremde Eingabe: Werte werden begrenzt);
+    /// `None`, wenn sie unlesbar ist.
+    fn from_text(text: &str) -> Option<Self> {
+        serde_json::from_str::<File>(text).ok().map(Self::from_file)
     }
 
     pub fn save(&self) -> Result<(), String> {
@@ -281,6 +287,81 @@ impl Settings {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A settings file changed at random loads with every value in its limits, or gives the
+    /// defaults; it never panics, and the daily update check is never stopped for good.
+    #[test]
+    fn fuzzed_settings_files() {
+        use crate::fuzzkit::{Case, Rng, cases, mutate_bytes};
+        let rect = WindowRect {
+            pos: Some([10.0, 20.0]),
+            size: [800.0, 600.0],
+        };
+        let full = Settings {
+            audio: DeviceChoice {
+                host: Some("ALSA".into()),
+                output: Some("Karte".into()),
+                input: Some("Karte".into()),
+                sample_rate: Some(48_000),
+                block_frames: Some(256),
+            },
+            windows: WindowRects {
+                mixer: Some(rect),
+                editor: Some(rect),
+            },
+            own_process: vec!["a.clap".into(), "b.vst3".into()],
+            update_check: true,
+            last_update_check: 1_700_000_000,
+            ..Settings::default()
+        };
+        let seed_doc = serde_json::to_value(full.to_file()).unwrap_or_default();
+        let now = crate::update::now_secs();
+        let mut loaded = 0;
+        let all = cases(0x5e7, 1500);
+        let n = all.len();
+        for seed in all {
+            let _case = Case("settings", seed);
+            let mut rng = Rng(seed | 1);
+            let mut doc = seed_doc.clone();
+            for _ in 0..1 + rng.below(3) {
+                crate::fuzzjson::mutate_json(&mut rng, &mut doc);
+            }
+            let mut bytes = serde_json::to_vec(&doc).unwrap_or_default();
+            if rng.below(4) == 0 {
+                mutate_bytes(&mut rng, &mut bytes);
+            }
+            let Some(s) = Settings::from_text(&String::from_utf8_lossy(&bytes)) else {
+                continue;
+            };
+            loaded += 1;
+            let a = &s.audio;
+            for t in [&a.host, &a.output, &a.input].into_iter().flatten() {
+                assert!(!t.is_empty() && t.chars().count() <= MAX_TEXT);
+            }
+            assert!(a.sample_rate.is_none_or(|r| (8_000..=768_000).contains(&r)));
+            assert!(a.block_frames.is_none_or(|b| (16..=8192).contains(&b)));
+            for r in [s.windows.mixer, s.windows.editor].into_iter().flatten() {
+                assert!(r.size.iter().all(|v| (100.0..=10_000.0).contains(v)));
+            }
+            assert!(s.autosave_minutes <= 120 && (1..=100).contains(&s.autosave_keep));
+            assert!(s.own_process.len() <= MAX_PLUGINS);
+            assert!(
+                s.own_process.windows(2).all(|w| w[0] < w[1]),
+                "sorted, unique"
+            );
+            assert!(
+                crate::update::due(s.last_update_check, now.saturating_add(2 * 24 * 3600)),
+                "the update check comes back within two days: {}",
+                s.last_update_check
+            );
+            // Saving and loading again gives the same settings.
+            let again = serde_json::to_string(&s.to_file())
+                .ok()
+                .and_then(|t| Settings::from_text(&t));
+            assert_eq!(again.as_ref(), Some(&s));
+        }
+        assert!(loaded * 10 > n, "only {loaded} of {n} variants loaded");
+    }
 
     #[test]
     fn roundtrip_through_file() {
