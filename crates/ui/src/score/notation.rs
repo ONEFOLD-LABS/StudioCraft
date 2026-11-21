@@ -25,7 +25,7 @@ pub(crate) enum Clef {
 
 impl Clef {
     /// Diatonische Stufe der Mittellinie (Oktave × 7 + Stufe, C4 = 28): h' bzw. d.
-    fn middle(self) -> i32 {
+    pub(crate) fn middle(self) -> i32 {
         match self {
             Self::Treble => 4 * 7 + 6,
             Self::Bass => 3 * 7 + 1,
@@ -120,6 +120,10 @@ pub(crate) struct Head {
     pub accidental: Option<Accidental>,
     /// Übergebunden zur gleichen Note im nächsten Element.
     pub tie: bool,
+    /// Index der Note im Part (die erste, falls mehrere gleiche zusammenfallen).
+    pub note: usize,
+    /// Schreibweise der Note (1 Kreuz, −1 Be, 0 nach Tonart).
+    pub spelling: i8,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -199,8 +203,9 @@ fn staff_of(clefs: &[Clef], pitch: u8) -> usize {
     if clefs.len() == 2 && pitch < 60 { 1 } else { 0 }
 }
 
-/// Schreibweise einer Tonhöhe in der Tonart: (diatonische Stufe absolut, Alteration −1/0/1).
-fn spell(pitch: u8, key: KeySignature) -> (i32, i8) {
+/// Schreibweise einer Tonhöhe: (diatonische Stufe absolut, Alteration −1/0/1). `spelling`
+/// der Note: 1 mit Kreuz, −1 mit Be, 0 nach der Tonart.
+pub(crate) fn spell(pitch: u8, key: KeySignature, spelling: i8) -> (i32, i8) {
     // Kreuz-Tonarten (und C) schreiben schwarze Tasten mit Kreuz, Be-Tonarten mit Be.
     const SHARP: [(i32, i8); 12] = [
         (0, 0),
@@ -230,14 +235,19 @@ fn spell(pitch: u8, key: KeySignature) -> (i32, i8) {
         (6, -1),
         (6, 0),
     ];
-    let table = if key.fifths >= 0 { &SHARP } else { &FLAT };
+    let sharp = match spelling {
+        1 => true,
+        -1 => false,
+        _ => key.fifths >= 0,
+    };
+    let table = if sharp { &SHARP } else { &FLAT };
     let (step, alter) = table[usize::from(pitch % 12)];
     let octave = i32::from(pitch / 12) - 1;
     (octave * 7 + step, alter)
 }
 
 /// Alteration, die die Tonart einer Stufe (0 = C … 6 = H) gibt.
-fn key_alter(key: KeySignature, step: i32) -> i8 {
+pub(crate) fn key_alter(key: KeySignature, step: i32) -> i8 {
     // Reihenfolge der Kreuze F C G D A E H und der Be H E A D G C F.
     const SHARP_ORDER: [i32; 7] = [3, 0, 4, 1, 5, 2, 6];
     const FLAT_ORDER: [i32; 7] = [6, 2, 5, 1, 4, 0, 3];
@@ -292,27 +302,41 @@ pub(crate) fn split(offset: u64, len: u64, beat: u64) -> Vec<Value> {
 }
 
 /// Ein Einsatz: ein Akkord (oder eine Pause) von `start` bis `end`, Ticks ab Projektanfang.
+/// Eine quantisierte Note: Anfang und Ende in Ticks ab Projektanfang, Tonhöhe, Index im Part,
+/// Schreibweise.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+struct QNote {
+    start: u64,
+    end: u64,
+    pitch: u8,
+    index: usize,
+    spelling: i8,
+}
+
 #[derive(Debug, Clone)]
 struct Span {
     start: u64,
     end: u64,
-    pitches: Vec<u8>,
+    /// (Tonhöhe, Index im Part, Schreibweise), nach Tonhöhe sortiert.
+    pitches: Vec<(u8, usize, i8)>,
 }
 
 /// Die Einsätze eines Systems: quantisiert, eine Stimme, Lücken als Pausen. `notes` ist nach
 /// Anfang sortiert.
-fn spans(notes: &[(u64, u64, u8)], from: u64, to: u64) -> Vec<Span> {
+fn spans(notes: &[QNote], from: u64, to: u64) -> Vec<Span> {
     // Gruppen gleicher Anfänge: (Anfang, spätestes Ende, Tonhöhen).
-    let mut groups: Vec<(u64, u64, Vec<u8>)> = Vec::new();
-    for &(start, end, pitch) in notes {
+    type Group = (u64, u64, Vec<(u8, usize, i8)>);
+    let mut groups: Vec<Group> = Vec::new();
+    for n in notes {
+        let head = (n.pitch, n.index, n.spelling);
         match groups.last_mut() {
-            Some(g) if g.0 == start => {
-                g.1 = g.1.max(end);
-                if !g.2.contains(&pitch) {
-                    g.2.push(pitch);
+            Some(g) if g.0 == n.start => {
+                g.1 = g.1.max(n.end);
+                if !g.2.iter().any(|h| h.0 == n.pitch) {
+                    g.2.push(head);
                 }
             }
-            _ => groups.push((start, end, vec![pitch])),
+            _ => groups.push((n.start, n.end, vec![head])),
         }
     }
     let mut out = Vec::new();
@@ -326,7 +350,7 @@ fn spans(notes: &[(u64, u64, u8)], from: u64, to: u64) -> Vec<Span> {
             });
         }
         let next = groups.get(i + 1).map_or(to, |g| g.0);
-        pitches.sort_unstable();
+        pitches.sort_unstable_by_key(|h| h.0);
         let end = end.min(next).min(to);
         out.push(Span {
             start: on,
@@ -369,26 +393,34 @@ pub(crate) fn layout(input: &Input) -> Score {
     let round = |t: u64| t.saturating_add(q / 2) / q * q;
     let part_end = input.part_start.saturating_add(input.part_len);
     // Quantisierte Noten in Ticks ab Projektanfang, im Part.
-    let mut notes: Vec<(u64, u64, u8)> = input
+    let mut notes: Vec<QNote> = input
         .notes
         .iter()
-        .filter_map(|n| {
+        .enumerate()
+        .filter_map(|(index, n)| {
             let s = u64::try_from(n.start).ok()?;
             let qs = round(s);
             let qe = round(s.saturating_add(n.length)).max(qs + q);
             let a = input.part_start.saturating_add(qs);
             let b = input.part_start.saturating_add(qe).min(part_end);
-            (a < b).then_some((a, b, n.pitch.min(127)))
+            (a < b).then_some(QNote {
+                start: a,
+                end: b,
+                pitch: n.pitch.min(127),
+                index,
+                spelling: n.spelling.clamp(-1, 1),
+            })
         })
         .collect();
     notes.sort_unstable();
     let visible: Vec<Note> = notes
         .iter()
-        .map(|&(s, e, p)| Note {
+        .map(|n| Note {
             start: 0,
-            length: e - s,
-            pitch: p,
+            length: n.end - n.start,
+            pitch: n.pitch,
             velocity: 100,
+            spelling: 0,
         })
         .collect();
     let clefs = clefs_for(&visible);
@@ -416,10 +448,10 @@ pub(crate) fn layout(input: &Input) -> Score {
         .collect();
 
     for (staff, &clef) in clefs.iter().enumerate() {
-        let own: Vec<(u64, u64, u8)> = notes
+        let own: Vec<QNote> = notes
             .iter()
             .copied()
-            .filter(|n| staff_of(&clefs, n.2) == staff)
+            .filter(|n| staff_of(&clefs, n.pitch) == staff)
             .collect();
         for span in spans(&own, from, to) {
             place(&mut bars, staff, &span);
@@ -457,11 +489,13 @@ fn place(bars: &mut [Bar], staff: usize, span: &Span) {
             Kind::Chord(
                 span.pitches
                     .iter()
-                    .map(|&p| Head {
-                        pitch: p,
+                    .map(|&(pitch, note, spelling)| Head {
+                        pitch,
                         pos: 0,
                         accidental: None,
                         tie: k + 1 < n,
+                        note,
+                        spelling,
                     })
                     .collect(),
             )
@@ -509,7 +543,7 @@ fn finish_bar(bar: &mut Bar, staff: usize, clef: Clef, key: KeySignature) {
         };
         let mut next_tied = Vec::new();
         for h in heads.iter_mut() {
-            let (step, alter) = spell(h.pitch, key);
+            let (step, alter) = spell(h.pitch, key, h.spelling);
             h.pos = step - clef.middle();
             let now = *current.entry(step).or_insert_with(|| key_alter(key, step));
             if !tied_in.contains(&h.pitch) && now != alter {
@@ -589,6 +623,7 @@ mod tests {
             length,
             pitch,
             velocity: 100,
+            spelling: 0,
         }
     }
 
@@ -845,6 +880,19 @@ mod tests {
         };
         assert_eq!(top, -6, "middle C below the treble staff");
         assert_eq!(bottom, -1, "C3 in the bass staff");
+    }
+
+    #[test]
+    fn a_note_keeps_its_spelling() {
+        // C♯4 written as D♭ (spelling −1) in C major: on the D position with a flat.
+        let mut n = note(0, Q, 61);
+        n.spelling = -1;
+        let s = score(&[n], 4 * Q, KeySignature::C_MAJOR);
+        let Kind::Chord(h) = &s.bars[0].staves[0][0].kind else {
+            panic!("chord")
+        };
+        assert_eq!((h[0].pos, h[0].accidental), (-5, Some(Accidental::Flat)));
+        assert_eq!(h[0].note, 0);
     }
 
     #[test]

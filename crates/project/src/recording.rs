@@ -87,6 +87,7 @@ fn to_notes(notes: &[TakeNote], origin: u64) -> impl Iterator<Item = Note> + '_ 
             velocity: n.velocity.clamp(1, 127),
             start: n.start as i64 - origin as i64,
             length: n.end.saturating_sub(n.start).max(1),
+            spelling: 0,
         })
 }
 
@@ -269,12 +270,14 @@ mod tests {
                 velocity: 90,
                 start: 0,
                 length: 240,
+                spelling: 0,
             },
             Note {
                 pitch: 41,
                 velocity: 90,
                 start: 1920,
                 length: 240,
+                spelling: 0,
             },
         ];
         let take = [note(960, 60, 0)];
