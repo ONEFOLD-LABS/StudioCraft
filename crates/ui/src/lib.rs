@@ -1704,12 +1704,21 @@ impl ProjectWindow {
     }
 
     /// Transportleiste (docs/ui-parity.md, „Transportleiste“): Locatoren mit Punch und Cycle,
-    /// Positionsanzeige, Transportknöpfe, Tempo/Takt/Metronom, rechts der Status.
+    /// Positionsanzeige, Transportknöpfe, Tempo/Takt/Metronom, zusammen zentriert; rechts
+    /// Meldungen ohne Statuszeile.
     fn transport_bar(&mut self, ui: &mut Ui) {
         use icons::{Icon, icon_button};
         let t = theme::tokens(ui.ctx());
+        let row = ui.available_rect_before_wrap();
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 2.0;
+            // Alle Gruppen zusammen auf die Fensterbreite zentriert. Die Breite stammt aus dem
+            // letzten Bild; ist kein Platz, beginnen sie am linken Rand.
+            let id = egui::Id::unique("transportleiste-breite");
+            let width = ui.ctx().data(|d| d.get_temp::<f32>(id)).unwrap_or(0.0);
+            let x = (row.center().x - width / 2.0).max(ui.cursor().left());
+            ui.add_space((x - ui.cursor().left()).max(0.0));
+            let start = ui.cursor().left();
             let tempo = self.project.tempo.clone();
             let fmt = |ticks: u64| {
                 let (b, be, s, _) = tempo.bars_beats(Position(ticks));
@@ -1859,6 +1868,11 @@ impl ProjectWindow {
                 .on_hover_text(tr("Automation schreiben bei W: Touch oder Auto-Latch"));
             icons::group_gap(ui);
             self.tempo_controls(ui);
+            let used = ui.cursor().left() - start;
+            if (used - width).abs() > 0.5 {
+                ui.ctx().data_mut(|d| d.insert_temp(id, used));
+                ui.ctx().request_repaint();
+            }
 
             // Ohne Statuszeile: Meldungen rechts in der Transportleiste, gekürzt auf den freien
             // Platz, damit sie nie über Tempo und Takt laufen.
@@ -6489,6 +6503,18 @@ mod tests {
             "{split:?}"
         );
         assert!(right.right() > 1350.0, "{right:?}");
+    }
+
+    #[test]
+    fn the_transport_bar_sits_in_the_middle_of_the_window() {
+        let (w, _) = one_event_window();
+        let mut h = window_harness(w);
+        h.run_steps(3);
+        let first = h.get_by_label("Punch-In (I)").rect();
+        let last = h.get_by_label("Metronom (C)").rect();
+        let centre = (first.left() + last.right()) / 2.0;
+        let middle = h.ctx.content_rect().center().x;
+        assert!((centre - middle).abs() < 40.0, "{first:?} … {last:?}");
     }
 
     /// Bildschirmposition für `ticks` und `rows` Zeilenhöhen unter dem Lineal.

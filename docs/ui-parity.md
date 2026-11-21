@@ -132,7 +132,8 @@ zeigen die Plugin-Liste schon gefiltert. Auf der Startseite gibt es kein Suchfel
 
 ## Transportleiste
 
-Gruppen von links nach rechts, durch Trenner getrennt:
+Gruppen von links nach rechts, durch Trenner getrennt und zusammen auf die Fensterbreite zentriert
+(in schmalen Fenstern ab dem linken Rand):
 
 1. Locatoren: L und R mit Position, Punch-In, Cycle, Punch-Out dazwischen
 2. Hauptanzeige: Position in Takten groß, darunter/daneben Zeit
