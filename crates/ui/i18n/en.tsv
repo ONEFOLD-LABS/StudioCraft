@@ -913,3 +913,10 @@ Event-Anzeige: {tracks} Spuren, {events} Events	Event display: {tracks} tracks, 
 Notenraster: {name}, {n} Noten	Note grid: {name}, {n} notes
 Drum-Raster: {map}, {n} Noten	Drum grid: {map}, {n} notes
 Kanal {name} wählen	Select channel {name}
+Aufnahmen nach der Sicherung	Recordings after the backup
+Diese Aufnahmen sind jünger als die Sicherung und in keinem Take:	These recordings are newer than the backup and in no take:
+Als Takes einfügen	Insert as Takes
+Nicht einfügen	Don't Insert
+Die Dateien bleiben im Aufnahmeordner.	The files stay in the recordings folder.
+{name} (+{n} Folgedateien)	{name} (+{n} continuation files)
+{name} (+1 Folgedatei)	{name} (+1 continuation file)

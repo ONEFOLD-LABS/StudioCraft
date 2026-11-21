@@ -1293,6 +1293,7 @@ impl ProjectWindow {
         self.poll_browser_files();
         self.io_dialog(ui.ctx());
         self.recovery_dialog(ui.ctx());
+        self.orphans_dialog(ui.ctx());
         self.fade_editor_dialog(ui.ctx());
         self.crossfade_editor_dialog(ui.ctx());
         self.device_dialog(ui.ctx());
@@ -5029,6 +5030,19 @@ mod tests {
             w.project.event_mut(part).unwrap().children[1].gain_db = -4.5;
             w.selection = vec![part];
             w.open_audio_part_editor(part);
+        });
+    }
+
+    #[test]
+    fn renders_the_orphaned_takes_dialog() {
+        shot("orphans_dialog", |w| {
+            w.autosave.orphans = vec![
+                vec![
+                    PathBuf::from("/Projekt/Audio/Aufnahme (2).wav"),
+                    PathBuf::from("/Projekt/Audio/Aufnahme (2)-002.wav"),
+                ],
+                vec![PathBuf::from("/Projekt/Audio/Aufnahme - Mikro.wav")],
+            ];
         });
     }
 

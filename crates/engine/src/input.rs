@@ -675,6 +675,37 @@ fn recorder_loop(
     }
 }
 
+/// Liest Aufnahme-Dateien (WAV) als eine [`Recording`]: die erste und ihre Folgedateien in
+/// Reihenfolge (siehe [`continuation_path`]), etwa eine Aufnahme, die nach einem Absturz liegen
+/// blieb. Kanäle und Rate aus der ersten Datei; alle müssen dazu passen.
+pub fn recording_from_files(files: &[PathBuf]) -> Result<Recording, String> {
+    let (first, more) = files.split_first().ok_or("keine Datei")?;
+    let mut frames = 0u64;
+    let mut spec: Option<hound::WavSpec> = None;
+    for path in files {
+        let r = hound::WavReader::open(path).map_err(|e| format!("{}: {e}", path.display()))?;
+        let s = r.spec();
+        match spec {
+            None => spec = Some(s),
+            Some(f) if (f.channels, f.sample_rate) != (s.channels, s.sample_rate) => {
+                return Err(format!("{}: passt nicht zur ersten Datei", path.display()));
+            }
+            Some(_) => {}
+        }
+        frames = frames.saturating_add(u64::from(r.duration()));
+    }
+    let spec = spec.ok_or("keine Datei")?;
+    Ok(Recording {
+        path: first.clone(),
+        more: more.to_vec(),
+        frames,
+        channels: spec.channels,
+        sample_rate: spec.sample_rate,
+        first_captured_at: None,
+        problem: None,
+    })
+}
+
 /// Liest eine Aufnahme und baut daraus Stereo für eine Spur: `first` ist der
 /// erste Eingangskanal, `stereo` nimmt `first` und `first + 1`, sonst Mono auf beide Seiten.
 pub fn extract_channels(rec: &Recording, first: u16, stereo: bool) -> Result<Vec<f32>, String> {
@@ -758,6 +789,30 @@ mod tests {
             std::env::temp_dir().join(format!("sc-rec-{}-{}", std::process::id(), now_nanos()));
         std::fs::create_dir_all(&dir).unwrap();
         (tx, rec, dir)
+    }
+
+    #[test]
+    fn a_recording_reads_from_its_files_in_order() {
+        let dir = std::env::temp_dir().join(format!("sc-rec-files-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let write = |name: &str, channels: u16, frames: usize| {
+            let path = dir.join(name);
+            let samples = vec![0.25f32; frames * usize::from(channels)];
+            crate::export::write_wav_f32_channels(&samples, channels, 48_000, &path).unwrap();
+            path
+        };
+        let a = write("Take.wav", 3, 100);
+        let b = write("Take-002.wav", 3, 50);
+        let rec = recording_from_files(&[a.clone(), b.clone()]).unwrap();
+        assert_eq!(
+            (rec.frames, rec.channels, rec.more.clone()),
+            (150, 3, vec![b])
+        );
+        assert_eq!(extract_channels(&rec, 1, false).unwrap().len(), 300);
+        // Eine Folgedatei mit anderer Kanalzahl gehört nicht dazu.
+        let c = write("Take-003.wav", 2, 10);
+        assert!(recording_from_files(&[a, c]).is_err());
+        assert!(recording_from_files(&[]).is_err());
     }
 
     #[test]
