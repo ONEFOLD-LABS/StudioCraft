@@ -1171,6 +1171,13 @@ fn fader(ui: &mut Ui, name: &str, width: f32, db: &mut f32, meter: Meter, height
     // Fader-Schiene und Knopf
     let rail = Rect::from_x_y_ranges(track.left() + 4.0..=track.left() + 7.0, track.y_range());
     p.rect_filled(rail, 1.0, v.extreme_bg_color);
+    // Kante der Schiene, damit sie sich vom Kanalzug abhebt (3:1).
+    p.rect_stroke(
+        rail.expand(1.0),
+        1.0,
+        Stroke::new(1.0, crate::theme::tokens(ui.ctx()).fader_track),
+        StrokeKind::Inside,
+    );
     let ky = to_y(db_to_pos(*db));
     let knob = Rect::from_center_size(pos2(rail.center().x, ky), vec2(16.0, 10.0));
     let knob_fill = if resp.hovered() || resp.dragged() {

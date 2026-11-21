@@ -81,6 +81,7 @@ pub struct Tokens {
     pub meter_green: Color32,
     pub meter_yellow: Color32,
     pub meter_red: Color32,
+    /// Edge of the fader rail in the mixer (3:1 against the channel strip).
     pub fader_track: Color32,
     /// Namensfeld der Kanalzüge von Eingangs- und Ausgangsbussen im Mixer.
     pub bus_input: Color32,
@@ -135,7 +136,7 @@ impl Tokens {
         playhead: rgb(0xeef2f1),
         event_text: rgb(0x0a0a0a),
         event_text_muted: rgb(0xc8d0d3),
-        event_muted: rgb(0x6a767c),
+        event_muted: rgb(0x4b5458),
         event_shade: rgb(0x0b0e10),
         event_selected: rgb(0xeef2f1),
         handle: rgb(0xffffff),
@@ -148,13 +149,13 @@ impl Tokens {
         meter_green: rgb(0x3cc850),
         meter_yellow: rgb(0xe6d23c),
         meter_red: rgb(0xf0452e),
-        fader_track: rgb(0x0b0e10),
+        fader_track: rgb(0x6a767c),
         bus_input: rgb(0x7fa37a),
         bus_output: rgb(0x8f97a8),
         strip_bg: rgb(0x1b2225),
         key_white: rgb(0xe2e7e6),
         key_black: rgb(0x161b1e),
-        key_line: rgb(0x9aa8ae),
+        key_line: rgb(0x6a767c),
         key_pressed: rgb(0xeb7287),
         key_row: rgb(0x472026),
         note_selected: rgb(0xffffff),
@@ -297,6 +298,60 @@ mod tests {
         ] {
             let c = contrast(fg, bg);
             assert!(c >= 4.5, "{name}: {c:.2}");
+        }
+    }
+
+    /// The dark theme in detail: muted event names, state colours used as text on every ground
+    /// they appear on, and the graphics a user reads (fader rail, piano key lines, ruler ticks,
+    /// meters) hold WCAG contrast.
+    #[test]
+    fn dark_theme_details_are_readable() {
+        let t = Tokens::DARK;
+        let grounds = [
+            ("panel", t.panel_bg),
+            ("raised panel", t.panel_bg2),
+            ("toolbar", t.toolbar_bg),
+            ("strip", t.strip_bg),
+            ("lane", t.lane_bg),
+            ("lane_alt", t.lane_alt),
+        ];
+        for (ground, bg) in grounds {
+            for (name, fg) in [("text", t.text), ("text_dim", t.text_dim)] {
+                let c = contrast(fg, bg);
+                assert!(c >= 4.5, "{name} on {ground}: {c:.2}");
+            }
+        }
+        let states = [
+            ("rec", t.rec),
+            ("solo", t.solo),
+            ("mute", t.mute),
+            ("monitor", t.monitor),
+        ];
+        // As text, the state colours appear in the transport bar and the status line.
+        for (ground, bg) in [("panel", t.panel_bg), ("toolbar", t.toolbar_bg)] {
+            for (name, fg) in states {
+                let c = contrast(fg, bg);
+                assert!(c >= 4.5, "{name} as text on {ground}: {c:.2}");
+            }
+        }
+        // Switched-on state buttons (M, S, R, W) fill with the state colour and write black.
+        for (name, fill) in states {
+            let c = contrast(Color32::BLACK, fill);
+            assert!(c >= 4.5, "black on {name}: {c:.2}");
+        }
+        let c = contrast(t.event_text_muted, t.event_muted);
+        assert!(c >= 4.5, "muted event name: {c:.2}");
+        for (name, fg, bg) in [
+            ("fader rail edge on strip", t.fader_track, t.strip_bg),
+            ("fader rail edge on panel", t.fader_track, t.panel_bg),
+            ("lines between white keys", t.key_line, t.key_white),
+            ("ruler ticks", t.ruler_tick, t.ruler_bg),
+            ("green meter", t.meter_green, t.strip_bg),
+            ("yellow meter", t.meter_yellow, t.strip_bg),
+            ("red meter", t.meter_red, t.strip_bg),
+        ] {
+            let c = contrast(fg, bg);
+            assert!(c >= 3.0, "{name}: {c:.2}");
         }
     }
 
