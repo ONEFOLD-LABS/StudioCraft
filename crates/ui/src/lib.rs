@@ -8236,6 +8236,52 @@ mod tests {
         assert!(w2.open(&tmp.join("gibt-es-nicht.studiocraft")).is_err());
     }
 
+    /// Ein Projekt mit fehlender Audiodatei lässt sich weiter speichern, auch unter neuem
+    /// Namen in einem anderen Ordner: Der Verweis auf die fehlende Datei bleibt erhalten, statt
+    /// dass das ganze Speichern scheitert (sonst wäre die Arbeit nicht mehr zu sichern).
+    #[test]
+    fn save_as_keeps_a_project_with_missing_audio() {
+        let tmp = temp_dir("missing-save");
+        let mut w = ProjectWindow::new(Project::default(), None, String::new());
+        w.import_clip("Weg", None, tone_clip(1.0, 220.0), None)
+            .unwrap();
+        w.import_clip("Da", None, tone_clip(1.0, 330.0), None)
+            .unwrap();
+        let file = tmp.join("P/P.studiocraft");
+        w.save_as(&file).unwrap();
+        std::fs::remove_file(tmp.join("P/Audio/Weg.wav")).unwrap();
+        let mut w2 = ProjectWindow::new(Project::default(), None, String::new());
+        w2.open(&file).unwrap();
+        w2.project.tracks[0].volume_db = -3.0;
+
+        let other = tmp.join("Q/Q.studiocraft");
+        w2.save_as(&other).unwrap();
+        assert!(!w2.is_modified());
+        assert!(
+            tmp.join("Q/Audio/Da.wav").exists(),
+            "vorhandenes Audio kopiert"
+        );
+        let json = std::fs::read_to_string(&other).unwrap();
+        let missing = tmp
+            .join("P/Audio/Weg.wav")
+            .to_string_lossy()
+            .replace('\\', "/");
+        assert!(
+            json.replace('\\', "/").contains(&missing),
+            "Verweis auf die fehlende Datei bleibt: {json}"
+        );
+        // Taucht die Datei wieder auf, klingt das Projekt wieder vollständig.
+        std::fs::write(
+            tmp.join("P/Audio/Weg.wav"),
+            std::fs::read(tmp.join("Q/Audio/Da.wav")).unwrap(),
+        )
+        .unwrap();
+        let mut w3 = ProjectWindow::new(Project::default(), None, String::new());
+        w3.open(&other).unwrap();
+        assert_eq!(w3.message, None);
+        assert_eq!(w3.clips.len(), 2);
+    }
+
     #[test]
     fn export_mixdown_covers_locator_range() {
         let tmp = temp_dir("export");
