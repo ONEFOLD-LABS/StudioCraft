@@ -89,6 +89,9 @@ pub struct EngineStatus {
     rec_started: AtomicBool,
     /// Latenz am Ausgang durch Plugins (Frames, mit Latenzausgleich).
     latency: AtomicU32,
+    /// Dinge, die keinen Platz mehr in einer Rückgabe-Queue fanden (siehe [`discard`]); soll
+    /// immer 0 bleiben.
+    garbage_overflow: AtomicU64,
 }
 
 impl EngineStatus {
@@ -131,6 +134,30 @@ impl EngineStatus {
     /// Latenz am Ausgang durch Plugins in Frames.
     pub fn latency(&self) -> u32 {
         self.latency.load(Ordering::Relaxed)
+    }
+    /// Wie oft eine Rückgabe-Queue voll war (dann bleibt das Objekt liegen, statt im
+    /// Audio-Thread freigegeben zu werden). Bei richtiger Auslegung immer 0.
+    pub fn garbage_overflow(&self) -> u64 {
+        self.garbage_overflow.load(Ordering::Relaxed)
+    }
+}
+
+/// Plätze der Befehls-Queue.
+const COMMANDS: usize = 256;
+
+/// Plätze jeder Rückgabe-Queue. [`EngineControl::send`] und [`EngineControl::try_send`]
+/// leeren die Rückgabe-Queues vor jedem Befehl; danach können höchstens die Befehle, die noch
+/// in der Queue stehen, je ein Objekt zurückgeben, ein Vorhören zusätzlich sein Ende. Mit
+/// doppelter Befehlskapazität läuft keine Rückgabe-Queue über.
+const GARBAGE: usize = 2 * COMMANDS + 2;
+
+/// Gibt ein Objekt, das der Audio-Thread nicht mehr braucht, an den Hauptthread zurück. Ist
+/// die Queue trotzdem voll, wird es nicht hier freigegeben (das hieße Deallokation, bei
+/// Plugins sogar deactivate/destroy im Audio-Thread), sondern bleibt liegen und wird gezählt.
+fn discard<T>(queue: &mut rtrb::Producer<T>, item: T, overflow: &AtomicU64) {
+    if let Err(rtrb::PushError::Full(item)) = queue.push(item) {
+        overflow.fetch_add(1, Ordering::Relaxed);
+        std::mem::forget(item);
     }
 }
 
@@ -283,12 +310,12 @@ fn click_sound(rate: u32, hz: f32) -> Box<[f32]> {
 
 /// Erzeugt das zusammengehörige Paar aus Kern und Steuerung.
 pub fn engine(sample_rate: u32, tempo: TempoMap) -> (EngineCore, EngineControl) {
-    let (producer, consumer) = rtrb::RingBuffer::new(256);
-    let (garbage_tx, garbage_rx) = rtrb::RingBuffer::new(64);
-    let (plugin_tx, plugin_rx) = rtrb::RingBuffer::new(64);
-    let (monitor_tx, monitor_rx) = rtrb::RingBuffer::new(4);
-    let (preview_tx, preview_rx) = rtrb::RingBuffer::new(16);
-    let (delay_tx, delay_rx) = rtrb::RingBuffer::new(16);
+    let (producer, consumer) = rtrb::RingBuffer::new(COMMANDS);
+    let (garbage_tx, garbage_rx) = rtrb::RingBuffer::new(GARBAGE);
+    let (plugin_tx, plugin_rx) = rtrb::RingBuffer::new(GARBAGE);
+    let (monitor_tx, monitor_rx) = rtrb::RingBuffer::new(GARBAGE);
+    let (preview_tx, preview_rx) = rtrb::RingBuffer::new(GARBAGE);
+    let (delay_tx, delay_rx) = rtrb::RingBuffer::new(GARBAGE);
     let (midi_tx, midi_rx) = rtrb::RingBuffer::new(1024);
     let (rec_tx, rec_rx) = rtrb::RingBuffer::new(8192);
     let (out_tx, out_rx) = rtrb::RingBuffer::new(crate::midi_out::OUT_RING);
@@ -391,9 +418,7 @@ impl EngineCore {
         match cmd {
             Command::SetSong(song) => {
                 let old = std::mem::replace(&mut self.song, song);
-                // Ist die Rückgabe-Queue voll, bleibt nur das Freigeben hier.
-                // Bei 64 Plätzen und Abholung in jedem UI-Frame kommt das praktisch nicht vor.
-                let _ = self.garbage.push(old);
+                discard(&mut self.garbage, old, &self.status.garbage_overflow);
             }
             Command::Play => t.play(),
             Command::Record => {
@@ -445,8 +470,7 @@ impl EngineCore {
                 if let Some(slot) = self.inserts.get_mut(track) {
                     if let Some(mut old) = std::mem::replace(slot, chain) {
                         old.stop_processing();
-                        // Volle Queue: dann bleibt nur das Freigeben hier (praktisch nie).
-                        let _ = self.plugin_garbage.push(old);
+                        discard(&mut self.plugin_garbage, old, &self.status.garbage_overflow);
                     }
                 }
             }
@@ -484,21 +508,26 @@ impl EngineCore {
             }
             Command::SetMonitorInput(input) => {
                 if let Some(old) = self.monitor.replace(input) {
-                    // Volle Queue: dann bleibt nur das Freigeben hier (praktisch nie).
-                    let _ = self.monitor_garbage.push(old);
+                    discard(
+                        &mut self.monitor_garbage,
+                        old,
+                        &self.status.garbage_overflow,
+                    );
                 }
             }
             Command::SetDelays(bank, total) => {
                 let old = std::mem::replace(&mut self.delays, bank);
-                // Volle Queue: dann bleibt nur das Freigeben hier (praktisch nie).
-                let _ = self.delay_garbage.push(old);
+                discard(&mut self.delay_garbage, old, &self.status.garbage_overflow);
                 self.status.latency.store(total, Ordering::Relaxed);
             }
             Command::Preview(samples) => {
                 let next = samples.map(|s| (s, 0));
                 if let Some((old, _)) = std::mem::replace(&mut self.preview, next) {
-                    // Volle Queue: dann bleibt nur das Freigeben hier (praktisch nie).
-                    let _ = self.preview_garbage.push(old);
+                    discard(
+                        &mut self.preview_garbage,
+                        old,
+                        &self.status.garbage_overflow,
+                    );
                 }
             }
             Command::SetBypass(track, slot, bypass) => {
@@ -1210,7 +1239,11 @@ impl EngineCore {
             if *at >= samples.len()
                 && let Some((old, _)) = self.preview.take()
             {
-                let _ = self.preview_garbage.push(old);
+                discard(
+                    &mut self.preview_garbage,
+                    old,
+                    &self.status.garbage_overflow,
+                );
             }
         }
         self.status
