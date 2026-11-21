@@ -2481,6 +2481,47 @@ mod tests {
         assert_eq!(h.state().focus, focus::Zone::Project);
     }
 
+    /// Ein offenes Menü liegt über dem Fokusrahmen der Zone darunter.
+    #[test]
+    fn an_open_menu_covers_the_focus_frame() {
+        let mut w = ProjectWindow::new(Project::demo(20), None, "kein Audio (Test)".into());
+        // The frame around the lower zone runs across the left of the window, under the menu.
+        w.focus = focus::Zone::Lower;
+        let mut h = Harness::builder()
+            .with_size(egui::vec2(1000.0, 640.0))
+            .with_step_dt(1.0 / 60.0)
+            .wgpu()
+            .build_ui_state(|ui, w: &mut ProjectWindow| w.ui(ui), w);
+        h.run_steps(2);
+        h.get_by_label("Bearbeiten").click();
+        h.run_steps(3);
+        let Ok(img) = h.render() else {
+            eprintln!("kein GPU-Renderer verfügbar, Bild übersprungen");
+            return;
+        };
+        if let Ok(dir) = std::env::var("STUDIOCRAFT_SHOTS") {
+            img.save(std::path::Path::new(&dir).join("menu_over_focus.png"))
+                .unwrap();
+        }
+        // Pixels inside the open menu: none has the accent colour of the frame.
+        let menu = h
+            .get_by_label_contains("Rückgängig")
+            .rect()
+            .union(h.get_by_label_contains("Tastaturbefehle").rect());
+        let accent = theme::tokens(&h.ctx).accent;
+        let scale = img.width() as f32 / 1000.0;
+        let mut hits = 0;
+        for y in (menu.top() * scale) as u32..(menu.bottom() * scale) as u32 {
+            for x in (menu.left() * scale) as u32..(menu.right() * scale) as u32 {
+                let p = img.get_pixel(x, y).0;
+                if p[0] == accent.r() && p[1] == accent.g() && p[2] == accent.b() {
+                    hits += 1;
+                }
+            }
+        }
+        assert_eq!(hits, 0, "focus frame painted over the menu {menu:?}");
+    }
+
     #[test]
     fn renders_focus_frame_on_the_lower_zone() {
         shot("fokus-untere-zone", |w| {
