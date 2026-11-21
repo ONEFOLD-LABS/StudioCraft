@@ -64,7 +64,6 @@ pub struct Tokens {
     pub punch_fill: Color32,
     pub playhead: Color32,
     // events
-    pub event_text: Color32,
     pub event_text_muted: Color32,
     pub event_muted: Color32,
     pub event_shade: Color32,
@@ -134,7 +133,6 @@ impl Tokens {
         cycle_fill: rgba(0xeb7287, 56),
         punch_fill: rgba(0xf0452e, 77),
         playhead: rgb(0xeef2f1),
-        event_text: rgb(0x0a0a0a),
         event_text_muted: rgb(0xc8d0d3),
         event_muted: rgb(0x4b5458),
         event_shade: rgb(0x0b0e10),
@@ -222,6 +220,35 @@ pub fn tokens(_ctx: &Context) -> &'static Tokens {
     &Tokens::DARK
 }
 
+/// WCAG relative luminance of a colour.
+pub(crate) fn luminance(c: Color32) -> f32 {
+    let lin = |v: u8| {
+        let s = f32::from(v) / 255.0;
+        if s <= 0.04045 {
+            s / 12.92
+        } else {
+            ((s + 0.055) / 1.055).powf(2.4)
+        }
+    };
+    0.2126 * lin(c.r()) + 0.7152 * lin(c.g()) + 0.0722 * lin(c.b())
+}
+
+/// WCAG contrast ratio of two colours (1 to 21).
+pub(crate) fn contrast(a: Color32, b: Color32) -> f32 {
+    let (la, lb) = (luminance(a), luminance(b));
+    (la.max(lb) + 0.05) / (la.min(lb) + 0.05)
+}
+
+/// Black or white, whichever reads better on `bg`: text on track colours (event heads, name
+/// plates, the inspector head). Works for the user's own track colours too.
+pub(crate) fn text_on(bg: Color32) -> Color32 {
+    if contrast(Color32::BLACK, bg) >= contrast(Color32::WHITE, bg) {
+        Color32::BLACK
+    } else {
+        Color32::WHITE
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -242,24 +269,6 @@ mod tests {
             t.rec
         );
         assert!(distance(t.playhead, t.rec) > 200);
-    }
-
-    /// WCAG relative luminance.
-    fn luminance(c: Color32) -> f32 {
-        let lin = |v: u8| {
-            let s = f32::from(v) / 255.0;
-            if s <= 0.04045 {
-                s / 12.92
-            } else {
-                ((s + 0.055) / 1.055).powf(2.4)
-            }
-        };
-        0.2126 * lin(c.r()) + 0.7152 * lin(c.g()) + 0.0722 * lin(c.b())
-    }
-
-    fn contrast(a: Color32, b: Color32) -> f32 {
-        let (la, lb) = (luminance(a), luminance(b));
-        (la.max(lb) + 0.05) / (la.min(lb) + 0.05)
     }
 
     /// Text and state colours stay readable (WCAG AA 4.5:1) on every ground they are drawn on;
@@ -352,6 +361,22 @@ mod tests {
         ] {
             let c = contrast(fg, bg);
             assert!(c >= 3.0, "{name}: {c:.2}");
+        }
+    }
+
+    /// Text on track colours: black or white by contrast. A very dark own colour gets white, a
+    /// very light one black, and every colour keeps at least 4.5:1.
+    #[test]
+    fn text_on_track_colours_is_readable() {
+        assert_eq!(text_on(Color32::from_rgb(0x12, 0x10, 0x24)), Color32::WHITE);
+        assert_eq!(text_on(Color32::from_rgb(0xf4, 0xf0, 0xd8)), Color32::BLACK);
+        let presets = studiocraft_project::TRACK_COLORS
+            .iter()
+            .map(|c| Color32::from_rgb(c[0], c[1], c[2]));
+        let greys = (0..=255).step_by(5).map(|v| Color32::from_gray(v as u8));
+        for bg in presets.chain(greys) {
+            let c = contrast(text_on(bg), bg);
+            assert!(c >= 4.5, "{bg:?}: {c:.2}");
         }
     }
 

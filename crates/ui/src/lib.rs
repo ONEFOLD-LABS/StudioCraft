@@ -1576,14 +1576,7 @@ impl ProjectWindow {
         let color = Color32::from_rgb(track.color[0], track.color[1], track.color[2]);
         let (head, _) =
             ui.allocate_exact_size(egui::vec2(ui.available_width(), 26.0), egui::Sense::hover());
-        let luma = 0.299 * f32::from(color.r())
-            + 0.587 * f32::from(color.g())
-            + 0.114 * f32::from(color.b());
-        let on_color = if luma > 140.0 {
-            Color32::BLACK
-        } else {
-            Color32::WHITE
-        };
+        let on_color = theme::text_on(color);
         let painter = ui.painter();
         painter.rect_filled(head, 3.0, color);
         let kind_rect = painter.text(

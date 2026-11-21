@@ -2383,7 +2383,7 @@ fn paint_event(
                 if ev.muted {
                     crate::theme::tokens(painter.ctx()).event_text_muted
                 } else {
-                    crate::theme::tokens(painter.ctx()).event_text
+                    crate::theme::text_on(color)
                 },
             );
     }
@@ -2678,7 +2678,7 @@ fn paint_headers(w: &ProjectWindow, painter: &Painter, g: &Geo) {
             Align2::CENTER_CENTER,
             (g.display_pos(row).unwrap_or(row) + 1).to_string(),
             FontId::proportional(10.0),
-            contrast_text(color),
+            crate::theme::text_on(color),
         );
         let [_, solo, ..] = g.header_buttons(row);
         let volume = g.header_volume(row);
@@ -2861,16 +2861,6 @@ fn paint_header_volume(
         2.0,
         visuals.widgets.active.fg_stroke.color,
     );
-}
-
-/// Lesbare Schriftfarbe auf einer Spurfarbe.
-fn contrast_text(bg: Color32) -> Color32 {
-    let l = 0.299 * f32::from(bg.r()) + 0.587 * f32::from(bg.g()) + 0.114 * f32::from(bg.b());
-    if l > 140.0 {
-        Color32::BLACK
-    } else {
-        Color32::WHITE
-    }
 }
 
 /// Beschriftung eines Spurkopf-Schalters.
