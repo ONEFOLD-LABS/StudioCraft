@@ -287,6 +287,8 @@ impl ProjectWindow {
         }
         for (k, s) in steps.iter().enumerate() {
             ui.horizontal(|ui| {
+                // Lange Namen brechen in der schmalen Liste um, statt am Rand abzureißen.
+                ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Wrap);
                 let mut on = s.on;
                 let name = match s.kind {
                     ProcessKind::Gain { db } => {

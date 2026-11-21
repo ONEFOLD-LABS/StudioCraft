@@ -6553,6 +6553,23 @@ mod tests {
     }
 
     #[test]
+    fn sample_editor_history_wraps_long_names() {
+        // Die Liste der Bearbeitungen ist schmal; ein langer Name bleibt im Fenster.
+        assert_inside(800.0, &["1. Normalisieren auf -1.0 dB"], |w| {
+            let id = w
+                .import_clip("Gesang", None, tone_clip(4.0, 220.0), Some((usize::MAX, 0)))
+                .unwrap();
+            w.open_sample_editor(id);
+            w.add_process(
+                id,
+                studiocraft_project::ProcessKind::Normalize { target_db: -1.0 },
+                (0, 192_000),
+            )
+            .unwrap();
+        });
+    }
+
+    #[test]
     fn toolbar_symbols_pick_tools_and_toggle_zones() {
         let (w, _) = one_event_window();
         let mut h = window_harness(w);
