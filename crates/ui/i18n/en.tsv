@@ -910,3 +910,4 @@ Aktualisiere über die Paketverwaltung oder lade es von der Release-Seite.	Updat
 Release-Seite	Release page
 Später	Later
 Neustart nicht möglich: {e}	Cannot restart: {e}
+{taste} war doppelt belegt; sie gilt jetzt nur für „{befehl}“, nicht mehr für „{anderer}“	{taste} was bound twice; it now works only for “{befehl}”, no longer for “{anderer}”
