@@ -970,7 +970,45 @@ impl Keymap {
             m.name = e.name.chars().take(MAX_NAME).collect();
             fill_steps(m, e.steps.iter().map(String::as_str), &wo, &mut problems);
         }
+        map.resolve_clashes(&mut problems);
         Ok((map, problems))
+    }
+
+    /// Eine Taste, die eine geladene Datei einem zweiten Befehl gibt, gilt nur für einen: den,
+    /// den die Datei ausdrücklich belegt (sonst den ersten im Katalog); die anderen verlieren
+    /// sie, und das wird gemeldet. Im Dialog verhindert [`Self::assign`] solche Doppelungen.
+    fn resolve_clashes(&mut self, problems: &mut Vec<String>) {
+        let explicit =
+            |m: &Self, cmd: Cmd| info(cmd).is_some_and(|i| m.inner.overrides().get(i.id).is_some());
+        let all = self.all();
+        let mut winners: Vec<(KeyboardShortcut, Cmd)> = Vec::new();
+        for &(k, c) in &all {
+            match winners.iter_mut().find(|(w, _)| *w == k) {
+                None => winners.push((k, c)),
+                Some(w) if !explicit(self, w.1) && explicit(self, c) => w.1 = c,
+                Some(_) => {}
+            }
+        }
+        for (k, c) in all {
+            let Some(&(_, winner)) = winners.iter().find(|(w, _)| *w == k) else {
+                continue;
+            };
+            if winner == c {
+                continue;
+            }
+            let rest: Vec<KeyboardShortcut> =
+                self.bindings(c).into_iter().filter(|b| *b != k).collect();
+            self.set(c, rest);
+            let name = |c: Cmd| info(c).map_or("?", |i| tr(i.name));
+            problems.push(crate::i18n::trf(
+                "{taste} war doppelt belegt; sie gilt jetzt nur für „{befehl}“, nicht mehr für „{anderer}“",
+                &[
+                    ("taste", &display_key(k)),
+                    ("befehl", &name(winner)),
+                    ("anderer", &name(c)),
+                ],
+            ));
+        }
     }
 
     /// Liest eine Makrozeile (`macro.N.name` oder `macro.N.steps`); `None`, wenn es keine ist.
@@ -1054,6 +1092,7 @@ impl Keymap {
             }
             map.set(c.cmd, b);
         }
+        map.resolve_clashes(&mut problems);
         (map, problems)
     }
 
@@ -1603,6 +1642,88 @@ mod tests {
         }
     }
 
+    /// A file that gives a key to a second command: the key works for the command the file
+    /// names, the other one loses it, and the loading reports it (found by the fuzz test).
+    #[test]
+    fn a_key_given_twice_by_a_file_belongs_to_one_command() {
+        let solo = Keymap::default().bindings(Cmd::Edit(EditCommand::Solo));
+        let Some(&key) = solo.first() else {
+            panic!("Solo has a default key");
+        };
+        let name = format_key(key);
+        let json = serde_json::json!({
+            "shortcuts": [{"command": "nav.zoom_in", "keys": [name]}],
+        })
+        .to_string();
+        let legacy = format!("nav.zoom_in = {name}\n");
+        for (map, problems) in [
+            Keymap::from_json(&json).unwrap_or_default(),
+            Keymap::from_legacy_text(&legacy),
+        ] {
+            assert!(map.bindings(Cmd::ZoomIn).contains(&key));
+            assert!(!map.bindings(Cmd::Edit(EditCommand::Solo)).contains(&key));
+            assert_eq!(problems.len(), 1, "{problems:?}");
+            let keys = map.all();
+            assert_eq!(keys.iter().filter(|(k, _)| *k == key).count(), 1);
+        }
+    }
+
+    /// A key map file changed at random loads or is refused, never panics; what loads binds
+    /// each key once, keeps macros in their limits and saves and loads again unchanged.
+    #[test]
+    fn fuzzed_key_map_files() {
+        use crate::fuzzkit::{Case, Rng, cases, mutate_bytes};
+        let mut map = Keymap::default();
+        let _ = map.assign(Cmd::Macro(2), k(CA, Key::M));
+        let _ = map.assign(Cmd::ZoomIn, k(CA, Key::Z));
+        if let Some(m) = map.macro_slot_mut(2) {
+            m.name = "Kopieren und schieben".into();
+            m.steps = vec![Cmd::Edit(EditCommand::Duplicate), Cmd::ZoomIn];
+        }
+        let seed_doc: serde_json::Value = map
+            .to_json()
+            .ok()
+            .and_then(|t| serde_json::from_str(&t).ok())
+            .unwrap_or_default();
+        let mut loaded = 0;
+        let all = cases(0x6e7, 1500);
+        let n = all.len();
+        for seed in all {
+            let _case = Case("key-map", seed);
+            let mut rng = Rng(seed | 1);
+            let mut doc = seed_doc.clone();
+            for _ in 0..1 + rng.below(3) {
+                crate::fuzzjson::mutate_json(&mut rng, &mut doc);
+            }
+            let mut bytes = serde_json::to_vec(&doc).unwrap_or_default();
+            if rng.below(4) == 0 {
+                mutate_bytes(&mut rng, &mut bytes);
+            }
+            let text = String::from_utf8_lossy(&bytes);
+            // The older text format reads the same bytes.
+            let _ = Keymap::from_preset(&text);
+            let Ok((map, _)) = Keymap::from_json(&text) else {
+                continue;
+            };
+            loaded += 1;
+            let keys = map.all();
+            for (i, (a, ca)) in keys.iter().enumerate() {
+                for (b, cb) in &keys[i + 1..] {
+                    assert!(a != b, "{} is bound to {ca:?} and {cb:?}", format_key(*a));
+                }
+            }
+            for slot in 0..=20 {
+                if let Some(m) = map.macro_slot(slot) {
+                    assert!(m.steps.len() <= MAX_STEPS && m.name.chars().count() <= MAX_NAME);
+                }
+                let _ = map.macro_label(slot);
+            }
+            let again = map.to_json().ok().and_then(|t| Keymap::from_json(&t).ok());
+            assert_eq!(again.map(|(m, _)| m).as_ref(), Some(&map), "round trip");
+        }
+        assert!(loaded * 10 > n, "only {loaded} of {n} variants loaded");
+    }
+
     #[test]
     fn macros_round_trip_and_hostile_entries_are_reported() {
         let mut map = Keymap::default();
@@ -1679,8 +1800,20 @@ mod tests {
         assert_eq!(Keymap::load_from(&dir), (Keymap::default(), Vec::new()));
         std::fs::write(dir.join("keys.txt"), "transport.metronome = J\n").unwrap();
         let (map, problems) = Keymap::load_from(&dir);
-        assert!(problems.is_empty(), "{problems:?}");
+        // J was Snap's key: it moves to the metronome, and that is said once.
+        assert_eq!(problems.len(), 1, "{problems:?}");
         assert_eq!(map.bindings(Cmd::Metronome), [k(N, Key::J)]);
+        assert_eq!(
+            map.all()
+                .iter()
+                .filter(|(key, _)| *key == k(N, Key::J))
+                .count(),
+            1
+        );
+        assert!(
+            Keymap::load_from(&dir).1.is_empty(),
+            "keys.json holds the move"
+        );
         assert!(dir.join("keys.json").exists(), "migrated");
         assert!(dir.join("keys.txt").exists(), "the old file stays");
         // From now on keys.json wins.

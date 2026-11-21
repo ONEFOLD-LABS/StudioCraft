@@ -34,6 +34,12 @@ mod file_dialog;
 mod focus;
 mod folders_ui;
 mod freeze;
+#[cfg(test)]
+#[path = "../../project/tests/fuzzkit/json.rs"]
+mod fuzzjson;
+#[cfg(test)]
+#[path = "../../project/tests/fuzzkit/mod.rs"]
+mod fuzzkit;
 pub mod i18n;
 mod icons;
 mod infoline;
