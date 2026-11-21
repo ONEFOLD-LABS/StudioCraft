@@ -139,6 +139,14 @@ impl PluginInstance {
         }
     }
 
+    /// Offline rendering (export, clip processing): a plugin in its own process then waits for
+    /// each block instead of running one behind. No effect on other instances.
+    pub fn set_offline(&mut self, offline: bool) {
+        if let Self::Bridged(i) = self {
+            i.set_offline(offline);
+        }
+    }
+
     pub fn stop_processing(&mut self) {
         match self {
             Self::Clap(i) => i.stop_processing(),

@@ -161,8 +161,13 @@ impl ProjectWindow {
                 continue;
             }
             let mut chain = InsertChain::default();
+            // Faster than real time: plugins in their own process wait for every block.
+            let offline = |mut i: studiocraft_plugin_host::PluginInstance| {
+                i.set_offline(true);
+                i
+            };
             if let Some(slot) = pt.instrument.as_ref().filter(|s| !s.bypass) {
-                match self.instantiate(slot) {
+                match self.instantiate(slot).map(offline) {
                     Ok(instance) => {
                         chain.instrument = Some(Insert {
                             instance,
@@ -174,7 +179,7 @@ impl ProjectWindow {
                 }
             }
             for (k, slot) in pt.inserts.iter().enumerate().filter(|(_, s)| !s.bypass) {
-                match self.instantiate(slot) {
+                match self.instantiate(slot).map(offline) {
                     Ok(instance) => chain.slots.push(Insert {
                         instance,
                         bypass: false,
