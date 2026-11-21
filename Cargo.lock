@@ -3821,7 +3821,7 @@ checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
 
 [[package]]
 name = "studiocraft"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "eframe",
  "objc2 0.6.5",
@@ -3840,7 +3840,7 @@ dependencies = [
 
 [[package]]
 name = "studiocraft-assistant"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "egui",
  "egui_kittest",
@@ -3855,7 +3855,7 @@ dependencies = [
 
 [[package]]
 name = "studiocraft-automation"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "craft-control",
  "craft-mcp-server",
@@ -3868,7 +3868,7 @@ dependencies = [
 
 [[package]]
 name = "studiocraft-cli"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "studiocraft-automation",
  "studiocraft-engine",
@@ -3877,7 +3877,7 @@ dependencies = [
 
 [[package]]
 name = "studiocraft-engine"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "cpal",
  "craft-audio",
@@ -3892,11 +3892,11 @@ dependencies = [
 
 [[package]]
 name = "studiocraft-graph"
-version = "0.7.0"
+version = "0.8.0"
 
 [[package]]
 name = "studiocraft-plugin-host"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "clap-sys",
  "libc",
@@ -3910,7 +3910,7 @@ dependencies = [
 
 [[package]]
 name = "studiocraft-project"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -3918,7 +3918,7 @@ dependencies = [
 
 [[package]]
 name = "studiocraft-ui"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "base64",
  "craft-window",
@@ -3943,7 +3943,7 @@ dependencies = [
 
 [[package]]
 name = "studiocraft-web"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "eframe",
  "egui",
@@ -5485,7 +5485,7 @@ checksum = "e450f9b2ed1dff33c94c12589a87338689467b9c4f5d8a5710bd09a847d2c8a7"
 
 [[package]]
 name = "xtask"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "serde_json",
 ]
