@@ -64,6 +64,7 @@ mod session;
 pub mod settings;
 mod shortcuts;
 mod snap;
+mod sponsor;
 mod stems;
 mod tempo_ui;
 pub mod theme;
@@ -4415,6 +4416,20 @@ mod tests {
             h.query_by_label_contains("StudioCraft – third-party licences")
                 .is_some()
         );
+    }
+
+    #[test]
+    fn the_help_menu_opens_the_donation_page() {
+        let (w, _) = one_event_window();
+        let mut h = window_harness(w);
+        h.get_by_label("Hilfe").click();
+        h.run_steps(2);
+        h.get_by_label("StudioCraft unterstützen …").click();
+        h.step();
+        let opened = h.output().platform_output.commands.iter().any(
+            |c| matches!(c, egui::OutputCommand::OpenUrl(u) if u.url == sponsor::URL && u.new_tab),
+        );
+        assert!(opened, "the donation page was not opened");
     }
 
     #[test]
