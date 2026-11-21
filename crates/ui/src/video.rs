@@ -996,6 +996,49 @@ pub(crate) mod tests {
         mux.finish().unwrap().into_inner()
     }
 
+    /// Video files are foreign input: a real WebM changed at random byte by byte is read or
+    /// refused, never crashes, and what reads gives sane sizes and frames.
+    #[test]
+    fn fuzzed_video_files() {
+        use crate::fuzzkit::{Case, Rng, cases, mutate_bytes};
+        let seed_file = webm(25);
+        assert!(probe(&seed_file).is_ok(), "the seed is a good video");
+        let mut opened = 0;
+        let all = cases(0x71d, 80);
+        let n = all.len();
+        for seed in all {
+            let _case = Case("video-file", seed);
+            let mut rng = Rng(seed | 1);
+            let mut bytes = seed_file.clone();
+            for _ in 0..1 + rng.below(4) {
+                mutate_bytes(&mut rng, &mut bytes);
+            }
+            if let Ok(info) = probe(&bytes) {
+                assert!(
+                    info.seconds.is_finite() && info.seconds >= 0.0,
+                    "{}",
+                    info.seconds
+                );
+            }
+            if let Ok(thumbs) = thumbnails(&bytes) {
+                for t in &thumbs {
+                    assert!(t.seconds.is_finite());
+                    assert_eq!(t.image.pixels.len(), t.image.size[0] * t.image.size[1]);
+                }
+            }
+            if let Ok(mut p) = Player::open(bytes) {
+                opened += 1;
+                for t in [0.0, 0.35, 2.0, 1.0, -3.0, 1e9, f64::NAN] {
+                    if let Some((at, f)) = p.frame_at(t) {
+                        assert!(at.is_finite());
+                        let _ = fitted(f, VIEW_W, VIEW_H);
+                    }
+                }
+            }
+        }
+        assert!(opened * 10 > n, "only {opened} of {n} variants opened");
+    }
+
     #[test]
     fn a_webm_video_gives_its_length_and_one_thumbnail_per_second() {
         let bytes = webm(30);
