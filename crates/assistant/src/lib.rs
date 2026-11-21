@@ -24,6 +24,9 @@
 
 pub mod client;
 mod conversation;
+#[cfg(test)]
+#[path = "../../project/tests/fuzzkit/mod.rs"]
+mod fuzzkit;
 mod settings;
 
 use std::sync::mpsc::{Receiver, TryRecvError, channel};
