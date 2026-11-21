@@ -6,27 +6,26 @@
 //! werden nur die sichtbaren Systeme gezeichnet; der Satz selbst wird nur neu berechnet, wenn
 //! sich Part, Tonart, Taktarten oder Quantisierung ändern.
 
-use egui::{
-    Color32, FontFamily, FontId, Painter, Pos2, Rect, Sense, Shape, Stroke, Ui, Vec2, pos2,
-};
+use egui::{Color32, FontFamily, FontId, Pos2, Rect, Sense, Shape, Stroke, Ui, Vec2, pos2};
 use studiocraft_project::{
     EventId, KeySignature, Note, SCORE_QUANTIZE, TICKS_PER_QUARTER, TempoMap,
 };
 
+use super::canvas::Canvas;
 use super::notation::{self, Accidental, Base, Clef, Item, Kind, Score};
 use crate::ProjectWindow;
 use crate::i18n::{tr, trf};
 
 /// Name der Schriftfamilie in egui.
-const FAMILY: &str = "Leland";
-static FONT: &[u8] = include_bytes!("../../../../assets/fonts/leland/Leland.otf");
+pub(crate) const FAMILY: &str = "Leland";
+pub(crate) static FONT: &[u8] = include_bytes!("../../../../assets/fonts/leland/Leland.otf");
 
 /// Größe eines Zwischenraums in Punkten.
-const SP: f32 = 8.0;
+pub(crate) const SP: f32 = 8.0;
 /// Abstand der Notensysteme eines Klaviersystems (Oberkante zu Oberkante) in `sp`.
 const STAFF_GAP: f32 = 11.0;
 /// Rand über und unter einem System für Hilfslinien in `sp`.
-const PAD: f32 = 7.0;
+pub(crate) const PAD: f32 = 7.0;
 
 // SMuFL-Zeichen (Standard Music Font Layout).
 const G_CLEF: char = '\u{E050}';
@@ -56,6 +55,8 @@ pub(crate) struct ScoreView {
     drag: Option<Drag>,
     /// Lage von Notenköpfen und Takten aus dem letzten Bild (Bedienung, Tests).
     pub(crate) last: Frame,
+    /// Dialog „Noten exportieren“.
+    pub(crate) export: super::export::ExportDialog,
 }
 
 impl Default for ScoreView {
@@ -67,6 +68,7 @@ impl Default for ScoreView {
             dotted: false,
             drag: None,
             last: Frame::default(),
+            export: super::export::ExportDialog::default(),
         }
     }
 }
@@ -115,25 +117,8 @@ fn install_font(ctx: &egui::Context) {
 }
 
 /// Zeichen der Notenschrift mit der Grundlinie bei `at` (links).
-fn glyph(p: &Painter, ch: char, at: Pos2, size: f32, color: Color32) -> f32 {
-    let galley = p.layout_no_wrap(
-        ch.to_string(),
-        FontId::new(size, FontFamily::Name(FAMILY.into())),
-        color,
-    );
-    let (baseline, width) = galley
-        .rows
-        .first()
-        .map(|r| {
-            let g = r.row.glyphs.first();
-            (
-                r.pos.y + g.map_or(0.0, |g| g.pos.y),
-                g.map_or(0.0, |g| g.advance_width),
-            )
-        })
-        .unwrap_or((0.0, 0.0));
-    p.galley(at - Vec2::new(0.0, baseline), galley, color);
-    width
+fn glyph(p: &dyn Canvas, ch: char, at: Pos2, size: f32, color: Color32) -> f32 {
+    p.glyph(ch, at, size, color)
 }
 
 /// Platz eines Takts: Spalten je Einsatz (über alle Systeme), Breite in `sp`.
@@ -180,7 +165,7 @@ fn columns(bar: &notation::Bar) -> Columns {
 }
 
 /// Ein System (eine Zeile): welche Takte, mit welchem x-Anfang je Takt.
-struct System {
+pub(crate) struct System {
     bars: Vec<(usize, f32, Columns)>,
     header: f32,
 }
@@ -192,7 +177,7 @@ fn header_width(key: KeySignature, time: bool, grand: bool) -> f32 {
     brace + 4.0 + key_w + if time { 3.0 } else { 0.5 }
 }
 
-fn break_systems(score: &Score, width_sp: f32) -> Vec<System> {
+pub(crate) fn break_systems(score: &Score, width_sp: f32) -> Vec<System> {
     let grand = score.clefs.len() == 2;
     let mut systems: Vec<System> = Vec::new();
     let mut cur: Option<System> = None;
@@ -226,7 +211,7 @@ fn break_systems(score: &Score, width_sp: f32) -> Vec<System> {
 }
 
 /// Höhe eines Systems in `sp`.
-fn system_height(staves: usize) -> f32 {
+pub(crate) fn system_height(staves: usize) -> f32 {
     PAD + (staves.saturating_sub(1)) as f32 * STAFF_GAP + 4.0 + PAD
 }
 
@@ -454,6 +439,10 @@ pub(crate) fn show(w: &mut ProjectWindow, ui: &mut Ui) {
         }
         ui.separator();
         ui.toggle_value(&mut w.follow_playback, tr("Folgen (F)"));
+        ui.separator();
+        if ui.button(tr("Exportieren …")).clicked() {
+            w.open_score_export();
+        }
     });
     let any = !w.key_editor.selection.is_empty();
     ui.horizontal(|ui| {
@@ -655,8 +644,8 @@ fn interact(
     }
 }
 
-struct Colors {
-    ink: Color32,
+pub(crate) struct Colors {
+    pub(crate) ink: Color32,
     line: Color32,
     playhead: Color32,
     weak: Color32,
@@ -718,6 +707,17 @@ impl BarHit {
 }
 
 impl Colors {
+    /// Für den Druck: schwarz auf weiß, ohne Cursor.
+    pub(crate) fn print() -> Self {
+        Self {
+            ink: Color32::BLACK,
+            line: Color32::BLACK,
+            playhead: Color32::TRANSPARENT,
+            weak: Color32::from_gray(90),
+            selected: Color32::BLACK,
+        }
+    }
+
     fn of(ctx: &egui::Context) -> Self {
         let t = crate::theme::tokens(ctx);
         Self {
@@ -738,8 +738,8 @@ fn y_of(top: f32, pos: i32) -> f32 {
 /// Zeichnet ein System (wenn `visible`) und gibt die x-Lage des Cursors zurück, falls er darin
 /// liegt.
 #[allow(clippy::too_many_arguments)]
-fn draw_system(
-    p: &Painter,
+pub(crate) fn draw_system(
+    p: &dyn Canvas,
     score: &Score,
     sys: &System,
     origin: Pos2,
@@ -898,7 +898,7 @@ fn draw_system(
 }
 
 fn time_sig(
-    p: &Painter,
+    p: &dyn Canvas,
     sig: studiocraft_project::TimeSignature,
     x: f32,
     top: f32,
@@ -926,7 +926,7 @@ type Stem = (f32, f32, f32, bool, u8, Option<u32>);
 /// Noten, Pausen, Hälse, Fähnchen, Balken und Punkte eines Takts in einem Notensystem.
 #[allow(clippy::too_many_arguments)]
 fn draw_items(
-    p: &Painter,
+    p: &dyn Canvas,
     items: &[Item],
     top: f32,
     bx: f32,
@@ -1125,7 +1125,7 @@ fn draw_items(
 }
 
 /// Hilfslinien über und unter dem System.
-fn ledger(p: &Painter, x: f32, hw: f32, top: f32, pos: i32, color: Color32) {
+fn ledger(p: &dyn Canvas, x: f32, hw: f32, top: f32, pos: i32, color: Color32) {
     let stroke = Stroke::new(0.16 * SP, color);
     let ext = 0.33 * SP;
     let draw = |q: i32| {
@@ -1144,7 +1144,7 @@ fn ledger(p: &Painter, x: f32, hw: f32, top: f32, pos: i32, color: Color32) {
 }
 
 /// Haltebögen: vom Kopf mit Bogen zum nächsten Kopf gleicher Tonhöhe desselben Notensystems.
-fn draw_ties(p: &Painter, heads: &[(Pos2, bool, u8, usize)], right: f32, ink: Color32) {
+fn draw_ties(p: &dyn Canvas, heads: &[(Pos2, bool, u8, usize)], right: f32, ink: Color32) {
     for (k, &(from, up, pitch, staff)) in heads.iter().enumerate() {
         if staff >= usize::MAX / 2 {
             continue;
@@ -1160,11 +1160,14 @@ fn draw_ties(p: &Painter, heads: &[(Pos2, bool, u8, usize)], right: f32, ink: Co
         let bend = dir * (0.8 * SP).min((b.x - a.x) * 0.25);
         let c1 = pos2(a.x + (b.x - a.x) * 0.25, y + bend);
         let c2 = pos2(a.x + (b.x - a.x) * 0.75, y + bend);
-        p.add(egui::epaint::CubicBezierShape::from_points_stroke(
-            [a, c1, c2, b],
-            false,
-            Color32::TRANSPARENT,
-            Stroke::new(0.18 * SP, ink),
-        ));
+        p.add(
+            egui::epaint::CubicBezierShape::from_points_stroke(
+                [a, c1, c2, b],
+                false,
+                Color32::TRANSPARENT,
+                Stroke::new(0.18 * SP, ink),
+            )
+            .into(),
+        );
     }
 }
