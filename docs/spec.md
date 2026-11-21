@@ -40,7 +40,7 @@ Ein Projekt besteht aus Spuren, auf denen Events liegen; Audio-Events verweisen 
 | Pool | Liste aller Audio-Dateien und Clips des Projekts | Clips sind unveränderliche Referenzen auf Dateien |
 | Audio-Clip | Datei plus optionaler Bearbeitungsverlauf (Offline-Effekte) | Destruktive Effekte erzeugen neue Dateien |
 | Audio-Event | Ausschnitt eines Clips auf einer Spur: Start, Offset, Länge, Fades, Lautstärke | Nicht-destruktiv |
-| Audio-Part | Container, der mehrere Audio-Events gruppiert | Optional, nach MVP |
+| Audio-Part | Container, der mehrere Audio-Events gruppiert | Events relativ zum Part-Start (seit 0.9) |
 | MIDI-Part | Container für Noten und Controller-Daten | Noten relativ zum Part-Start |
 | Spur | Zeile im Projektfenster; Typ bestimmt Inhalt und Kanal | Siehe Spurtypen |
 | Kanal | Mixer-Gegenstück einer Spur mit Inserts, Sends, Fader | Eine Audio-Spur hat genau einen Kanal |
@@ -51,6 +51,8 @@ Ein Projekt besteht aus Spuren, auf denen Events liegen; Audio-Events verweisen 
 | Marker | Benannte Position oder Bereich (Cycle-Marker) | Eigene Marker-Spur |
 
 **Zeitbasis:** Jede Spur ist entweder musikalisch (Events hängen an Takten, Tempoänderungen verschieben sie) oder linear (Events hängen an Sekunden). Standard ist musikalisch für MIDI und linear für Audio. Einzelne Audio-Events können dem Projekttempo folgen (Info-Zeile „Folgt dem Tempo“ mit dem Tempo der Datei, vorbelegt aus einer BPM-Angabe im Dateinamen): sie hängen dann an Takten wie MIDI, und ihr Inhalt wird so gedehnt, dass eine Viertel der Datei eine Viertel im Projekt dauert – auch entlang der Tempospur; die Tonhöhe bleibt.
+
+**Audio-Part (seit 0.9):** Bearbeiten → „Audio-Part bilden“ fasst gewählte Audio-Events einer Audiospur zu einem Part zusammen, „Audio-Part auflösen“ legt sie wieder einzeln auf die Spur (an derselben Stelle, auf den Part zugeschnitten). Der Part wird wie ein Event verschoben, kopiert, ausgeschnitten, stummgeschaltet, mit Fades und Lautstärke versehen und am Rand gekürzt; seine Events bleiben dabei an ihrer Stelle im Projekt. Was hinter dem Part-Ende liegt, ist nur ausgeblendet; rückt der Part-Anfang über den Anfang eines Events, wird dessen Kopf abgeschnitten. Teilen schneidet die Events am Schnitt mit; Kleben und Strecken gelten nicht für Audio-Parts. Wiedergabe und Export spielen die Events des Parts mit Mute, Lautstärke und Fades des Parts. Die Event-Anzeige zeigt ihre Wellenformen im Part.
 
 **Undo:** Jede Bearbeitung ist ein Befehl im Undo-Verlauf. Der Verlauf ist unbegrenzt konfigurierbar und wird mit dem Projekt nicht gespeichert.
 

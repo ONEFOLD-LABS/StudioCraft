@@ -16,6 +16,7 @@
     )
 )]
 
+pub mod audio_parts;
 pub mod automation;
 pub mod click;
 pub mod controllers;

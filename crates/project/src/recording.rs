@@ -201,7 +201,13 @@ impl Project {
                     .events
                     .iter()
                     .rev()
-                    .find(|e| !e.muted && e.clip.is_none() && e.start.0 < b && e.end() > a)
+                    .find(|e| {
+                        !e.muted
+                            && e.clip.is_none()
+                            && !e.is_audio_part()
+                            && e.start.0 < b
+                            && e.end() > a
+                    })
                     .map(|e| e.id);
                 let Some(id) = target else {
                     return self

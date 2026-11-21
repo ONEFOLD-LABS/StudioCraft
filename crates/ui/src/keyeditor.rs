@@ -198,7 +198,11 @@ impl ProjectWindow {
         let parts: Vec<EventId> = ids
             .iter()
             .copied()
-            .filter(|&id| self.project.event(id).is_some_and(|e| e.clip.is_none()))
+            .filter(|&id| {
+                self.project
+                    .event(id)
+                    .is_some_and(|e| e.clip.is_none() && !e.is_audio_part())
+            })
             .collect();
         let Some(&first) = parts.first() else {
             return;

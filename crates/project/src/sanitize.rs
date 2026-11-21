@@ -289,6 +289,42 @@ impl Project {
                         clamp!(c.kind, crate::CtrlKind::Cc(n.min(127)));
                     }
                 }
+                // Audio-Part: nur Audio-Events mit vorhandenem Clip, ohne eigene Kinder,
+                // begrenzte Anzahl; ihre Werte wie oben.
+                let pool_len = self.pool.len();
+                let before = e.children.len();
+                e.children.truncate(crate::audio_parts::MAX_PART_EVENTS);
+                e.children
+                    .retain(|c| c.clip.is_some_and(|id| (id as usize) < pool_len));
+                fix(e.children.len() != before);
+                for c in &mut e.children {
+                    clamp!(c.children, Vec::new());
+                    clamp!(c.start.0, c.start.0.min(MAX_TICKS));
+                    clamp!(c.length, c.length.clamp(1, MAX_TICKS));
+                    clamp!(c.offset, c.offset.min(MAX_FRAMES));
+                    clamp!(c.fade_in, c.fade_in.min(c.length));
+                    let rest = c.length - c.fade_in;
+                    clamp!(c.fade_out, c.fade_out.min(rest));
+                    clamp!(
+                        c.gain_db,
+                        finite_f32(c.gain_db, (MIN_DB, crate::EVENT_MAX_DB), 0.0)
+                    );
+                    clamp!(
+                        c.musical,
+                        c.musical
+                            .filter(|b| b.is_finite())
+                            .map(|b| b.clamp(BPM.0, BPM.1))
+                    );
+                    let mut warp = c.warp.clone();
+                    crate::warp::clean(&mut warp);
+                    clamp!(c.warp, warp);
+                    clamp!(c.notes, Vec::new());
+                    clamp!(c.controllers, Vec::new());
+                }
+                // Ein Part hat keinen eigenen Clip.
+                if e.is_audio_part() {
+                    clamp!(e.clip, None);
+                }
             }
         }
         fixed += usize::from(self.sanitize_derived());
