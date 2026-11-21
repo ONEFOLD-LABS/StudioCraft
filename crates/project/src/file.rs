@@ -197,6 +197,23 @@ mod tests {
         let _ = to_json(&p);
     }
 
+    /// Saving and loading does not change any number: a tempo from a MIDI file keeps all its
+    /// digits instead of drifting a little with every save (found by tests/fuzz.rs).
+    #[test]
+    fn numbers_survive_save_and_load_exactly() {
+        let mut p = Project::default();
+        for bpm in [
+            f64::from_bits(4_638_144_632_461_327_470),
+            119.999_520_001_92,
+            120.1 + 0.2,
+            133.333_333_333_333_33,
+        ] {
+            p.tempo.bpm = bpm;
+            let back = from_json(&to_json(&p)).unwrap();
+            assert_eq!(back.tempo.bpm.to_bits(), bpm.to_bits(), "{bpm}");
+        }
+    }
+
     #[test]
     fn hostile_numbers_and_truncated_files_load_safely() {
         let json = to_json(&rich_project());
