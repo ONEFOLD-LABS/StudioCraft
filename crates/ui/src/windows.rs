@@ -79,6 +79,11 @@ impl ProjectWindow {
             return;
         };
         let (id, audio) = (ev.id, ev.clip.is_some());
+        // Audio-Parts haben ihren Editor in der unteren Zone.
+        if ev.is_audio_part() {
+            self.open_audio_part_editor(id);
+            return;
+        }
         let kind = if audio {
             self.open_sample_editor(id);
             EditorWindow::Sample
@@ -110,6 +115,7 @@ impl ProjectWindow {
             LowerZone::SampleEditor => self.windows.editor == Some(EditorWindow::Sample),
             LowerZone::List => false,
             LowerZone::Score => self.windows.editor == Some(EditorWindow::Score),
+            LowerZone::AudioPart => false,
         }
     }
 
@@ -194,6 +200,7 @@ impl ProjectWindow {
                 LowerZone::SampleEditor => crate::sampleeditor::show(w, ui),
                 LowerZone::List => crate::listeditor::show(w, ui),
                 LowerZone::Score => crate::score::show(w, ui),
+                LowerZone::AudioPart => crate::audio_part_editor::show(w, ui),
             }
         };
         if class == ViewportClass::EmbeddedWindow {

@@ -17,6 +17,7 @@
 )]
 
 mod about;
+mod audio_part_editor;
 mod audio_parts_ui;
 mod automation_panel;
 mod automation_write;
@@ -294,6 +295,8 @@ pub struct ProjectWindow {
     list_filter: listeditor::ListFilter,
     /// Noten-Editor: Schrift und gemerkter Satz.
     score_view: score::ScoreView,
+    /// Audio-Part im Part-Editor.
+    audio_part: Option<EventId>,
     midi_inputs: Option<studiocraft_engine::midi::MidiInputs>,
     /// Anzeige der MIDI-Eingänge für die Statuszeile.
     midi_status: String,
@@ -340,6 +343,8 @@ pub(crate) enum LowerZone {
     List,
     /// Noten-Editor: der aktive Part als Partitur.
     Score,
+    /// Part-Editor: die Events eines Audio-Parts.
+    AudioPart,
 }
 
 impl ProjectWindow {
@@ -461,6 +466,7 @@ impl ProjectWindow {
             key_editor: keyeditor::KeyEditor::default(),
             list_filter: listeditor::ListFilter::default(),
             score_view: score::ScoreView::default(),
+            audio_part: None,
             midi_inputs: None,
             midi_status: String::new(),
             midi_target_sent: None,
@@ -1117,6 +1123,11 @@ impl ProjectWindow {
                                 LowerZone::Score,
                                 tr("Noten-Editor"),
                             );
+                            ui.selectable_value(
+                                &mut self.lower,
+                                LowerZone::AudioPart,
+                                tr("Part-Editor"),
+                            );
                             if self.lower == LowerZone::Editor
                                 && let Some(ev) =
                                     self.key_editor.part.and_then(|p| self.project.event(p))
@@ -1141,6 +1152,7 @@ impl ProjectWindow {
                                 LowerZone::SampleEditor => sampleeditor::show(self, ui),
                                 LowerZone::List => listeditor::show(self, ui),
                                 LowerZone::Score => score::show(self, ui),
+                                LowerZone::AudioPart => audio_part_editor::show(self, ui),
                             }
                         });
                     });
@@ -4742,6 +4754,59 @@ mod tests {
         assert!(h.state().project.tracks[0].events[0].is_audio_part());
         h.state_mut().undo();
         assert_eq!(h.state().project.tracks[0].events.len(), 2);
+    }
+
+    /// Part-Editor: Doppelklick-Ziel für Audio-Parts; Anfang, Stumm und Löschen ändern die
+    /// Events im Part als Rückgängig-Schritte; ein leerer Part verschwindet.
+    #[test]
+    fn the_part_editor_edits_the_events_of_an_audio_part() {
+        let mut w = ProjectWindow::new(Project::default(), None, "kein Audio (Test)".into());
+        let (a, b) = two_audio_events(&mut w);
+        let part = w.project.group_audio(&[a, b]).unwrap();
+        w.open_audio_part_editor(part);
+        assert_eq!((w.show_lower, w.lower), (true, LowerZone::AudioPart));
+        let mut h = window_harness(w);
+        h.run_steps(2);
+        h.get_by_label("2 Events");
+        // A new start for the second event (as the start field hands it over).
+        assert!(h.query_all_by_label("Anfang").count() >= 2);
+        h.state_mut()
+            .edit_part_child(part, 1, crate::audio_part_editor::PartEdit::Start(10 * 960));
+        let ev = h.state().project.event(part).unwrap().clone();
+        assert_eq!(ev.children[1].start.0, 10 * 960);
+        h.state_mut().undo();
+        assert_eq!(
+            h.state().project.event(part).unwrap().children[1].start.0,
+            6 * 960
+        );
+        // Mute through the checkbox, delete through the button.
+        // The info line has its own "Stumm" first; the part editor's rows follow.
+        let n = h.query_all_by_label("Stumm").count();
+        h.get_all_by_label("Stumm").nth(n - 2).unwrap().click();
+        h.run_steps(2);
+        assert!(h.state().project.event(part).unwrap().children[0].muted);
+        h.get_all_by_label("Löschen").next().unwrap().click();
+        h.run_steps(2);
+        assert_eq!(h.state().project.event(part).unwrap().children.len(), 1);
+        h.get_all_by_label("Löschen").next().unwrap().click();
+        h.run_steps(2);
+        assert!(
+            h.state().project.event(part).is_none(),
+            "an empty part goes"
+        );
+        h.state_mut().undo();
+        assert!(h.state().project.event(part).is_some());
+    }
+
+    #[test]
+    fn renders_the_part_editor() {
+        shot("audio_part_editor", |w| {
+            let (a, b) = two_audio_events(w);
+            let part = w.project.group_audio(&[a, b]).unwrap();
+            w.project.event_mut(part).unwrap().children[1].gain_db = -4.5;
+            w.selection = vec![part];
+            w.open_audio_part_editor(part);
+        });
     }
 
     #[test]

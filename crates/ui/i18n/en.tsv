@@ -857,3 +857,5 @@ Nur Audio-Events einer Audiospur lassen sich zu einem Part zusammenfassen	Only a
 Audio-Part bilden	Make audio part
 Die gewählten Audio-Events einer Spur zu einem Part zusammenfassen	Group the selected audio events of one track into a part
 Audio-Part auflösen	Dissolve audio part
+Einen Audio-Part doppelklicken oder wählen, um seine Events hier zu bearbeiten	Double-click or select an audio part to edit its events here
+Part-Editor	Part editor

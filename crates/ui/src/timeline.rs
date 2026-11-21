@@ -1022,8 +1022,13 @@ fn interact(w: &mut ProjectWindow, ui: &Ui, resp: &egui::Response, g: &Geo) {
         && w.project.tracks[row].kind == TrackKind::Audio
         && let Some(id) = hit_event(w, g, row, p.y, g.ticks(p.x).max(0.0) as u64)
     {
-        // Kein `return`: der Klick wählt das Event wie gewohnt aus.
-        w.open_sample_editor(id);
+        // Kein `return`: der Klick wählt das Event wie gewohnt aus. Audio-Parts öffnen den
+        // Part-Editor.
+        if w.project.event(id).is_some_and(|e| e.is_audio_part()) {
+            w.open_audio_part_editor(id);
+        } else {
+            w.open_sample_editor(id);
+        }
     }
     // Doppelklick auf einen Part öffnet den Key-Editor.
     if resp.double_clicked()
