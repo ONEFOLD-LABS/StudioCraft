@@ -182,6 +182,14 @@ pub struct Event {
     /// musikalische Stelle gehören.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub warp: Vec<crate::WarpPoint>,
+    /// MIDI-Parts: Anzeige-Quantisierung im Noten-Editor in Ticks (nur Darstellung);
+    /// `None`: die Vorgabe ([`crate::DEFAULT_SCORE_QUANTIZE`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub score_quantize: Option<u64>,
+    /// Audio-Part (Issue #184): die Audio-Events darin, Anfang relativ zum Part-Anfang. Ein
+    /// Part hat keinen eigenen Clip; Wiedergabe und Export lösen ihn in diese Events auf.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub children: Vec<Event>,
 }
 
 /// Art des Time-Stretch eines Audio-Events, das dem Tempo folgt.
@@ -376,6 +384,14 @@ pub struct Note {
     pub velocity: u8,
     pub start: i64,
     pub length: u64,
+    /// Schreibweise im Noten-Editor (nur Darstellung): 1 mit Kreuz, −1 mit Be, 0 nach der
+    /// Tonart.
+    #[serde(default, skip_serializing_if = "is_zero_i8")]
+    pub spelling: i8,
+}
+
+fn is_zero_i8(v: &i8) -> bool {
+    *v == 0
 }
 
 impl Note {
@@ -737,6 +753,10 @@ pub struct InsertSlot {
     /// Kompletter Plugin-Zustand (`clap.state`), Base64. Wird beim Speichern erfasst.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub state: Option<String>,
+    /// In einem eigenen Prozess rechnen (Plugin-Bridge, Issue #146): stürzt das Plugin ab,
+    /// verstummt nur dieser Insert. Fehlt in älteren Dateien.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub isolated: bool,
 }
 
 impl InsertSlot {
@@ -747,9 +767,10 @@ impl InsertSlot {
         }
     }
 
-    /// Gleiches Plugin an gleicher Stelle (Parameter und Bypass dürfen abweichen).
+    /// Gleiches Plugin an gleicher Stelle, im selben Prozess (Parameter und Bypass dürfen
+    /// abweichen).
     pub fn same_plugin(&self, other: &Self) -> bool {
-        self.plugin_id == other.plugin_id
+        self.plugin_id == other.plugin_id && self.isolated == other.isolated
     }
 }
 
@@ -971,6 +992,9 @@ pub struct Project {
     /// Gespeicherte Mixer-Ansichten: welche Kanäle sichtbar und welche schmal sind.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub mixer_views: Vec<MixerView>,
+    /// Tonart für den Noten-Editor (Vorzeichen); ändert keine Tonhöhen.
+    #[serde(default, skip_serializing_if = "crate::KeySignature::is_c_major")]
+    pub key: crate::KeySignature,
 }
 
 /// Farben neuer Spuren, reihum; auch die Palette der Farbauswahl.
@@ -1003,6 +1027,7 @@ impl Default for Project {
             layouts: Vec::new(),
             mixer_views: Vec::new(),
             pre_fader_inserts: DEFAULT_PRE_INSERTS,
+            key: crate::KeySignature::C_MAJOR,
         }
     }
 }
@@ -1193,6 +1218,8 @@ impl Project {
                         musical: None,
                         stretch_mode: StretchMode::Standard,
                         warp: Vec::new(),
+                        score_quantize: None,
+                        children: Vec::new(),
                         gain_db: 0.0,
                         fade_in_curve: FadeCurve::Linear,
                         fade_out_curve: FadeCurve::Linear,
@@ -1291,6 +1318,17 @@ impl Project {
             })
             .collect();
         ev.controllers.retain(|c| c.start < cut);
+        // Audio-Part: seine Events werden am Schnitt geteilt.
+        if ev.is_audio_part() {
+            let (l, r) = crate::audio_parts::split_children(
+                &ev.children,
+                cut.unsigned_abs(),
+                &self.pool,
+                &self.tempo,
+            );
+            ev.children = l;
+            right.children = r;
+        }
         // Fade-In bleibt links, Fade-Out wandert nach rechts.
         right.fade_in = 0;
         ev.fade_out = 0;
@@ -1410,6 +1448,8 @@ impl Project {
                 musical: None,
                 stretch_mode: StretchMode::Standard,
                 warp: Vec::new(),
+                score_quantize: None,
+                children: Vec::new(),
                 gain_db: 0.0,
                 fade_in_curve: FadeCurve::Linear,
                 fade_out_curve: FadeCurve::Linear,
@@ -1602,15 +1642,22 @@ impl Project {
         }
         let old_start = ev.start.0;
         let tempo = self.tempo.clone();
+        let pool = std::mem::take(&mut self.pool);
         let Some(ev) = self.event_mut(id) else {
+            self.pool = pool;
             return false;
         };
         if let Some(rate) = rate {
             let delta = start as i64 - old_start as i64;
             ev.offset = ev.shifted_offset(&tempo, rate, delta);
         }
-        // Noten und Controller bleiben an ihrer Stelle im Projekt.
+        // Noten, Controller und die Events eines Audio-Parts bleiben an ihrer Stelle.
         let shift = start as i64 - ev.start.0 as i64;
+        crate::audio_parts::shift_children(&mut ev.children, shift, &pool, &tempo);
+        self.pool = pool;
+        let Some(ev) = self.event_mut(id) else {
+            return false;
+        };
         for n in &mut ev.notes {
             n.start -= shift;
         }
@@ -1665,7 +1712,9 @@ impl Project {
             .and_then(|c| self.pool.get(c as usize))
             .map(|c| c.sample_rate);
         let tempo = self.tempo.clone();
+        let pool = std::mem::take(&mut self.pool);
         let Some(ev) = self.event_mut(id) else {
+            self.pool = pool;
             return false;
         };
         if let Some(rate) = rate {
@@ -1673,6 +1722,11 @@ impl Project {
             ev.offset = ev.shifted_offset(&tempo, rate, delta);
         }
         let shift = end as i64 - old_end as i64;
+        crate::audio_parts::shift_children(&mut ev.children, -shift, &pool, &tempo);
+        self.pool = pool;
+        let Some(ev) = self.event_mut(id) else {
+            return false;
+        };
         for n in &mut ev.notes {
             n.start += shift;
         }
@@ -1692,7 +1746,7 @@ impl Project {
         let Some(ev) = self.event_mut(id) else {
             return false;
         };
-        if ev.clip.is_some() || ev.length == 0 {
+        if ev.clip.is_some() || ev.is_audio_part() || ev.length == 0 {
             return false;
         }
         let new_end = new_end.max(new_start + 1);
@@ -1831,6 +1885,8 @@ impl Project {
                 musical: None,
                 stretch_mode: StretchMode::Standard,
                 warp: Vec::new(),
+                score_quantize: None,
+                children: Vec::new(),
                 gain_db: 0.0,
                 fade_in_curve: FadeCurve::Linear,
                 fade_out_curve: FadeCurve::Linear,
@@ -1888,7 +1944,11 @@ impl Project {
         let f = f64::from(rate) / f64::from(c.sample_rate);
         c.frames = (c.frames as f64 * f).round() as u64;
         c.sample_rate = rate;
+        // Auch die Events in Audio-Parts.
         for ev in self.tracks.iter_mut().flat_map(|t| t.events.iter_mut()) {
+            for c in ev.children.iter_mut().filter(|c| c.clip == Some(clip)) {
+                c.offset = (c.offset as f64 * f).round() as u64;
+            }
             if ev.clip == Some(clip) {
                 ev.offset = (ev.offset as f64 * f).round() as u64;
             }
@@ -1932,6 +1992,8 @@ impl Project {
             musical: None,
             stretch_mode: StretchMode::Standard,
             warp: Vec::new(),
+            score_quantize: None,
+            children: Vec::new(),
             gain_db: 0.0,
             fade_in_curve: FadeCurve::Linear,
             fade_out_curve: FadeCurve::Linear,
@@ -1963,6 +2025,9 @@ impl Project {
             self.event(id).cloned().ok_or("Event fehlt")?,
             self.event(next).cloned().ok_or("Event fehlt")?,
         );
+        if a.is_audio_part() || b.is_audio_part() {
+            return Err("Audio-Parts lassen sich nicht kleben");
+        }
         let midi = a.clip.is_none() && b.clip.is_none();
         if !midi {
             let rate = a
@@ -2095,6 +2160,16 @@ impl Project {
                     let (a1, b1) = (conv_i(a), conv_i(b));
                     n.start = a1.saturating_sub(base1);
                     n.length = u64::try_from(b1.saturating_sub(a1)).unwrap_or(0).max(1);
+                }
+                // Events eines Audio-Parts ebenso (Anfang relativ zum Part).
+                for c in &mut e.children {
+                    let a = s0.saturating_add(c.start.0);
+                    let b = a.saturating_add(c.length);
+                    let (a1, b1) = (conv(a), conv(b));
+                    c.start = Position(a1.saturating_sub(s1));
+                    c.length = b1.saturating_sub(a1).max(1);
+                    c.fade_in = c.fade_in.min(c.length);
+                    c.fade_out = c.fade_out.min(c.length - c.fade_in);
                 }
             }
         }
@@ -2340,6 +2415,7 @@ mod tests {
             velocity: 100,
             start: 480,
             length: 240,
+            spelling: 0,
         });
         // Swap: audio musical, instrument linear.
         p.tracks[a].time_base = Some(TimeBase::Musical);
@@ -2414,12 +2490,14 @@ mod tests {
                 velocity: 100,
                 start: 0,
                 length: TICKS_PER_QUARTER,
+                spelling: 0,
             },
             Note {
                 pitch: 62,
                 velocity: 100,
                 start: 2 * TICKS_PER_QUARTER as i64,
                 length: TICKS_PER_QUARTER,
+                spelling: 0,
             },
         ];
         (p, id)
@@ -2905,6 +2983,7 @@ mod tests {
                 velocity: 100,
                 start: (i as u64 * q) as i64,
                 length: q,
+                spelling: 0,
             });
         }
         // Anfang eine Viertel nach rechts: die Noten bleiben an ihrem Platz.
@@ -3071,12 +3150,14 @@ mod tests {
             velocity: 100,
             start: 0,
             length: q,
+            spelling: 0,
         });
         p.event_mut(b).unwrap().notes.push(Note {
             pitch: 64,
             velocity: 100,
             start: 0,
             length: q,
+            spelling: 0,
         });
         assert_eq!(p.glue(a), Ok(a));
         let ev = p.event(a).unwrap();

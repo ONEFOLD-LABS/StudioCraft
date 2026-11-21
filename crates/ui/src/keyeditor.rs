@@ -198,7 +198,11 @@ impl ProjectWindow {
         let parts: Vec<EventId> = ids
             .iter()
             .copied()
-            .filter(|&id| self.project.event(id).is_some_and(|e| e.clip.is_none()))
+            .filter(|&id| {
+                self.project
+                    .event(id)
+                    .is_some_and(|e| e.clip.is_none() && !e.is_audio_part())
+            })
             .collect();
         let Some(&first) = parts.first() else {
             return;
@@ -659,6 +663,7 @@ fn interact(
                         velocity: 100,
                         start,
                         length: len,
+                        spelling: 0,
                     });
                     let i = ev.notes.len() - 1;
                     w.key_editor.selection = vec![i];
@@ -789,6 +794,7 @@ fn interact(
                         velocity: 100,
                         start,
                         length: len,
+                        spelling: 0,
                     })
                 });
                 if let Some(ev) = w.project.event(part) {
@@ -823,7 +829,7 @@ fn paint_grid(w: &ProjectWindow, p: &Painter, g: &KGeo, part_start: u64, part_en
             pos2(g.grid.right(), y + g.view.key_h),
         );
         if is_black(pitch) {
-            p.rect_filled(row, 0.0, Color32::from_black_alpha(60));
+            p.rect_filled(row, 0.0, crate::theme::tokens(p.ctx()).key_black_row);
         }
         let s = if pitch % 12 == 0 {
             Stroke::new(1.0, v.widgets.noninteractive.bg_stroke.color)
@@ -837,12 +843,12 @@ fn paint_grid(w: &ProjectWindow, p: &Painter, g: &KGeo, part_start: u64, part_en
     p.rect_filled(
         Rect::from_x_y_ranges(g.grid.left()..=a, g.grid.y_range()),
         0.0,
-        Color32::from_black_alpha(90),
+        crate::theme::tokens(p.ctx()).outside_part,
     );
     p.rect_filled(
         Rect::from_x_y_ranges(b..=g.grid.right(), g.grid.y_range()),
         0.0,
-        Color32::from_black_alpha(90),
+        crate::theme::tokens(p.ctx()).outside_part,
     );
     // Feines Snap-Raster, darüber Zählzeit- und Taktlinien.
     let beat = w.beat_ticks().max(1);

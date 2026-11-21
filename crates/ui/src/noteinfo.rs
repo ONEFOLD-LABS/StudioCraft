@@ -74,7 +74,7 @@ impl ProjectWindow {
         if multi {
             let t = crate::theme::tokens(ui.ctx());
             ui.label(
-                RichText::new(crate::i18n::trf("{n} Noten", &[("n", &sel.len())])).color(t.solo),
+                RichText::new(crate::i18n::trf("{n} Noten", &[("n", &sel.len())])).color(t.warning),
             )
             .on_hover_text(tr(
                 "Werte der ersten Note; Änderungen wirken relativ auf alle",

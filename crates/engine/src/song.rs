@@ -272,9 +272,12 @@ impl Song {
             .map(|(slot, t)| {
                 // Auf einer Audiospur klingt bei Überlappung nur das oberste Event
                 // (höchster Comp-Rang, sonst das spätere in der Liste). Verdeckte Teile fallen weg.
-                let audible = t.audible_spans();
+                // Audio-Parts klingen als ihre Events (Issue #184).
+                let flat = project.flattened_track(slot);
+                let audio_track: &studiocraft_project::Track = flat.as_deref().unwrap_or(t);
+                let audible = audio_track.audible_spans();
                 let mut events = Vec::new();
-                for (e, parts) in t.events.iter().zip(&audible) {
+                for (e, parts) in audio_track.events.iter().zip(&audible) {
                     let Some(samples) = e.clip.and_then(|c| clips.get(&c)) else {
                         continue;
                     };
@@ -790,6 +793,7 @@ mod tests {
             bypass: false,
             params: Vec::new(),
             state: None,
+            isolated: false,
         });
         let song = Song::build(&p, &HashMap::new(), 48_000);
         let track = song.tracks.iter().find(|tr| tr.slot == t).unwrap();
@@ -1113,6 +1117,43 @@ mod tests {
     }
 
     #[test]
+    fn an_audio_part_plays_its_events_like_the_loose_ones() {
+        let mut p = Project::default();
+        p.add_track(TrackKind::Audio, "a");
+        let c = p.add_clip(PoolClip {
+            name: "c".into(),
+            path: None,
+            sample_rate: 48_000,
+            frames: 192_000,
+        });
+        let q = TICKS_PER_QUARTER;
+        let a = p.add_audio_event(0, 0, c).unwrap();
+        let b = p.add_audio_event(0, 4 * q, c).unwrap();
+        p.event_mut(a).unwrap().length = 2 * q;
+        p.event_mut(b).unwrap().length = 2 * q;
+        p.event_mut(b).unwrap().offset = 24_000;
+        let clips = HashMap::from([(c, ones(192_000, 1.0))]);
+        let frames = |p: &Project| -> Vec<(u64, u64, u64)> {
+            Song::build(p, &clips, 48_000)
+                .tracks
+                .first()
+                .map(|t| {
+                    t.events
+                        .iter()
+                        .map(|e| (e.start, e.length, e.offset))
+                        .collect()
+                })
+                .unwrap_or_default()
+        };
+        let loose = frames(&p);
+        let part = p.group_audio(&[a, b]).unwrap();
+        assert_eq!(frames(&p), loose, "same audio as a part");
+        // Muting the part silences all its events.
+        p.event_mut(part).unwrap().muted = true;
+        assert!(frames(&p).is_empty());
+    }
+
+    #[test]
     fn topmost_event_wins_on_overlap() {
         use studiocraft_project::Position;
         let mut p = Project::default();
@@ -1177,6 +1218,7 @@ mod tests {
             bypass: false,
             params: Vec::new(),
             state: None,
+            isolated: false,
         });
         let id = p.create_event(t, 0, 3840).unwrap();
         p.event_mut(id).unwrap().notes = vec![studiocraft_project::Note {
@@ -1184,6 +1226,7 @@ mod tests {
             velocity: 100,
             start: 0,
             length: 120,
+            spelling: 0,
         }];
         let mut map = studiocraft_project::DrumMap::general_midi();
         map.rows.iter_mut().find(|r| r.pitch == 38).unwrap().output = Some(40);
@@ -1203,6 +1246,7 @@ mod tests {
             bypass: false,
             params: Vec::new(),
             state: None,
+            isolated: false,
         });
         let id = p.create_event(t, 0, 4 * TICKS_PER_QUARTER).unwrap();
         p.event_mut(id).unwrap().notes = [36u8, 38, 42]
@@ -1212,6 +1256,7 @@ mod tests {
                 velocity: 100,
                 start: 0,
                 length: 10,
+                spelling: 0,
             })
             .collect();
         let keys = |p: &Project| -> Vec<u8> {
@@ -1292,6 +1337,7 @@ mod tests {
             bypass: false,
             params: Vec::new(),
             state: None,
+            isolated: false,
         });
         let q = TICKS_PER_QUARTER;
         let id = p.create_event(t, 0, 2 * q).unwrap();
@@ -1302,18 +1348,21 @@ mod tests {
                 velocity: 100,
                 start: 0,
                 length: q,
+                spelling: 0,
             },
             Note {
                 pitch: 64,
                 velocity: 90,
                 start: q as i64,
                 length: 4 * q,
+                spelling: 0,
             }, // ragt über das Part-Ende
             Note {
                 pitch: 67,
                 velocity: 80,
                 start: -(q as i64),
                 length: q,
+                spelling: 0,
             }, // ausgeblendet
         ];
         let song = Song::build(&p, &HashMap::new(), 48_000);
@@ -1379,6 +1428,7 @@ mod tests {
             velocity: 100,
             start: 0,
             length: q,
+            spelling: 0,
         }];
         p.tracks[t].instrument = Some(studiocraft_project::InsertSlot {
             plugin_id: "x".into(),
@@ -1386,6 +1436,7 @@ mod tests {
             bypass: false,
             params: Vec::new(),
             state: None,
+            isolated: false,
         });
         p.tracks[t].input_gain_db = 6.0;
         p.tracks[t].pre_hpf = Some(100.0);

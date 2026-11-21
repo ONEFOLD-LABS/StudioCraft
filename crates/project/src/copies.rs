@@ -26,10 +26,16 @@ impl Project {
             Some(None) => self.next_shared_group(),
             None => return false,
         };
-        let content = self
-            .event(original)
-            .map(|e| (e.notes.clone(), e.controllers.clone(), e.clip, e.offset));
-        let (Some((notes, controllers, clip, offset)), true) =
+        let content = self.event(original).map(|e| {
+            (
+                e.notes.clone(),
+                e.controllers.clone(),
+                e.clip,
+                e.offset,
+                e.children.clone(),
+            )
+        });
+        let (Some((notes, controllers, clip, offset, children)), true) =
             (content, self.event(copy).is_some())
         else {
             return false;
@@ -43,6 +49,7 @@ impl Project {
             e.controllers = controllers;
             e.clip = clip;
             e.offset = offset;
+            e.children = children;
         }
         true
     }
@@ -66,6 +73,7 @@ impl Project {
                         || b.controllers != e.controllers
                         || b.clip != e.clip
                         || b.offset != e.offset
+                        || b.children != e.children
                 });
                 if differs && before.event(e.id).is_some() {
                     changed.push((
@@ -75,11 +83,12 @@ impl Project {
                         e.controllers.clone(),
                         e.clip,
                         e.offset,
+                        e.children.clone(),
                     ));
                 }
             }
         }
-        for (g, src, notes, controllers, clip, offset) in changed {
+        for (g, src, notes, controllers, clip, offset, children) in changed {
             for t in &mut self.tracks {
                 for e in t
                     .events
@@ -90,6 +99,7 @@ impl Project {
                     e.controllers.clone_from(&controllers);
                     e.clip = clip;
                     e.offset = offset;
+                    e.children.clone_from(&children);
                 }
             }
         }
@@ -141,6 +151,7 @@ mod tests {
             velocity: 100,
             start: 0,
             length: 480,
+            spelling: 0,
         }
     }
 

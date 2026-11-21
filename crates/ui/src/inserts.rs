@@ -68,24 +68,32 @@ pub(crate) struct PluginState {
     /// Presets je Plugin-Id (beim ersten Anzeigen gelesen).
     pub presets: HashMap<String, Vec<studiocraft_plugin_host::PluginPreset>>,
     pub sent: Vec<SentChain>,
+    /// Isolierte Plugins, deren Prozess abgestürzt ist (Spur, Slot); einmal gemeldet.
+    pub crashed: std::collections::HashSet<(usize, usize)>,
+    /// Plugin-Ids aus gesperrten Dateien (Absturz beim Scan nach vollständiger Meldung): Sie
+    /// laufen nur im eigenen Prozess.
+    pub own_process: std::collections::HashSet<String>,
+    /// Plugin-Ids, deren neue Inserts im eigenen Prozess laufen (Voreinstellung aus der
+    /// Plugin-Liste, in den Einstellungen gemerkt).
+    pub preferred: std::collections::BTreeSet<String>,
 }
 
 impl ProjectWindow {
     pub(crate) fn plugin_list(&mut self) -> &[PluginInfo] {
         if self.plugins.list.is_none() {
             let paths = studiocraft_plugin_host::default_paths();
-            let (list, errors, blocked) = match PLUGIN_SCANNER.get() {
+            let (list, errors, blocked, own) = match PLUGIN_SCANNER.get() {
                 // Im Programm: jede Datei in einem eigenen Prozess (Absturzschutz).
                 Some(exe) => {
                     let cache = crate::settings::config_dir().map(|d| d.join(SCAN_CACHE));
                     let opts = studiocraft_plugin_host::ScanOptions::new(exe.clone(), cache);
                     let r = studiocraft_plugin_host::scan_isolated(&paths, &opts);
-                    (r.plugins, r.errors, r.blocked.len())
+                    (r.plugins, r.errors, r.blocked.len(), r.own_process)
                 }
                 // Tests und Werkzeuge ohne Scan-Programm: im eigenen Prozess.
                 None => {
                     let (list, errors) = studiocraft_plugin_host::scan(&paths);
-                    (list, errors, 0)
+                    (list, errors, 0, Vec::new())
                 }
             };
             let mut notes = Vec::new();
@@ -101,9 +109,16 @@ impl ProjectWindow {
                     &[("blocked", &blocked)],
                 ));
             }
+            if !own.is_empty() {
+                notes.push(crate::i18n::trf(
+                    "{n} Plugin(s) daraus laufen nur im eigenen Prozess",
+                    &[("n", &own.len())],
+                ));
+            }
             if !notes.is_empty() {
                 self.message = Some(notes.join(" · "));
             }
+            self.plugins.own_process = own.into_iter().collect();
             self.plugins.list = Some(list);
         }
         self.plugins.list.as_deref().unwrap_or_default()
@@ -124,6 +139,41 @@ impl ProjectWindow {
         let n = self.plugin_list().len();
         if self.message.is_none() {
             self.message = Some(crate::i18n::trf("{n} Plugins gefunden", &[("n", &n)]));
+        }
+    }
+
+    /// Das Plugin stürzte beim Scan ab und lässt sich nur im eigenen Prozess laden.
+    pub(crate) fn needs_own_process(&self, id: &str) -> bool {
+        self.plugins.own_process.contains(id)
+    }
+
+    /// Neue Inserts dieses Plugins laufen im eigenen Prozess (Voreinstellung oder Sperrliste).
+    pub(crate) fn own_process_default(&self, id: &str) -> bool {
+        cfg!(not(target_arch = "wasm32"))
+            && (self.plugins.preferred.contains(id) || self.needs_own_process(id))
+    }
+
+    /// Voreinstellung der Plugin-Liste setzen und für den nächsten Start merken.
+    pub(crate) fn set_own_process_default(&mut self, id: &str, on: bool) {
+        let changed = if on {
+            self.plugins.preferred.insert(id.to_owned())
+        } else {
+            self.plugins.preferred.remove(id)
+        };
+        if changed {
+            self.save_settings();
+        }
+    }
+
+    /// Ein neuer Slot für `p` mit der Voreinstellung für den eigenen Prozess.
+    pub(crate) fn new_slot(&self, p: &PluginInfo) -> InsertSlot {
+        InsertSlot {
+            plugin_id: p.id.clone(),
+            name: p.name.clone(),
+            bypass: false,
+            params: Vec::new(),
+            state: None,
+            isolated: self.own_process_default(&p.id),
         }
     }
 
@@ -163,7 +213,15 @@ impl ProjectWindow {
         let info = self.find_plugin(&slot.plugin_id).ok_or_else(|| {
             crate::i18n::trf("{name}: nicht installiert", &[("name", &slot.name)])
         })?;
-        let mut inst = PluginInstance::new(&info, self.sample_rate, MAX_BLOCK)?;
+        let mut inst = if slot.isolated || self.needs_own_process(&slot.plugin_id) {
+            // Eigener Prozess: dasselbe Programm wie für den Plugin-Scan.
+            let exe = PLUGIN_SCANNER
+                .get()
+                .ok_or_else(|| tr("Eigener Prozess ist hier nicht verfügbar").to_owned())?;
+            PluginInstance::new_isolated(&info, self.sample_rate, MAX_BLOCK, exe)?
+        } else {
+            PluginInstance::new(&info, self.sample_rate, MAX_BLOCK)?
+        };
         if let Some(state) = slot.state.as_deref().and_then(|s| B64.decode(s).ok())
             && !inst.handle().load_state(&state)
         {
@@ -312,6 +370,7 @@ impl ProjectWindow {
                     dst.state.clone_from(&src.state);
                 }
             }
+            self.plugins.crashed.retain(|(t, _)| *t != i);
             let mut chain = InsertChain::default();
             let mut handles = Vec::with_capacity(want.len());
             let mut instrument_handle = None;
@@ -447,13 +506,7 @@ impl ProjectWindow {
         let t = self
             .project
             .add_track(studiocraft_project::TrackKind::Instrument, name);
-        self.project.tracks[t].instrument = info.map(|p| InsertSlot {
-            plugin_id: p.id,
-            name: p.name,
-            bypass: false,
-            params: Vec::new(),
-            state: None,
-        });
+        self.project.tracks[t].instrument = info.map(|p| self.new_slot(&p));
         self.selected_track = Some(t);
         self.checkpoint(before);
     }
@@ -461,6 +514,7 @@ impl ProjectWindow {
     /// Ersetzt das Instrument einer Instrument-Spur durch `p` (Ziehen aus der rechten Zone).
     pub(crate) fn replace_instrument(&mut self, track: usize, p: &PluginInfo) {
         let before = self.project.clone();
+        let slot = self.new_slot(p);
         let Some(t) = self
             .project
             .tracks
@@ -470,13 +524,7 @@ impl ProjectWindow {
             return;
         };
         // Automation des alten Instruments passt nicht zum neuen und fällt weg.
-        t.set_instrument(Some(InsertSlot {
-            plugin_id: p.id.clone(),
-            name: p.name.clone(),
-            bypass: false,
-            params: Vec::new(),
-            state: None,
-        }));
+        t.set_instrument(Some(slot));
         self.selected_track = Some(track);
         self.checkpoint(before);
     }
@@ -519,13 +567,8 @@ impl ProjectWindow {
 
     fn set_instrument(&mut self, track: usize, info: Option<PluginInfo>) {
         let before = self.project.clone();
-        self.project.tracks[track].set_instrument(info.map(|p| InsertSlot {
-            plugin_id: p.id,
-            name: p.name,
-            bypass: false,
-            params: Vec::new(),
-            state: None,
-        }));
+        let slot = info.map(|p| self.new_slot(&p));
+        self.project.tracks[track].set_instrument(slot);
         self.checkpoint(before);
     }
 
@@ -575,6 +618,7 @@ impl ProjectWindow {
     /// Im UI-Takt: offene Plugin-Fenster bedienen (Timer, Ereignisse) und
     /// Zustandsänderungen einsammeln. `true`, solange Fenster offen sind.
     pub(crate) fn idle_plugins(&mut self) -> bool {
+        let mut crashed = Vec::new();
         let mut open = false;
         let mut dirty = false;
         let mut changes = Vec::new();
@@ -585,12 +629,25 @@ impl ProjectWindow {
                 .filter_map(|(k, h)| h.as_mut().map(|h| (k, h)))
                 .chain(instrument)
             {
+                if h.is_isolated() && h.crashed() && self.plugins.crashed.insert((track, k)) {
+                    crashed.push((track, k));
+                }
                 open |= h.idle();
                 dirty |= h.take_dirty();
                 for (id, v) in h.take_param_changes() {
                     changes.push((track, k, id, v));
                 }
             }
+        }
+        for (track, k) in crashed {
+            let name = self
+                .slot(track, k)
+                .map(|s| s.name.clone())
+                .unwrap_or_default();
+            self.message = Some(crate::i18n::trf(
+                "{name} ist abgestürzt und schweigt; das Programm läuft weiter (Insert-Menü: Neu laden)",
+                &[("name", &name)],
+            ));
         }
         // Reglerbewegungen im Plugin-Fenster wie eigene Parameteränderungen setzen.
         for (track, k, id, v) in changes {
@@ -665,8 +722,24 @@ impl ProjectWindow {
                     self.project.tracks[track].inserts[k].bypass = !on;
                     self.checkpoint(before);
                 }
-                ui.label(&slot.name);
+                let crashed = self.plugins.crashed.contains(&(track, k));
+                let name = if crashed {
+                    egui::RichText::new(crate::i18n::trf(
+                        "{name} (abgestürzt)",
+                        &[("name", &slot.name)],
+                    ))
+                    .color(crate::theme::tokens(ui.ctx()).danger)
+                } else if slot.isolated {
+                    egui::RichText::new(&slot.name).italics()
+                } else {
+                    egui::RichText::new(&slot.name)
+                };
+                let label = ui.label(name);
+                if slot.isolated && !crashed {
+                    label.on_hover_text(tr("Läuft in einem eigenen Prozess"));
+                }
                 self.window_button(ui, track, k, &slot.name);
+                self.slot_menu(ui, track, k, crashed);
                 if ui
                     .small_button(tr("x"))
                     .on_hover_text(tr("Insert entfernen"))
@@ -687,19 +760,84 @@ impl ProjectWindow {
         }
     }
 
+    /// Menü „…“ eines Inserts: eigener Prozess, nach einem Absturz neu laden.
+    fn slot_menu(&mut self, ui: &mut Ui, track: usize, k: usize, crashed: bool) {
+        if cfg!(target_arch = "wasm32") {
+            // Im Browser gibt es keine Plugin-Bridge.
+            return;
+        }
+        let menu = ui.menu_button("…", |ui| {
+            let Some((mut isolated, id)) = self
+                .slot(track, k)
+                .map(|s| (s.isolated, s.plugin_id.clone()))
+            else {
+                return;
+            };
+            let forced = self.needs_own_process(&id);
+            isolated |= forced;
+            let hint = if forced {
+                tr("Dieses Plugin stürzte beim Scan ab und läuft daher nur im eigenen Prozess")
+            } else {
+                tr("Stürzt das Plugin ab oder hängt es, verstummt nur dieser Insert (ein Block mehr Latenz)")
+            };
+            if ui
+                .add_enabled(
+                    !forced,
+                    egui::Checkbox::new(&mut isolated, tr("In eigenem Prozess")),
+                )
+                .on_hover_text(hint)
+                .on_disabled_hover_text(hint)
+                .changed()
+            {
+                let before = self.project.clone();
+                if let Some(s) = self.slot_mut(track, k) {
+                    s.isolated = isolated;
+                }
+                self.checkpoint(before);
+                ui.close();
+            }
+            if ui
+                .add_enabled(crashed, egui::Button::new(tr("Neu laden")))
+                .on_hover_text(tr("Den abgestürzten Prozess neu starten"))
+                .clicked()
+            {
+                self.reload_insert(track, k);
+                ui.close();
+            }
+        })
+        .response;
+        // Das Zeichen „…“ sagt einem Bildschirmleser nichts.
+        ui.ctx()
+            .accesskit_node_builder(menu.id, |n| n.set_label(tr("Insert-Menü")));
+        menu.on_hover_text(tr("Insert-Menü"));
+    }
+
+    /// Ein abgestürztes isoliertes Plugin neu laden: seine Kette wird neu aufgebaut (mit dem
+    /// Zustand aus dem Projekt).
+    pub(crate) fn reload_insert(&mut self, track: usize, k: usize) {
+        self.plugins.crashed.remove(&(track, k));
+        if let Some(sent) = self.plugins.sent.get_mut(track) {
+            let slot = if k == INSTRUMENT {
+                sent.instrument.as_mut()
+            } else {
+                sent.slots.get_mut(k)
+            };
+            if let Some(s) = slot {
+                // Weicht vom Projekt ab: der nächste Abgleich baut die Kette neu.
+                s.plugin_id.clear();
+            }
+        }
+        self.sync_inserts();
+    }
+
     /// Hängt `p` als neuen Insert an die Spur `track` (ein Undo-Schritt).
     pub(crate) fn add_insert(&mut self, track: usize, p: &PluginInfo) {
         let before = self.project.clone();
+        let slot = self.new_slot(p);
         let Some(t) = self.project.tracks.get_mut(track) else {
             return;
         };
-        t.inserts.push(InsertSlot {
-            plugin_id: p.id.clone(),
-            name: p.name.clone(),
-            bypass: false,
-            params: Vec::new(),
-            state: None,
-        });
+        t.inserts.push(slot);
         self.checkpoint(before);
     }
 

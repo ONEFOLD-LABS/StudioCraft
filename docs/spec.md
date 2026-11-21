@@ -40,7 +40,7 @@ Ein Projekt besteht aus Spuren, auf denen Events liegen; Audio-Events verweisen 
 | Pool | Liste aller Audio-Dateien und Clips des Projekts | Clips sind unveränderliche Referenzen auf Dateien |
 | Audio-Clip | Datei plus optionaler Bearbeitungsverlauf (Offline-Effekte) | Destruktive Effekte erzeugen neue Dateien |
 | Audio-Event | Ausschnitt eines Clips auf einer Spur: Start, Offset, Länge, Fades, Lautstärke | Nicht-destruktiv |
-| Audio-Part | Container, der mehrere Audio-Events gruppiert | Optional, nach MVP |
+| Audio-Part | Container, der mehrere Audio-Events gruppiert | Events relativ zum Part-Start (seit 0.9) |
 | MIDI-Part | Container für Noten und Controller-Daten | Noten relativ zum Part-Start |
 | Spur | Zeile im Projektfenster; Typ bestimmt Inhalt und Kanal | Siehe Spurtypen |
 | Kanal | Mixer-Gegenstück einer Spur mit Inserts, Sends, Fader | Eine Audio-Spur hat genau einen Kanal |
@@ -51,6 +51,8 @@ Ein Projekt besteht aus Spuren, auf denen Events liegen; Audio-Events verweisen 
 | Marker | Benannte Position oder Bereich (Cycle-Marker) | Eigene Marker-Spur |
 
 **Zeitbasis:** Jede Spur ist entweder musikalisch (Events hängen an Takten, Tempoänderungen verschieben sie) oder linear (Events hängen an Sekunden). Standard ist musikalisch für MIDI und linear für Audio. Einzelne Audio-Events können dem Projekttempo folgen (Info-Zeile „Folgt dem Tempo“ mit dem Tempo der Datei, vorbelegt aus einer BPM-Angabe im Dateinamen): sie hängen dann an Takten wie MIDI, und ihr Inhalt wird so gedehnt, dass eine Viertel der Datei eine Viertel im Projekt dauert – auch entlang der Tempospur; die Tonhöhe bleibt.
+
+**Audio-Part (seit 0.9):** Bearbeiten → „Audio-Part bilden“ fasst gewählte Audio-Events einer Audiospur zu einem Part zusammen, „Audio-Part auflösen“ legt sie wieder einzeln auf die Spur (an derselben Stelle, auf den Part zugeschnitten). Der Part wird wie ein Event verschoben, kopiert, ausgeschnitten, stummgeschaltet, mit Fades und Lautstärke versehen und am Rand gekürzt; seine Events bleiben dabei an ihrer Stelle im Projekt. Was hinter dem Part-Ende liegt, ist nur ausgeblendet; rückt der Part-Anfang über den Anfang eines Events, wird dessen Kopf abgeschnitten. Teilen schneidet die Events am Schnitt mit; Kleben und Strecken gelten nicht für Audio-Parts. Wiedergabe und Export spielen die Events des Parts mit Mute, Lautstärke und Fades des Parts. Die Event-Anzeige zeigt ihre Wellenformen im Part. Doppelklick auf einen Audio-Part öffnet den Part-Editor in der unteren Zone: je Event Anfang und Länge (im Projekt, eintippbar), Lautstärke, Stumm und Löschen; ein Part ohne Events verschwindet.
 
 **Undo:** Jede Bearbeitung ist ein Befehl im Undo-Verlauf. Der Verlauf ist unbegrenzt konfigurierbar und wird mit dem Projekt nicht gespeichert.
 
@@ -101,7 +103,7 @@ Der Spurtyp legt fest, welche Events eine Spur trägt und ob sie einen Mixer-Kan
 | Tempo/Taktart | Tempo- und Taktart-Ereignisse | nein | Tempo-Modus fest/variabel | ja |
 | Lineal | zusätzliches Zeitlineal mit eigenem Format (Takte, Sekunden, Timecode 25/30 fps, Samples); beliebig viele, Projekt → „Lineal-Spur hinzufügen“ | nein | Anzeigeformat | 0.8 |
 | Automation | Kurve eines Parameters, unter ihrer Spur | nein | Parameter-Auswahl, Modus | ja |
-| Video | Videoframes als Thumbnails | nein | Offset, Ton an/aus | später (#174; Codec-Lizenzen vorher prüfen) |
+| Video | Videoframes als Thumbnails | nein | Offset, Ton an/aus | später (#174; Codec-Lizenzen: `docs/video-dekodierung.md`) |
 
 **Spurkopf in der Spurliste:** links eine Farbleiste mit der Spurnummer, daneben zwei Zeilen. Oben: Automationspfeil, Mute, Solo, Name und ein Lautstärkeregler (Strg+Klick: 0 dB). Unten: Aufnahme bereit, Monitor, Automation lesen, Automation schreiben, Zeitbasis, Lanes ein/aus. Breite und sichtbare Elemente sind pro Spurtyp einstellbar.
 
@@ -243,6 +245,8 @@ Der Mixer zeigt zu jeder Spur mit Kanal einen Kanalzug, links Eingänge, rechts 
 
 Die Insert-Aufteilung Pre/Post ist eine Projekt-Voreinstellung; jeder Slot ist einzeln schaltbar (an/aus, Bypass).
 
+**Plugin im eigenen Prozess:** Im Menü „…“ eines Insert-Slots schaltet „In eigenem Prozess“ das Plugin in einen Hilfsprozess (nicht in der Web-Version). Stürzt es dort ab oder hängt es, verstummt nur dieser Insert; die Meldung nennt das Plugin, „Neu laden“ startet es mit dem Zustand aus dem Projekt neu. Im Kontextmenü der Plugin-Liste setzt „Immer in eigenem Prozess“ die Voreinstellung für neue Inserts dieses Plugins (in den Einstellungen gemerkt; bestehende Inserts bleiben, wie sie sind). Das Fenster eines solchen Plugins öffnet der Hilfsprozess (unter X11 über dem Hauptfenster); Reglerbewegungen darin kommen wie sonst im Projekt an. Beim Abspielen läuft es einen Block hinterher (Teil der gemeldeten Latenz), beim Export und Rendern wartet es auf jeden Block. Eine Plugin-Datei, die beim Scan abstürzt oder hängt, kommt auf die Sperrliste; hat der Scan ihre Plugins vor dem Absturz vollständig gelesen (etwa bei einem Absturz erst beim Entladen), stehen sie mit dem Zusatz „eigener Prozess“ in der Plugin-Liste und laufen nur dort.
+
 **Kanalzug-Elemente**
 
 | Element | Verhalten |
@@ -279,7 +283,7 @@ Doppelklick auf ein Event öffnet den Standard-Editor seines Typs: Audio → Sam
 | Drum-Editor | Noten als Rauten pro Instrument-Zeile, Namen aus der Drum-Map | Eigene Quantisierung pro Zeile, Länge ignoriert, Mute/Solo pro Zeile | 0.6 (Drum-Maps bearbeiten: #161) |
 | List-Editor | Alle Events als Tabelle (Position, Länge, Wert, Kanal) | Werte direkt eingeben, filtern nach Event-Typ | 0.6 |
 | Sample-Editor | Wellenform eines Clips in voller Größe | Bereich wählen, Offline-Effekte, Hitpoints, Tempo-Erkennung | ja (ohne Hitpoints) |
-| Noten-Editor | Partitur | Notensatz, Druck | später (#40) |
+| Noten-Editor | Partitur | Anzeige, Bearbeiten, MusicXML- und PDF-Export | 0.9 |
 
 **Gemeinsames Verhalten**
 
@@ -288,6 +292,12 @@ Doppelklick auf ein Event öffnet den Standard-Editor seines Typs: Audio → Sam
 - Akustisches Feedback: angeklickte oder verschobene Noten erklingen (abschaltbar)
 - Mehrere Parts gleichzeitig öffnen; ein aktiver Part, die anderen gedämpft
 - „Editor folgt Wiedergabe“ scrollt automatisch mit (Taste F)
+
+**Noten-Editor (seit 0.9, Anzeige):** Zeigt den aktiven MIDI-Part als Partitur, in der unteren Zone (Reiter „Noten-Editor“) oder im eigenen Fenster (Ansicht → „Noten-Editor im eigenen Fenster“). Der Schlüssel folgt dem Tonumfang: Violin- oder Bassschlüssel, bei großem Umfang ein Klaviersystem mit Trennung beim eingestrichenen c. Taktarten kommen aus dem Projekt, die Tonart ist eine Projekteinstellung (Werkzeugzeile, rückgängig machbar). Die Anzeige-Quantisierung (1/4 bis 1/32, je Part gespeichert) rundet Anfang und Dauer nur für die Darstellung. Notenwerte zeigen den Schlag; was über einen Schlag oder Taktstrich hinausreicht, wird geteilt und übergebunden. Achtel und kürzere Werte werden je Schlag (bei 6/8, 9/8, 12/8 je drei Achtel) mit Balken verbunden. Vorzeichen gelten bis zum Taktende, Auflösungszeichen werden gesetzt. Leere Takte zeigen eine ganze Pause. Je Notensystem eine Stimme: Noten, die über den nächsten Einsatz hinaus klingen, werden dort beendet. Der Cursor läuft mit; „Folgen“ blättert beim Abspielen mit. Notenschrift: Leland (SIL OFL 1.1).
+
+**Noten-Editor bearbeiten (seit 0.9):** Klick auf einen Notenkopf wählt die Note (Umschalt fügt hinzu oder nimmt weg); die Auswahl ist dieselbe wie im Key-Editor. Ziehen verschiebt die gewählten Noten in der Zeit (im Raster der Anzeige-Quantisierung) und auf den Linien (Stufen der Tonart). Das Zeichenwerkzeug setzt mit Klick eine Note an Linie und Zählzeit, mit dem Notenwert aus der Werkzeugzeile (Ganze bis Zweiunddreißigstel, punktiert); der Radierer und Entf löschen. Ein anderer Notenwert gilt auch für die gewählten Noten. „Kreuz“ und „Be“ verschieben um einen Halbton und schreiben die Note so, „Enharmonisch verwechseln“ tauscht Kreuz und Be (die Schreibweise wird je Note gespeichert). Jede Änderung ist ein Rückgängig-Schritt und landet im MIDI-Part; die Anzeige-Quantisierung ändert die gespeicherten Zeiten nicht.
+
+**Noten exportieren (seit 0.9):** Datei → „Noten exportieren …“ (oder „Exportieren …“ im Noten-Editor) schreibt die gewählten MIDI-Parts in Spur- und Zeitfolge, ohne Auswahl den aktiven Part, als MusicXML 4.0 (offenes Format, je Part ein `<part>`, Klaviersystem als zwei Notensysteme) oder als druckfertiges PDF. Für das PDF: Papier A4 oder Letter, Ränder, Notengröße (Abstand zweier Notenlinien in mm) und Titel; Systeme werden auf Seiten umbrochen. Notenzeichen stehen als Vektorpfade aus der Notenschrift im PDF, Texte in einer Standardschrift jedes PDF-Lesers; eingebettet wird nichts.
 
 **Controller-Lanes im Key-Editor:** Beliebig viele Lanes, jede zeigt einen Datentyp (Velocity, Pitchbend, CC 1–127, Aftertouch). Zeichnen mit Linien-, Parabel-, Sinus- und Rechteck-Formen (seit 0.6).
 
@@ -400,6 +410,11 @@ Clip (0.7), Pakete für alle Plattformen und den Browser (0.5), englische Oberfl
 
 - [ ] Projektname: entschieden, StudioCraft (Repo unter Dokumente/GitHub/StudioCraft). Verworfen: SoundCraft (in der Familie vergeben), AudioCraft (Meta), MixCraft (bestehende DAW), RecordCraft (Rust-Recorder kaptaindieter/RecordCraft). Markenrecherche steht noch aus.
 - [x] GUI-Toolkit: entschieden, egui/eframe (nativ und Web). Prototyp bestätigt: 0,15 ms CPU pro Frame bei 100 und 1000 Spuren (Release-Build)
-- [ ] Plugin-GUIs unter Wayland: Fremdfenster einbetten geht nur über X11/XWayland; als eigene Fenster öffnen? (#175, 0.8)
+- [x] Plugin-GUIs unter Wayland (#175, 0.8): CLAP-Plugins öffnen zuerst ein eigenes
+  Wayland-Fenster, sonst bettet StudioCraft den Editor über XWayland in ein eigenes Fenster ein
+  (bleibt über dem Hauptfenster, merkt sich seine Position je Plugin-Fenster, solange die App
+  läuft), zuletzt ein eigenes X11-Fenster des Plugins. LV2 und VST3 betten über XWayland ein.
+  Unter X11 hängen Plugin-Fenster am Hauptfenster (`WM_TRANSIENT_FOR`). Ohne XWayland gibt es
+  nur die Wayland-Fenster von CLAP-Plugins.
 - [x] Standard-MIDI-Dateien: entschieden, nicht im MVP, sondern in 0.6 (Issue #47). Datei → MIDI-Datei importieren legt je Spur und Kanal der Datei eine MIDI-Spur mit einem Part an (Noten, CC, Pitchbend, Aftertouch, erstes Programm); in einem Projekt ohne Events gelten danach Tempo und Taktarten der Datei, sonst beginnen die Parts am Takt des Cursors. Datei → MIDI-Datei exportieren schreibt Format 1 mit Tempospur und je MIDI- und Instrument-Spur einer Spur (stumme Parts und ausgeblendete Noten fehlen, Tempo-Rampen als Stufen je Sechzehntel). AAF/OMF-Import kommt später (Issue #154).
 - [ ] Wer übernimmt die Spec-Autor-Rolle, wer implementiert (Cleanroom-Trennung)?

@@ -102,6 +102,8 @@ impl ProjectWindow {
             return Ok(());
         }
         let mut inst = self.instantiate(slot)?;
+        // Faster than real time: a plugin in its own process waits for every block.
+        inst.set_offline(true);
         let latency = inst.handle().latency() as usize;
         // Eingang mit Stille für die Latenz verlängert; die ersten `latency` Frames der Ausgabe
         // fallen weg.
@@ -189,13 +191,7 @@ impl ProjectWindow {
                     .show(ui, |ui| {
                         for p in list {
                             if ui.button(p.display_name()).clicked() {
-                                chosen = Some(InsertSlot {
-                                    plugin_id: p.id.clone(),
-                                    name: p.name.clone(),
-                                    bypass: false,
-                                    params: Vec::new(),
-                                    state: None,
-                                });
+                                chosen = Some(self.new_slot(&p));
                                 ui.close();
                             }
                         }

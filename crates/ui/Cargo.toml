@@ -13,6 +13,8 @@ studiocraft-plugin-host.workspace = true
 base64 = "0.23"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# Umrisse der Notenschrift für den PDF-Export (schon über egui im Baum).
+skrifa = { version = "0.44", default-features = false, features = ["std"] }
 # Instant, das auch im Browser läuft; sonst identisch mit std.
 web-time = "1"
 # Sprache des Systems (Einstellung „Wie das System“); im Browser über navigator.language.
