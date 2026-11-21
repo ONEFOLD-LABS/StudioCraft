@@ -62,6 +62,8 @@ fn report_main_window(cc: &eframe::CreationContext<'_>) {
     use raw_window_handle::{HasWindowHandle, RawWindowHandle};
     use studiocraft_plugin_host::MainWindow;
     let window = match cc.window_handle().map(|h| h.as_raw()) {
+        // `c_ulong`: 64 bits on Linux, 32 on Windows, where the conversion is a no-op.
+        #[allow(clippy::useless_conversion)]
         Ok(RawWindowHandle::Xlib(h)) => {
             u32::try_from(h.window).map_or(MainWindow::Other, MainWindow::X11)
         }
