@@ -1186,6 +1186,7 @@ mod tests {
             velocity: 100,
             start: 0,
             length: 120,
+            spelling: 0,
         }];
         let mut map = studiocraft_project::DrumMap::general_midi();
         map.rows.iter_mut().find(|r| r.pitch == 38).unwrap().output = Some(40);
@@ -1215,6 +1216,7 @@ mod tests {
                 velocity: 100,
                 start: 0,
                 length: 10,
+                spelling: 0,
             })
             .collect();
         let keys = |p: &Project| -> Vec<u8> {
@@ -1306,18 +1308,21 @@ mod tests {
                 velocity: 100,
                 start: 0,
                 length: q,
+                spelling: 0,
             },
             Note {
                 pitch: 64,
                 velocity: 90,
                 start: q as i64,
                 length: 4 * q,
+                spelling: 0,
             }, // ragt über das Part-Ende
             Note {
                 pitch: 67,
                 velocity: 80,
                 start: -(q as i64),
                 length: q,
+                spelling: 0,
             }, // ausgeblendet
         ];
         let song = Song::build(&p, &HashMap::new(), 48_000);
@@ -1383,6 +1388,7 @@ mod tests {
             velocity: 100,
             start: 0,
             length: q,
+            spelling: 0,
         }];
         p.tracks[t].instrument = Some(studiocraft_project::InsertSlot {
             plugin_id: "x".into(),

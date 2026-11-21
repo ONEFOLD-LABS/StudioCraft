@@ -141,6 +141,7 @@ mod tests {
             velocity: 100,
             start: 0,
             length: 480,
+            spelling: 0,
         }
     }
 

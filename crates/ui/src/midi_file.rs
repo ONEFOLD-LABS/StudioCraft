@@ -130,6 +130,7 @@ mod tests {
             velocity: 100,
             start: 0,
             length: 960,
+            spelling: 0,
         }];
         p.export_midi().unwrap()
     }

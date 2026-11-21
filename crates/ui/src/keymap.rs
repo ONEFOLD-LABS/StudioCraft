@@ -1081,7 +1081,6 @@ impl crate::ProjectWindow {
 
     /// Führt einen Befehl aus (Taste, Menü, Dialog).
     pub(crate) fn run_cmd(&mut self, ui: &egui::Ui, cmd: Cmd) {
-        use crate::LowerZone;
         match cmd {
             Cmd::File(a) => self.request(ui, a),
             Cmd::Edit(e) => self.run_edit_command(e),
@@ -1089,7 +1088,7 @@ impl crate::ProjectWindow {
             Cmd::Undo => self.undo(),
             Cmd::Redo => self.redo(),
             Cmd::Delete => {
-                if self.key_editor.focused && self.show_lower && self.lower == LowerZone::Editor {
+                if self.key_editor.focused {
                     self.delete_selected_notes();
                 } else {
                     self.delete_selection();

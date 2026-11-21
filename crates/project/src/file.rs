@@ -144,6 +144,7 @@ mod tests {
             velocity: 100,
             start: -120,
             length: 480,
+            spelling: 0,
         }];
         p.tracks[a].automation.push(crate::AutomationLane {
             param: crate::AutoParam::Volume,

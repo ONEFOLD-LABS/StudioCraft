@@ -130,6 +130,7 @@ mod tests {
                 velocity: 100,
                 start,
                 length: 100,
+                spelling: 0,
             });
         }
         let a = project.add_track(TrackKind::Audio, "Audio");

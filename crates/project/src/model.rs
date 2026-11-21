@@ -380,6 +380,14 @@ pub struct Note {
     pub velocity: u8,
     pub start: i64,
     pub length: u64,
+    /// Schreibweise im Noten-Editor (nur Darstellung): 1 mit Kreuz, −1 mit Be, 0 nach der
+    /// Tonart.
+    #[serde(default, skip_serializing_if = "is_zero_i8")]
+    pub spelling: i8,
+}
+
+fn is_zero_i8(v: &i8) -> bool {
+    *v == 0
 }
 
 impl Note {
@@ -2357,6 +2365,7 @@ mod tests {
             velocity: 100,
             start: 480,
             length: 240,
+            spelling: 0,
         });
         // Swap: audio musical, instrument linear.
         p.tracks[a].time_base = Some(TimeBase::Musical);
@@ -2431,12 +2440,14 @@ mod tests {
                 velocity: 100,
                 start: 0,
                 length: TICKS_PER_QUARTER,
+                spelling: 0,
             },
             Note {
                 pitch: 62,
                 velocity: 100,
                 start: 2 * TICKS_PER_QUARTER as i64,
                 length: TICKS_PER_QUARTER,
+                spelling: 0,
             },
         ];
         (p, id)
@@ -2922,6 +2933,7 @@ mod tests {
                 velocity: 100,
                 start: (i as u64 * q) as i64,
                 length: q,
+                spelling: 0,
             });
         }
         // Anfang eine Viertel nach rechts: die Noten bleiben an ihrem Platz.
@@ -3088,12 +3100,14 @@ mod tests {
             velocity: 100,
             start: 0,
             length: q,
+            spelling: 0,
         });
         p.event_mut(b).unwrap().notes.push(Note {
             pitch: 64,
             velocity: 100,
             start: 0,
             length: q,
+            spelling: 0,
         });
         assert_eq!(p.glue(a), Ok(a));
         let ev = p.event(a).unwrap();

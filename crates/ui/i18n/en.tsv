@@ -825,3 +825,18 @@ Keine Vorzeichen	No accidentals
 Partitur: {name}, {bars} Takte	Score: {name}, {bars} bars
 Anzeige-Quantisierung:	Display quantize:
 Tonart:	Key:
+Notenwert:	Note value:
+Wert für neue Noten; ändert auch die gewählten	Value for new notes; also changes the selected ones
+Punktiert	Dotted
+Kreuz	Sharp
+Gewählte Noten einen Halbton höher, mit Kreuz	Selected notes a semitone higher, with a sharp
+Be	Flat
+Gewählte Noten einen Halbton tiefer, mit Be	Selected notes a semitone lower, with a flat
+Enharmonisch verwechseln	Respell enharmonically
+Kreuz als Be schreiben und umgekehrt	Write sharps as flats and the other way round
+Ganze	Whole
+Halbe	Half
+Viertel	Quarter
+Achtel	Eighth
+Sechzehntel	Sixteenth
+Zweiunddreißigstel	Thirty-second

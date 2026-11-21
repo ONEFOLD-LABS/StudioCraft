@@ -300,6 +300,7 @@ mod tests {
                 velocity: 100,
                 start,
                 length: 100,
+                spelling: 0,
             });
         }
         (p, id)

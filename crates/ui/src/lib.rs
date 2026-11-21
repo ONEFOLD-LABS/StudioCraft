@@ -4434,6 +4434,7 @@ mod tests {
                     velocity: 70 + i as u8 * 4,
                     start: i64::from(i) * 480,
                     length: 480,
+                    spelling: 0,
                 })
                 .collect();
             ev.controllers = vec![
@@ -4471,6 +4472,7 @@ mod tests {
             length,
             pitch,
             velocity: 100,
+            spelling: 0,
         };
         let q = 960i64;
         let mut notes = vec![
@@ -4502,6 +4504,7 @@ mod tests {
     fn renders_the_score_editor() {
         shot("score", |w| {
             score_part(w);
+            w.key_editor.selection = vec![3];
             w.cursor = 5 * 960;
             w.show_lower = true;
             w.lower = LowerZone::Score;
@@ -4536,6 +4539,125 @@ mod tests {
         assert_eq!(h.state().project.key.fifths, 1);
         h.state_mut().undo();
         assert_eq!(h.state().project.event(part).unwrap().score_quantize, None);
+    }
+
+    /// Noten im Notenbild: Klick wählt, „Kreuz“ erhöht, Zeichnen setzt eine Note an Linie und
+    /// Zählzeit, Ziehen verschiebt in Zeit und Tonhöhe, Entf löscht; alles rückgängig machbar.
+    #[test]
+    fn notes_are_edited_in_the_score() {
+        let mut p = Project::default();
+        let t = p.add_track(TrackKind::Instrument, "Flöte");
+        let part = p.create_event(t, 0, 3840).unwrap();
+        p.event_mut(part).unwrap().notes = vec![studiocraft_project::Note {
+            pitch: 67,
+            velocity: 100,
+            start: 0,
+            length: 960,
+            spelling: 0,
+        }];
+        let mut w = ProjectWindow::new(p, None, "kein Audio (Test)".into());
+        w.selection = vec![part];
+        w.key_editor.part = Some(part);
+        w.show_lower = true;
+        w.lower = LowerZone::Score;
+        let mut h = window_harness(w);
+        h.run_steps(3);
+        let press = |h: &mut Harness<'_, ProjectWindow>, pos: egui::Pos2, down: bool| {
+            h.event(egui::Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Primary,
+                pressed: down,
+                modifiers: egui::Modifiers::NONE,
+            });
+        };
+        let click = |h: &mut Harness<'_, ProjectWindow>, pos: egui::Pos2| {
+            h.event(egui::Event::PointerMoved(pos));
+            h.run_steps(1);
+            press(h, pos, true);
+            h.run_steps(1);
+            press(h, pos, false);
+            h.run_steps(2);
+        };
+        let notes =
+            |h: &Harness<'_, ProjectWindow>| h.state().project.event(part).unwrap().notes.clone();
+        let head = |h: &Harness<'_, ProjectWindow>, n: usize| {
+            h.state()
+                .score_view
+                .last
+                .heads
+                .iter()
+                .find(|x| x.1 == n)
+                .map(|x| x.0.center())
+                .expect("head drawn")
+        };
+
+        // Select, then sharpen.
+        let g = head(&h, 0);
+        click(&mut h, g);
+        assert_eq!(h.state().key_editor.selection, vec![0]);
+        h.get_by_label("Kreuz").click();
+        h.run_steps(2);
+        assert_eq!((notes(&h)[0].pitch, notes(&h)[0].spelling), (68, 1));
+        h.state_mut().undo();
+        h.run_steps(2);
+        assert_eq!(notes(&h)[0].pitch, 67);
+
+        // Draw a note on the middle line (B4) at the second beat.
+        h.state_mut().tool = crate::tools::Tool::Draw;
+        let bar = h.state().score_view.last.bars[0].clone();
+        let x = bar
+            .pts
+            .iter()
+            .find(|p| p.0 == 960)
+            .map(|p| p.1)
+            .expect("column");
+        let y = bar.tops[0] + 2.0 * 8.0;
+        click(&mut h, egui::pos2(x + 2.0, y));
+        let n = notes(&h);
+        assert_eq!(n.len(), 2);
+        assert_eq!((n[1].start, n[1].pitch, n[1].length), (960, 71, 960));
+        assert_eq!(h.state().key_editor.selection, vec![1]);
+
+        // Drag the first note one space up (two steps: G4 → B4) and right to the next beat.
+        h.state_mut().tool = crate::tools::Tool::Select;
+        let from = head(&h, 0);
+        let to = egui::pos2(x + (from.x - bar.pts[0].1), from.y - 8.0);
+        h.event(egui::Event::PointerMoved(from));
+        h.run_steps(1);
+        press(&mut h, from, true);
+        h.run_steps(1);
+        for k in 1..=6 {
+            let f = k as f32 / 6.0;
+            h.event(egui::Event::PointerMoved(from + (to - from) * f));
+            h.run_steps(1);
+        }
+        press(&mut h, to, false);
+        h.run_steps(2);
+        let n = notes(&h);
+        assert_eq!(
+            (n[0].start, n[0].pitch),
+            (960, 71),
+            "moved in time and pitch"
+        );
+        h.state_mut().undo();
+        h.run_steps(2);
+        assert_eq!(
+            (notes(&h)[0].start, notes(&h)[0].pitch),
+            (0, 67),
+            "one undo step"
+        );
+
+        // Delete with the key while the score has the focus.
+        let g = head(&h, 0);
+        click(&mut h, g);
+        h.key_press(egui::Key::Delete);
+        h.run_steps(2);
+        assert_eq!(notes(&h).len(), 1);
+        assert_eq!(
+            h.state().project.tracks[0].events.len(),
+            1,
+            "the part stays"
+        );
     }
 
     #[test]
@@ -5017,6 +5139,7 @@ mod tests {
             velocity: 100,
             start: 0,
             length: 480,
+            spelling: 0,
         }];
         let mut w = ProjectWindow::new(p, None, String::new());
         w.view.scroll_ticks = 0.0;
@@ -5149,12 +5272,14 @@ mod tests {
                 velocity: 100,
                 start: 0,
                 length: 480,
+                spelling: 0,
             },
             studiocraft_project::Note {
                 pitch: 64,
                 velocity: 100,
                 start: 480,
                 length: 480,
+                spelling: 0,
             },
         ];
         let mut w = ProjectWindow::new(p, None, String::new());
@@ -5207,6 +5332,7 @@ mod tests {
                 velocity: 96,
                 start: 960,
                 length: 960,
+                spelling: 0,
             }];
             w.open_key_editor(part);
             w.key_editor.selection = vec![0];
@@ -5230,6 +5356,7 @@ mod tests {
                         velocity: 100,
                         start: i * 960,
                         length: 720,
+                        spelling: 0,
                     })
                     .collect();
                 ids.push(id);
@@ -5252,6 +5379,7 @@ mod tests {
                 velocity: 100,
                 start: 0,
                 length: 960,
+                spelling: 0,
             }];
         }
         let mut w = ProjectWindow::new(p, None, String::new());
@@ -5626,6 +5754,7 @@ mod tests {
                     velocity: 70 + (k % 2) as u8 * 40,
                     start: k * q / 2,
                     length: 120,
+                    spelling: 0,
                 });
             }
             for (pitch, beat) in [(36, 0), (38, 1), (36, 2), (38, 3), (10, 3)] {
@@ -5634,6 +5763,7 @@ mod tests {
                     velocity: 110,
                     start: beat * q,
                     length: 120,
+                    spelling: 0,
                 });
             }
             let mut map = studiocraft_project::DrumMap::general_midi();
@@ -5659,6 +5789,7 @@ mod tests {
                 velocity: 100,
                 start: 0,
                 length: 3840,
+                spelling: 0,
             }];
             ev.controllers = (0..16)
                 .map(|i| CtrlPoint {
@@ -5731,12 +5862,14 @@ mod tests {
                 velocity: 100,
                 start: 0,
                 length: 480,
+                spelling: 0,
             },
             studiocraft_project::Note {
                 pitch: 64,
                 velocity: 100,
                 start: 480,
                 length: 480,
+                spelling: 0,
             },
         ];
         let mut w = ProjectWindow::new(p, None, String::new());
@@ -6359,6 +6492,7 @@ mod tests {
                 velocity: 100,
                 start: 2 * q as i64,
                 length: q,
+                spelling: 0,
             }];
         }
         w.snap = false;
@@ -7774,6 +7908,7 @@ mod tests {
                 velocity: 100,
                 start: (i as u64 * q) as i64,
                 length: q - 120,
+                spelling: 0,
             });
         }
         id

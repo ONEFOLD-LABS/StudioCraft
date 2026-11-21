@@ -411,6 +411,7 @@ impl Exec<'_> {
                 velocity: velocity as u8,
                 start,
                 length,
+                spelling: 0,
             });
         }
         let replace = bool_arg(a, "replace");

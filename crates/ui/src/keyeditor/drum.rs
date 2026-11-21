@@ -530,6 +530,7 @@ fn interact(
                             velocity: 100,
                             start: t as i64,
                             length: len,
+                            spelling: 0,
                         });
                     });
                     w.key_editor.selection.clear();
@@ -653,6 +654,7 @@ mod tests {
             velocity: 100,
             start: 0,
             length: 10,
+            spelling: 0,
         };
         let r = rows(&map, &[note(36), note(10), note(100), note(10)]);
         assert_eq!(r.len(), 49);

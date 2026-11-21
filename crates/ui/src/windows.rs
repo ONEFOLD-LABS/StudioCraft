@@ -200,8 +200,12 @@ impl ProjectWindow {
             body(self, ui, &mut open);
             return (open, None);
         }
-        // Tasten, die in diesem Fenster gedrückt werden, kommen nur in seiner Eingabe an.
+        // Tasten, die in diesem Fenster gedrückt werden, kommen nur in seiner Eingabe an. In
+        // einem Editorfenster gelten Entf und Co. den Noten, nicht den Events.
+        let focused = self.key_editor.focused;
+        self.key_editor.focused = matches!(zone, LowerZone::Editor | LowerZone::Score);
         self.handle_window_keys(ui);
+        self.key_editor.focused = focused;
         // Drücken hier beginnt eine Geste für den Rückgängig-Verlauf (panel_undo.rs).
         let (press, down) = ui.input(|i| {
             (

@@ -190,6 +190,7 @@ impl ProjectWindow {
             velocity: 100,
             start,
             length: beat.max(1),
+            spelling: 0,
         });
         self.key_editor.selection = vec![ev.notes.len() - 1];
         self.key_editor.ctrl_sel.clear();
@@ -463,12 +464,14 @@ mod tests {
                 velocity: 90,
                 start: 960,
                 length: 480,
+                spelling: 0,
             },
             Note {
                 pitch: 60,
                 velocity: 100,
                 start: 0,
                 length: 960,
+                spelling: 0,
             },
         ];
         ev.controllers = vec![
@@ -524,7 +527,8 @@ mod tests {
                 pitch: 127,
                 velocity: 1,
                 start: -240,
-                length: 1
+                length: 1,
+                spelling: 0,
             }
         );
         assert_eq!(ev.controllers[0].kind, CtrlKind::Cc(7));

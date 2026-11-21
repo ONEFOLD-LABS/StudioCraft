@@ -659,6 +659,7 @@ fn interact(
                         velocity: 100,
                         start,
                         length: len,
+                        spelling: 0,
                     });
                     let i = ev.notes.len() - 1;
                     w.key_editor.selection = vec![i];
@@ -789,6 +790,7 @@ fn interact(
                         velocity: 100,
                         start,
                         length: len,
+                        spelling: 0,
                     })
                 });
                 if let Some(ev) = w.project.event(part) {
