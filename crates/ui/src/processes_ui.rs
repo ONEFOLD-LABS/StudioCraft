@@ -102,6 +102,8 @@ impl ProjectWindow {
             return Ok(());
         }
         let mut inst = self.instantiate(slot)?;
+        // Faster than real time: a plugin in its own process waits for every block.
+        inst.set_offline(true);
         let latency = inst.handle().latency() as usize;
         // Eingang mit Stille für die Latenz verlängert; die ersten `latency` Frames der Ausgabe
         // fallen weg.
