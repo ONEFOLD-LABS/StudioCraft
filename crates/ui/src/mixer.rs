@@ -544,7 +544,7 @@ pub(crate) fn channel_column(w: &mut ProjectWindow, ui: &mut Ui) {
         Align2::LEFT_CENTER,
         &track.name,
         FontId::proportional(11.0),
-        on_color(color),
+        crate::theme::text_on(color),
     );
     let inserts: Vec<(String, bool)> = track
         .inserts
@@ -636,16 +636,6 @@ fn slot_list(ui: &mut Ui, title: &str, slots: &[(String, bool)]) {
         let text = RichText::new(name).size(10.0);
         let text = if *active { text } else { text.weak() };
         ui.add(egui::Label::new(text).truncate());
-    }
-}
-
-/// Lesbare Schriftfarbe auf einer Spurfarbe.
-fn on_color(bg: Color32) -> Color32 {
-    let l = 0.299 * f32::from(bg.r()) + 0.587 * f32::from(bg.g()) + 0.114 * f32::from(bg.b());
-    if l > 140.0 {
-        Color32::BLACK
-    } else {
-        Color32::WHITE
     }
 }
 
@@ -861,7 +851,7 @@ impl Strip<'_> {
                     Align2::CENTER_CENTER,
                     self.name,
                     FontId::proportional(11.0),
-                    Color32::from_gray(15),
+                    crate::theme::text_on(self.color),
                 );
                 if let Some(link) = self.link_group {
                     if let Some(g) = *link {

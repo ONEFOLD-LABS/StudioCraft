@@ -740,7 +740,7 @@ pub(crate) fn paint(
             egui::Align2::LEFT_CENTER,
             text,
             egui::FontId::proportional(10.0),
-            crate::theme::tokens(painter.ctx()).event_text,
+            crate::theme::tokens(painter.ctx()).text,
         );
         return;
     };
