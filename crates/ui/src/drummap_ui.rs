@@ -8,7 +8,7 @@ use egui::{DragValue, Key, RichText, TextEdit, Ui};
 use studiocraft_project::{DRUM_MAP_EXTENSION, DrumMap, Project};
 
 use crate::ProjectWindow;
-use crate::i18n::{tr, tr_dyn, trf};
+use crate::i18n::{tr, trf};
 
 /// Notenwerte für Länge und Raster einer Zeile: (Ticks, Beschriftung).
 const VALUES: [(u64, &str); 7] = [
@@ -262,9 +262,13 @@ impl ProjectWindow {
                             let row = &map.rows[i];
                             ui.horizontal(|ui| {
                                 let id = ui.scope_id().with(("zeile", row.pitch));
-                                if let Some(n) =
-                                    text_cell(ui, id, &tr_dyn(&row.name), widths[0] - 8.0, ids[0])
-                                {
+                                if let Some(n) = text_cell(
+                                    ui,
+                                    id,
+                                    &crate::names::drum_row(row.pitch, &row.name),
+                                    widths[0] - 8.0,
+                                    ids[0],
+                                ) {
                                     changes.push(Change::RowName(i, n));
                                 }
                                 let note = |v: f64, _| crate::keyeditor::note_name(v as u8);

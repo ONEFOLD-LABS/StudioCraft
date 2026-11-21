@@ -59,8 +59,8 @@ impl ProjectWindow {
         let label = current
             .and_then(|id| self.project.io.input(id))
             .map_or_else(
-                || crate::i18n::tr_dyn(&self.project.tracks[track].input.label()),
-                |b| b.name.clone(),
+                || crate::names::bus(&self.project.tracks[track].input.label()),
+                |b| crate::names::bus(&b.name),
             );
         let mut choice = None;
         ui.horizontal(|ui| {
@@ -69,7 +69,7 @@ impl ProjectWindow {
                 .selected_text(label)
                 .show_ui(ui, |ui| {
                     for b in &self.project.io.inputs {
-                        let text = format!("{} ({})", b.name, b.ports_label());
+                        let text = format!("{} ({})", crate::names::bus(&b.name), b.ports_label());
                         if ui.selectable_label(current == Some(b.id), text).clicked() {
                             choice = Some(b.id);
                         }
@@ -98,13 +98,13 @@ impl ProjectWindow {
             .io
             .outputs
             .first()
-            .map_or(tr("Summe").to_owned(), |b| b.name.clone());
+            .map_or(tr("Summe").to_owned(), |b| crate::names::bus(&b.name));
         let label = match (
             current,
             current_bus.and_then(|id| self.project.io.output(id)),
         ) {
             (Some(id), _) => self.track_name(id),
-            (None, Some(b)) => b.name.clone(),
+            (None, Some(b)) => crate::names::bus(&b.name),
             (None, None) => main_name.clone(),
         };
         // Wahl: Gruppe, Hauptmix (None, None) oder weiterer Ausgangsbus (None, Some).
@@ -120,7 +120,10 @@ impl ProjectWindow {
                     }
                     for b in self.project.io.outputs.iter().skip(1) {
                         let on = current.is_none() && current_bus == Some(b.id);
-                        if ui.selectable_label(on, b.name.as_str()).clicked() {
+                        if ui
+                            .selectable_label(on, crate::names::bus(&b.name))
+                            .clicked()
+                        {
                             choice = Some((None, Some(b.id)));
                         }
                     }
@@ -160,7 +163,7 @@ impl ProjectWindow {
                 .project
                 .io
                 .output(id)
-                .map_or_else(|| "?".to_owned(), |b| b.name.clone()),
+                .map_or_else(|| "?".to_owned(), |b| crate::names::bus(&b.name)),
         }
     }
 

@@ -49,7 +49,10 @@ fn bus_table(
                         egui::WidgetInfo::labeled(
                             egui::Role::ComboBox,
                             true,
-                            crate::i18n::trf("Art von {name}", &[("name", &b.name)]),
+                            crate::i18n::trf(
+                                "Art von {name}",
+                                &[("name", &crate::names::bus(&b.name))],
+                            ),
                         )
                     });
                 let width = if b.stereo { 2 } else { 1 };
@@ -70,7 +73,10 @@ fn bus_table(
                         egui::WidgetInfo::labeled(
                             egui::Role::ComboBox,
                             true,
-                            crate::i18n::trf("Kanäle von {name}", &[("name", &b.name)]),
+                            crate::i18n::trf(
+                                "Kanäle von {name}",
+                                &[("name", &crate::names::bus(&b.name))],
+                            ),
                         )
                     });
                 let removable = !(output && b.id == MAIN_OUT);

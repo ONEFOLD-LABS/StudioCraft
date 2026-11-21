@@ -98,7 +98,7 @@ impl ProjectWindow {
             .io
             .outputs
             .first()
-            .map_or(tr("Summe").to_owned(), |b| b.name.clone());
+            .map_or(tr("Summe").to_owned(), |b| crate::names::bus(&b.name));
         out.push((None, main));
         out
     }

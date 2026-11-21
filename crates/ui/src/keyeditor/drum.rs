@@ -397,7 +397,7 @@ fn heads(
         if top < head.top() {
             continue; // halb unter dem Lineal: nur ganze Zeilen bedienen
         }
-        let name = map.name_of(row.pitch);
+        let name = crate::names::drum_row(row.pitch, &map.name_of(row.pitch));
         let Some(k) = row.map else {
             painter.with_clip_rect(head).text(
                 pos2(rect.left(), rect.center().y),
@@ -413,7 +413,10 @@ fn heads(
             ui.horizontal_centered(|ui| {
                 ui.spacing_mut().item_spacing.x = 2.0;
                 let (mut m, mut s) = (r.mute, r.solo);
-                let label = crate::i18n::trf("{name} stumm", &[("name", &r.name)]);
+                let label = crate::i18n::trf(
+                    "{name} stumm",
+                    &[("name", &crate::names::drum_row(r.pitch, &r.name))],
+                );
                 let resp =
                     crate::icons::state_toggle(ui, &mut m, tr("M"), t.mute).on_hover_text(&label);
                 resp.widget_info(|| {

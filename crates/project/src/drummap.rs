@@ -119,6 +119,11 @@ const GM_KIT: [(u8, &str); 47] = [
     (81, "Triangel offen"),
 ];
 
+/// Eingebauter Name einer Tonhöhe in der General-MIDI-Map (deutsch, wie gespeichert).
+pub fn gm_name(pitch: u8) -> Option<&'static str> {
+    GM_KIT.iter().find(|(p, _)| *p == pitch).map(|(_, n)| *n)
+}
+
 impl DrumMap {
     /// Standard-Map nach General MIDI, höchste Tonhöhe oben.
     pub fn general_midi() -> Self {
