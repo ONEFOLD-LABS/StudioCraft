@@ -400,6 +400,11 @@ Clip (0.7), Pakete für alle Plattformen und den Browser (0.5), englische Oberfl
 
 - [ ] Projektname: entschieden, StudioCraft (Repo unter Dokumente/GitHub/StudioCraft). Verworfen: SoundCraft (in der Familie vergeben), AudioCraft (Meta), MixCraft (bestehende DAW), RecordCraft (Rust-Recorder kaptaindieter/RecordCraft). Markenrecherche steht noch aus.
 - [x] GUI-Toolkit: entschieden, egui/eframe mit craft-ui wie die Craft-Apps (nativ und Web). Prototyp bestätigt: 0,15 ms CPU pro Frame bei 100 und 1000 Spuren (Release-Build)
-- [ ] Plugin-GUIs unter Wayland: Fremdfenster einbetten geht nur über X11/XWayland; als eigene Fenster öffnen? (#175, 0.8)
+- [x] Plugin-GUIs unter Wayland (#175, 0.8): CLAP-Plugins öffnen zuerst ein eigenes
+  Wayland-Fenster, sonst bettet StudioCraft den Editor über XWayland in ein eigenes Fenster ein
+  (bleibt über dem Hauptfenster, merkt sich seine Position je Plugin-Fenster, solange die App
+  läuft), zuletzt ein eigenes X11-Fenster des Plugins. LV2 und VST3 betten über XWayland ein.
+  Unter X11 hängen Plugin-Fenster am Hauptfenster (`WM_TRANSIENT_FOR`). Ohne XWayland gibt es
+  nur die Wayland-Fenster von CLAP-Plugins.
 - [x] Standard-MIDI-Dateien: entschieden, nicht im MVP, sondern in 0.6 (Issue #47). Datei → MIDI-Datei importieren legt je Spur und Kanal der Datei eine MIDI-Spur mit einem Part an (Noten, CC, Pitchbend, Aftertouch, erstes Programm); in einem Projekt ohne Events gelten danach Tempo und Taktarten der Datei, sonst beginnen die Parts am Takt des Cursors. Datei → MIDI-Datei exportieren schreibt Format 1 mit Tempospur und je MIDI- und Instrument-Spur einer Spur (stumme Parts und ausgeblendete Noten fehlen, Tempo-Rampen als Stufen je Sechzehntel). AAF/OMF-Import kommt später (Issue #154).
 - [ ] Wer übernimmt die Spec-Autor-Rolle, wer implementiert (Cleanroom-Trennung)?

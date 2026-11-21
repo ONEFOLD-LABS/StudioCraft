@@ -56,6 +56,22 @@ fn app_icon() -> egui::IconData {
     eframe::icon_data::from_png_bytes(png).unwrap_or_default()
 }
 
+/// Meldet dem Plugin-Host das Hauptfenster: Plugin-Fenster hängen unter X11 daran und
+/// wählen unter Wayland ihren Weg danach (Issue #175).
+fn report_main_window(cc: &eframe::CreationContext<'_>) {
+    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+    use studiocraft_plugin_host::MainWindow;
+    let window = match cc.window_handle().map(|h| h.as_raw()) {
+        Ok(RawWindowHandle::Xlib(h)) => {
+            u32::try_from(h.window).map_or(MainWindow::Other, MainWindow::X11)
+        }
+        Ok(RawWindowHandle::Xcb(h)) => MainWindow::X11(h.window.get()),
+        Ok(RawWindowHandle::Wayland(_)) => MainWindow::Wayland,
+        _ => MainWindow::Other,
+    };
+    studiocraft_plugin_host::set_main_window(window);
+}
+
 struct App {
     // Reihenfolge der Felder = Reihenfolge beim Aufräumen: erst der Steuerkanal (nimmt die
     // Token-Datei weg), dann das Fenster (es hält Plugin-Handles), dann der Kern mit den
@@ -356,6 +372,7 @@ fn main() -> ExitCode {
         Box::new(move |cc| {
             let mut window = window;
             window.enable_assistant();
+            report_main_window(cc);
             let control = control_port.and_then(|port| {
                 let ctx = cc.egui_ctx.clone();
                 match Control::start(port, move || ctx.request_repaint()) {
