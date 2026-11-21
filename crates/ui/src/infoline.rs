@@ -159,7 +159,7 @@ pub(crate) fn field(
         .unwrap_or_else(|| value.clone());
     let l = if multi {
         let t = crate::theme::tokens(ui.ctx());
-        ui.label(RichText::new(label).color(t.solo))
+        ui.label(RichText::new(label).color(t.warning))
     } else {
         ui.weak(label)
     };

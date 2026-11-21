@@ -1,11 +1,16 @@
 //! StudioCraft's look: design tokens for dark and light, egui visuals built from them, and the
 //! choice between Dark, Light and System.
 //!
-//! The token set and most dark/light values follow SoundCraft's DAW theme
-//! (`crates/ui-egui/src/theme.rs` in storytold/soundcraft, MIT OR Apache-2.0), with plain neutral
-//! greys and wine red (`APP_COLOR`) as a sparing accent (`docs/ui-parity.md`, „Farben“). Because
-//! a DAW already uses red for recording, `rec` is a brighter orange red and the playhead is
-//! neutral, so the accent and a recording are never mistaken for one another.
+//! The token set follows SoundCraft's DAW theme (`crates/ui-egui/src/theme.rs` in
+//! storytold/soundcraft, MIT OR Apache-2.0). The colours come from the ONEFOLD LABS brand book
+//! (ONEFOLD-LABS/brand, MIT): surfaces, lines and text from its neutrals (`paper`, `surface`,
+//! `surface-sunken`, `line`, `ink`, `ink-muted`), the accent from `apps/palette.json` (light:
+//! wine red `app-studiocraft` with white text; dark: a lighter wine with near-black text) and the
+//! semantic colours (success, warning, danger, info) from the same file. The DAW's own colours
+//! (lanes, grid, ruler, keys) are mixed from those neutrals; record, solo, mute, monitor and the
+//! meters keep their conventional hues. Because a DAW already uses red for recording, `rec` is a
+//! brighter orange red and the playhead is neutral, so the accent and a recording are never
+//! mistaken for one another.
 //!
 //! Use: call [`install`] once at start-up with the saved [`ThemePreference`] (egui then follows the
 //! system for `System`), and read colours with [`tokens`] wherever the UI paints.
@@ -89,117 +94,138 @@ pub struct Tokens {
     pub key_pressed: Color32,
     pub key_row: Color32,
     pub note_selected: Color32,
+    /// Overlay on the rows of black keys in the note grid.
+    pub key_black_row: Color32,
+    /// Overlay on the note grid outside the edited part.
+    pub outside_part: Color32,
+    // states in text and icons (brand `semantic`)
+    pub success: Color32,
+    pub warning: Color32,
+    pub danger: Color32,
+    pub info: Color32,
 }
 
 impl Tokens {
     pub const DARK: Tokens = Tokens {
-        window_bg: rgb(0x1e1e1e),
-        panel_bg: rgb(0x2a2a2a),
-        panel_bg2: rgb(0x323232),
-        toolbar_bg: rgb(0x242424),
-        border: rgb(0x121212),
-        border_light: rgb(0x454545),
-        text: rgb(0xd8d8d8),
-        text_dim: rgb(0x9a9a9a),
-        text_on_accent: rgb(0xffffff),
-        accent: rgb(0xc8466a),
+        window_bg: rgb(0x0b0e10),
+        panel_bg: rgb(0x171d20),
+        panel_bg2: rgb(0x202628),
+        toolbar_bg: rgb(0x101416),
+        border: rgb(0x3a454a),
+        border_light: rgb(0x9aa8ae),
+        text: rgb(0xeef2f1),
+        text_dim: rgb(0x9aa8ae),
+        text_on_accent: rgb(0x08181b),
+        accent: rgb(0xeb7287),
         brand_light: rgb(0xd9587a),
         brand_dark: rgb(0x8e1f3c),
-        accent_dark: rgb(0x9e2343),
-        button: rgb(0x3c3c3c),
-        button_hi: rgb(0x4e4e4e),
-        ruler_bg: rgb(0x2e2e2e),
-        ruler_text: rgb(0xb4b4b4),
-        ruler_tick: rgb(0x626262),
-        lane_bg: rgb(0x262626),
-        lane_alt: rgb(0x2a2a2a),
-        grid_line: rgb(0x363636),
-        bar_line: rgb(0x474747),
-        selection: rgba(0xc8466a, 77),
-        row_selected: rgb(0x383838),
-        cycle_fill: rgba(0xc8466a, 64),
+        accent_dark: rgb(0xfe93a2),
+        button: rgb(0x252d30),
+        button_hi: rgb(0x333c40),
+        ruler_bg: rgb(0x101416),
+        ruler_text: rgb(0x9aa8ae),
+        ruler_tick: rgb(0x5c686d),
+        lane_bg: rgb(0x111618),
+        lane_alt: rgb(0x171d20),
+        grid_line: rgb(0x272f33),
+        bar_line: rgb(0x3a454a),
+        selection: rgba(0xeb7287, 77),
+        row_selected: rgb(0x282e31),
+        cycle_fill: rgba(0xeb7287, 56),
         punch_fill: rgba(0xf0452e, 77),
-        playhead: rgb(0xf2e8ea),
+        playhead: rgb(0xeef2f1),
         event_text: rgb(0x0a0a0a),
-        event_text_muted: rgb(0xc8c8c8),
-        event_muted: rgb(0x777777),
-        event_shade: rgb(0x121212),
-        event_selected: rgb(0xf2e8ea),
+        event_text_muted: rgb(0xc8d0d3),
+        event_muted: rgb(0x6a767c),
+        event_shade: rgb(0x0b0e10),
+        event_selected: rgb(0xeef2f1),
         handle: rgb(0xffffff),
         rec: rgb(0xf0452e),
         solo: rgb(0xdec434),
         mute: rgb(0xe89428),
         monitor: rgb(0x46aa5a),
-        counter_bg: rgb(0x0c0c0c),
-        counter_text: rgb(0xef9fb4),
+        counter_bg: rgb(0x0b0e10),
+        counter_text: rgb(0xfe93a2),
         meter_green: rgb(0x3cc850),
         meter_yellow: rgb(0xe6d23c),
         meter_red: rgb(0xf0452e),
-        fader_track: rgb(0x0c0c0c),
+        fader_track: rgb(0x0b0e10),
         bus_input: rgb(0x7fa37a),
         bus_output: rgb(0x8f97a8),
-        strip_bg: rgb(0x303030),
-        key_white: rgb(0xe4e4e4),
-        key_black: rgb(0x1c1c1c),
-        key_line: rgb(0x949494),
-        key_pressed: rgb(0xc8466a),
-        key_row: rgb(0x5a2a38),
+        strip_bg: rgb(0x1b2225),
+        key_white: rgb(0xe2e7e6),
+        key_black: rgb(0x161b1e),
+        key_line: rgb(0x9aa8ae),
+        key_pressed: rgb(0xeb7287),
+        key_row: rgb(0x472026),
         note_selected: rgb(0xffffff),
+        key_black_row: rgba(0x000000, 60),
+        outside_part: rgba(0x000000, 90),
+        success: rgb(0x319751),
+        warning: rgb(0xb57a08),
+        danger: rgb(0xd2655b),
+        info: rgb(0x258bd2),
     };
 
     pub const LIGHT: Tokens = Tokens {
-        window_bg: rgb(0xbcbcbc),
-        panel_bg: rgb(0xcfcfcf),
-        panel_bg2: rgb(0xdadada),
-        toolbar_bg: rgb(0xc5c5c5),
-        border: rgb(0x6a6a6a),
-        border_light: rgb(0xa0a0a0),
-        text: rgb(0x1a1a1a),
-        text_dim: rgb(0x484848),
+        window_bg: rgb(0xeceeeb),
+        panel_bg: rgb(0xffffff),
+        panel_bg2: rgb(0xf6f7f5),
+        toolbar_bg: rgb(0xf6f7f5),
+        border: rgb(0xc9d0cf),
+        border_light: rgb(0x56636a),
+        text: rgb(0x111719),
+        text_dim: rgb(0x56636a),
         text_on_accent: rgb(0xffffff),
         accent: rgb(0x9e2343),
         brand_light: rgb(0xd9587a),
         brand_dark: rgb(0x8e1f3c),
-        accent_dark: rgb(0x7c1a34),
-        button: rgb(0xdddddd),
-        button_hi: rgb(0xcbcbcb),
-        ruler_bg: rgb(0xc8c8c8),
-        ruler_text: rgb(0x313131),
-        ruler_tick: rgb(0x888888),
-        lane_bg: rgb(0xd5d5d5),
-        lane_alt: rgb(0xcdcdcd),
-        grid_line: rgb(0xbcbcbc),
-        bar_line: rgb(0xa0a0a0),
-        selection: rgba(0x9e2343, 51),
-        row_selected: rgb(0xe3e3e3),
-        cycle_fill: rgba(0x9e2343, 46),
+        accent_dark: rgb(0x82002f),
+        button: rgb(0xeceeeb),
+        button_hi: rgb(0xc9d0cf),
+        ruler_bg: rgb(0xeceeeb),
+        ruler_text: rgb(0x56636a),
+        ruler_tick: rgb(0x9ba4a7),
+        lane_bg: rgb(0xffffff),
+        lane_alt: rgb(0xf6f7f5),
+        grid_line: rgb(0xe7eae9),
+        bar_line: rgb(0xc9d0cf),
+        selection: rgba(0x9e2343, 46),
+        row_selected: rgb(0xe1e6e5),
+        cycle_fill: rgba(0x9e2343, 40),
         punch_fill: rgba(0xd1321c, 56),
-        playhead: rgb(0x1b181a),
+        playhead: rgb(0x111719),
         event_text: rgb(0x0a0a0a),
-        event_text_muted: rgb(0xf4f2f3),
-        event_muted: rgb(0x8d8d8d),
-        event_shade: rgb(0x383838),
-        event_selected: rgb(0x1b181a),
+        event_text_muted: rgb(0xf6f7f5),
+        event_muted: rgb(0x9ba4a7),
+        event_shade: rgb(0x2c3438),
+        event_selected: rgb(0x111719),
         handle: rgb(0xffffff),
         rec: rgb(0xd1321c),
         solo: rgb(0xb2911a),
         mute: rgb(0xc26a16),
         monitor: rgb(0x24a03a),
-        counter_bg: rgb(0xe3e3e3),
-        counter_text: rgb(0x7c1a34),
+        counter_bg: rgb(0xeceeeb),
+        counter_text: rgb(0x82002f),
         meter_green: rgb(0x24a03a),
         meter_yellow: rgb(0xc9ad1c),
         meter_red: rgb(0xd1321c),
-        fader_track: rgb(0x8c8c8c),
+        fader_track: rgb(0x9aa8ae),
         bus_input: rgb(0x9cc296),
         bus_output: rgb(0xaab2c4),
-        strip_bg: rgb(0xc8c8c8),
-        key_white: rgb(0xf6f6f6),
-        key_black: rgb(0x292929),
-        key_line: rgb(0x8c8c8c),
+        strip_bg: rgb(0xf6f7f5),
+        key_white: rgb(0xffffff),
+        key_black: rgb(0x1f272a),
+        key_line: rgb(0x9aa8ae),
         key_pressed: rgb(0x9e2343),
-        key_row: rgb(0xecd3da),
-        note_selected: rgb(0x1b181a),
+        key_row: rgb(0xffdfe2),
+        note_selected: rgb(0x111719),
+        key_black_row: rgba(0x111719, 18),
+        outside_part: rgba(0x111719, 28),
+        success: rgb(0x017b37),
+        warning: rgb(0x906106),
+        danger: rgb(0xb24840),
+        info: rgb(0x006fb1),
     };
 
     pub const fn of(theme: Theme) -> &'static Tokens {
@@ -235,7 +261,9 @@ impl Tokens {
             (&mut v.widgets.noninteractive, self.panel_bg, self.text_dim),
             (&mut v.widgets.inactive, self.button, self.text),
             (&mut v.widgets.hovered, self.button_hi, self.text),
-            (&mut v.widgets.active, self.accent, self.text_on_accent),
+            // Pressed: neutral ground with an accent border. egui draws `strong` text in the
+            // pressed text colour, so it must be the body text, not the text on the accent.
+            (&mut v.widgets.active, self.button_hi, self.text),
             (&mut v.widgets.open, self.button_hi, self.text),
         ] {
             w.bg_fill = fill;
@@ -244,8 +272,10 @@ impl Tokens {
             w.fg_stroke = Stroke::new(w.fg_stroke.width, fg);
         }
         v.widgets.noninteractive.bg_stroke = Stroke::new(1.0, self.border);
+        // Brand book: borders of buttons and inputs in `ink-muted`, at least 3:1.
+        v.widgets.inactive.bg_stroke = Stroke::new(1.0, self.border_light);
         v.widgets.hovered.bg_stroke = Stroke::new(1.0, self.accent);
-        v.widgets.active.bg_stroke = Stroke::new(1.0, self.accent_dark);
+        v.widgets.active.bg_stroke = Stroke::new(1.5, self.accent);
         v
     }
 }
@@ -294,11 +324,88 @@ mod tests {
         }
     }
 
+    /// WCAG relative luminance.
+    fn luminance(c: Color32) -> f32 {
+        let lin = |v: u8| {
+            let s = f32::from(v) / 255.0;
+            if s <= 0.04045 {
+                s / 12.92
+            } else {
+                ((s + 0.055) / 1.055).powf(2.4)
+            }
+        };
+        0.2126 * lin(c.r()) + 0.7152 * lin(c.g()) + 0.0722 * lin(c.b())
+    }
+
+    fn contrast(a: Color32, b: Color32) -> f32 {
+        let (la, lb) = (luminance(a), luminance(b));
+        (la.max(lb) + 0.05) / (la.min(lb) + 0.05)
+    }
+
+    /// Text and state colours stay readable (WCAG AA 4.5:1) on every ground they are drawn on;
+    /// control borders, the playhead and the accent as a mark hold 3:1 (brand book).
     #[test]
-    fn text_contrasts_with_its_panels() {
-        for t in [Tokens::DARK, Tokens::LIGHT] {
-            assert!(distance(t.text, t.panel_bg) > 300);
-            assert!(distance(t.text, t.lane_bg) > 300);
+    fn text_and_state_colours_are_readable() {
+        for (theme, t) in [("dark", Tokens::DARK), ("light", Tokens::LIGHT)] {
+            let grounds = [
+                ("panel", t.panel_bg),
+                ("toolbar", t.toolbar_bg),
+                ("lane", t.lane_bg),
+                ("lane_alt", t.lane_alt),
+            ];
+            for (ground, bg) in grounds {
+                for (name, fg, min) in [
+                    ("text", t.text, 4.5),
+                    ("text_dim", t.text_dim, 4.5),
+                    ("success", t.success, 4.5),
+                    ("warning", t.warning, 4.5),
+                    ("danger", t.danger, 4.5),
+                    ("info", t.info, 4.5),
+                    ("accent", t.accent, 3.0),
+                    ("border_light", t.border_light, 3.0),
+                    ("playhead", t.playhead, 3.0),
+                ] {
+                    let c = contrast(fg, bg);
+                    assert!(c >= min, "{theme}: {name} on {ground}: {c:.2}");
+                }
+            }
+            for (name, fg, bg) in [
+                ("text on accent", t.text_on_accent, t.accent),
+                ("text on selected row", t.text, t.row_selected),
+                ("text on raised panel", t.text, t.panel_bg2),
+                ("ruler text", t.ruler_text, t.ruler_bg),
+                ("counter", t.counter_text, t.counter_bg),
+            ] {
+                let c = contrast(fg, bg);
+                assert!(c >= 4.5, "{theme}: {name}: {c:.2}");
+            }
+        }
+    }
+
+    /// The neutrals are the brand's (ONEFOLD-LABS/brand `tokens/tokens.json`).
+    #[test]
+    fn surfaces_and_text_are_the_brand_neutrals() {
+        assert_eq!(Tokens::LIGHT.panel_bg, rgb(0xffffff)); // surface
+        assert_eq!(Tokens::LIGHT.toolbar_bg, rgb(0xf6f7f5)); // paper
+        assert_eq!(Tokens::LIGHT.window_bg, rgb(0xeceeeb)); // surface-sunken
+        assert_eq!(Tokens::LIGHT.text, rgb(0x111719)); // ink
+        assert_eq!(Tokens::DARK.panel_bg, rgb(0x171d20));
+        assert_eq!(Tokens::DARK.toolbar_bg, rgb(0x101416));
+        assert_eq!(Tokens::DARK.window_bg, rgb(0x0b0e10));
+        assert_eq!(Tokens::DARK.text, rgb(0xeef2f1));
+        assert_eq!(Tokens::LIGHT.accent, APP_COLOR);
+    }
+
+    /// egui draws `strong` text (headings in lists and dialogs) in the pressed widget's text
+    /// colour: it must be readable on the panels.
+    #[test]
+    fn strong_text_is_readable() {
+        for (dark, t) in [(true, Tokens::DARK), (false, Tokens::LIGHT)] {
+            let v = t.visuals(dark);
+            for bg in [t.panel_bg, t.panel_bg2] {
+                let c = contrast(v.strong_text_color(), bg);
+                assert!(c >= 4.5, "strong text: {c:.2}");
+            }
         }
     }
 
