@@ -272,9 +272,12 @@ impl Song {
             .map(|(slot, t)| {
                 // Auf einer Audiospur klingt bei Überlappung nur das oberste Event
                 // (höchster Comp-Rang, sonst das spätere in der Liste). Verdeckte Teile fallen weg.
-                let audible = t.audible_spans();
+                // Audio-Parts klingen als ihre Events (Issue #184).
+                let flat = project.flattened_track(slot);
+                let audio_track: &studiocraft_project::Track = flat.as_deref().unwrap_or(t);
+                let audible = audio_track.audible_spans();
                 let mut events = Vec::new();
-                for (e, parts) in t.events.iter().zip(&audible) {
+                for (e, parts) in audio_track.events.iter().zip(&audible) {
                     let Some(samples) = e.clip.and_then(|c| clips.get(&c)) else {
                         continue;
                     };
@@ -1111,6 +1114,43 @@ mod tests {
         }
         assert_eq!(left[2], 1.0);
         assert_eq!(left[10], 1.0);
+    }
+
+    #[test]
+    fn an_audio_part_plays_its_events_like_the_loose_ones() {
+        let mut p = Project::default();
+        p.add_track(TrackKind::Audio, "a");
+        let c = p.add_clip(PoolClip {
+            name: "c".into(),
+            path: None,
+            sample_rate: 48_000,
+            frames: 192_000,
+        });
+        let q = TICKS_PER_QUARTER;
+        let a = p.add_audio_event(0, 0, c).unwrap();
+        let b = p.add_audio_event(0, 4 * q, c).unwrap();
+        p.event_mut(a).unwrap().length = 2 * q;
+        p.event_mut(b).unwrap().length = 2 * q;
+        p.event_mut(b).unwrap().offset = 24_000;
+        let clips = HashMap::from([(c, ones(192_000, 1.0))]);
+        let frames = |p: &Project| -> Vec<(u64, u64, u64)> {
+            Song::build(p, &clips, 48_000)
+                .tracks
+                .first()
+                .map(|t| {
+                    t.events
+                        .iter()
+                        .map(|e| (e.start, e.length, e.offset))
+                        .collect()
+                })
+                .unwrap_or_default()
+        };
+        let loose = frames(&p);
+        let part = p.group_audio(&[a, b]).unwrap();
+        assert_eq!(frames(&p), loose, "same audio as a part");
+        // Muting the part silences all its events.
+        p.event_mut(part).unwrap().muted = true;
+        assert!(frames(&p).is_empty());
     }
 
     #[test]

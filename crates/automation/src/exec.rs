@@ -90,7 +90,12 @@ impl Exec<'_> {
                             "length_text": tempo.format_length(e.length),
                             "muted": e.muted,
                         });
+                        if e.is_audio_part() {
+                            v["type"] = json!("audio_part");
+                            v["events"] = json!(e.children.len());
+                        }
                         match e.clip {
+                            _ if e.is_audio_part() => {}
                             Some(c) => {
                                 v["type"] = json!("audio");
                                 v["clip"] = json!(p.pool.get(c as usize).map(|c| c.name.clone()));

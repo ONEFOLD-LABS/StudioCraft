@@ -853,3 +853,7 @@ Notengröße:	Staff size:
 Notengröße	Staff size
 Abstand zweier Notenlinien	Distance between two staff lines
 Gespeichert: {file}	Saved: {file}
+Nur Audio-Events einer Audiospur lassen sich zu einem Part zusammenfassen	Only audio events of one audio track can be grouped into a part
+Audio-Part bilden	Make audio part
+Die gewählten Audio-Events einer Spur zu einem Part zusammenfassen	Group the selected audio events of one track into a part
+Audio-Part auflösen	Dissolve audio part

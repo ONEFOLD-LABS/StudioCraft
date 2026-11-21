@@ -17,6 +17,7 @@
 )]
 
 mod about;
+mod audio_parts_ui;
 mod automation_panel;
 mod automation_write;
 mod autosave;
@@ -4699,6 +4700,60 @@ mod tests {
         h.get_by_label("Notengröße");
         h.get_by_label("Ränder");
         h.get_by_label("2 MIDI-Part(s)");
+    }
+
+    /// Zwei Audio-Events auf einer Spur, nebeneinander mit Lücke.
+    fn two_audio_events(
+        w: &mut ProjectWindow,
+    ) -> (studiocraft_project::EventId, studiocraft_project::EventId) {
+        w.project = Project::default();
+        let a = w
+            .import_clip("Strophe", None, tone_clip(2.0, 220.0), None)
+            .unwrap();
+        let b = w
+            .import_clip("Refrain", None, tone_clip(2.0, 330.0), Some((0, 6 * 960)))
+            .unwrap();
+        (a, b)
+    }
+
+    /// Bearbeiten → „Audio-Part bilden“ fasst zusammen, „auflösen“ gibt die Events zurück;
+    /// beides rückgängig machbar.
+    #[test]
+    fn audio_events_group_into_a_part_and_back() {
+        let mut w = ProjectWindow::new(Project::default(), None, "kein Audio (Test)".into());
+        let (a, b) = two_audio_events(&mut w);
+        w.selection = vec![a, b];
+        let mut h = window_harness(w);
+        h.get_by_label("Bearbeiten").click();
+        h.run_steps(2);
+        h.get_by_label("Audio-Part bilden").click();
+        h.run_steps(2);
+        let events = &h.state().project.tracks[0].events;
+        assert_eq!(events.len(), 1);
+        assert!(events[0].is_audio_part());
+        let part = events[0].id;
+        assert_eq!(h.state().selection, vec![part]);
+        h.get_by_label("Bearbeiten").click();
+        h.run_steps(2);
+        h.get_by_label("Audio-Part auflösen").click();
+        h.run_steps(2);
+        assert_eq!(h.state().project.tracks[0].events.len(), 2);
+        h.state_mut().undo();
+        assert!(h.state().project.tracks[0].events[0].is_audio_part());
+        h.state_mut().undo();
+        assert_eq!(h.state().project.tracks[0].events.len(), 2);
+    }
+
+    #[test]
+    fn renders_an_audio_part() {
+        shot("audio_part", |w| {
+            let (a, b) = two_audio_events(w);
+            let part = w.project.group_audio(&[a, b]).unwrap();
+            let ev = w.project.event_mut(part).unwrap();
+            ev.fade_in = 480;
+            ev.gain_db = -3.0;
+            w.selection = vec![part];
+        });
     }
 
     #[test]

@@ -470,6 +470,7 @@ impl Project {
                 stretch_mode: crate::StretchMode::Standard,
                 warp: Vec::new(),
                 score_quantize: None,
+                children: Vec::new(),
             });
             added.push(i);
         }

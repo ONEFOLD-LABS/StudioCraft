@@ -238,7 +238,7 @@ fn smart_zone(w: &ProjectWindow, g: &Geo, p: Pos2) -> Option<(EventId, usize, Zo
     let fin = g.x((ev.start.0 + ev.fade_in) as f64);
     let fout = g.x((ev.end() - ev.fade_out) as f64);
     let mid = (x0 + x1) / 2.0;
-    let gain_handle = ev.clip.is_some()
+    let gain_handle = (ev.clip.is_some() || ev.is_audio_part())
         && p.y < lane_top + EDGE * 2.0
         && (p.x - mid).abs() <= EDGE
         && x1 - x0 > EDGE * 6.0;
@@ -2311,6 +2311,30 @@ fn paint_event(
         };
         paint_waveform(w, painter, g, ev, clip, body.intersect(g.lanes), wave);
     }
+    // Audio-Part: die Wellenformen seiner Events, auf den Part zugeschnitten (Issue #184).
+    if ev.is_audio_part() {
+        let wave = if ev.muted {
+            crate::theme::tokens(painter.ctx())
+                .event_text_muted
+                .gamma_multiply(0.7)
+        } else {
+            color.lerp_to_gamma(Color32::WHITE, 0.35)
+        };
+        let area = body.intersect(g.lanes);
+        for c in w.project.part_children(ev) {
+            let Some(clip) = c.clip.and_then(|id| w.clip(id)) else {
+                continue;
+            };
+            let x0 = g.x(c.start.0 as f64).max(area.left());
+            let x1 = g.x(c.end() as f64).min(area.right());
+            if x1 <= x0 {
+                continue;
+            }
+            let r = Rect::from_x_y_ranges(x0..=x1, area.y_range());
+            paint_waveform(w, painter, g, &c, clip, r, wave);
+            painter.vline(x0, r.y_range(), Stroke::new(1.0, wave.gamma_multiply(0.5)));
+        }
+    }
     let selected = w.selection.contains(&ev.id);
     paint_fades(painter, g, ev, body, selected);
 
@@ -2422,7 +2446,7 @@ fn paint_fades(painter: &Painter, g: &Geo, ev: &Event, body: Rect, selected: boo
         painter.add(egui::Shape::line(pts, line));
     }
     // Lautstärkegriff oben in der Mitte (Audio-Events), mit Wert, wenn nicht 0 dB.
-    if ev.clip.is_some() && body.width() > EDGE * 6.0 {
+    if (ev.clip.is_some() || ev.is_audio_part()) && body.width() > EDGE * 6.0 {
         let t = crate::theme::tokens(painter.ctx());
         let c = pos2(body.center().x, top + 3.0);
         painter.circle_filled(c, 3.0, t.handle);

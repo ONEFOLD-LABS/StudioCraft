@@ -108,6 +108,7 @@ impl ProjectWindow {
                         ui.close();
                     }
                 }
+                self.audio_part_menu(ui);
                 self.render_menu(ui);
                 self.freeze_menu(ui);
                 self.event_color_menu(ui);
