@@ -27,6 +27,7 @@ mod browser;
 mod bundle;
 mod colors;
 mod devices;
+mod dialog;
 mod drummap_ui;
 mod eq_ui;
 mod fades_ui;
@@ -178,6 +179,8 @@ pub struct ProjectWindow {
     /// Bildern, damit der öffnende Klick sie nicht gleich wieder schließt.
     tool_palette: Option<egui::Pos2>,
     tool_palette_age: u8,
+    /// Escape für die Dialogfenster (dialog.rs).
+    dialogs: dialog::Dialogs,
     /// Tastaturbelegung (Standard plus eigene Änderungen) und der Dialog dazu.
     keymap: keymap::Keymap,
     /// Thumbnails der Videospuren (Issue #174).
@@ -409,6 +412,7 @@ impl ProjectWindow {
             time_warp: None,
             tool_palette: None,
             tool_palette_age: 0,
+            dialogs: dialog::Dialogs::default(),
             keymap: keymap::Keymap::default(),
             videos: video::Cache::default(),
             show_video: false,
@@ -1082,6 +1086,7 @@ impl ProjectWindow {
             self.theme_installed = true;
         }
         self.panel_edit_start(ui.ctx());
+        self.dialogs.begin_frame(ui.ctx());
         // Link-Gruppen: Stand vor allen Bedienelementen dieses Bildes (project/links.rs).
         let links_before = self.project.link_snapshot();
         self.sync_from_engine();
@@ -1324,6 +1329,7 @@ impl ProjectWindow {
         self.confirm_dialog(ui);
         self.about_dialog(ui);
         self.drum_map_window(ui.ctx());
+        self.dialogs.end_frame(ui.ctx());
         self.sync_title_bar(ui.ctx());
         let title = self.title();
         if title != self.last_title {
@@ -5255,6 +5261,99 @@ mod tests {
             img.save(std::path::Path::new(&dir).join("file_menu.png"))
                 .unwrap();
         }
+    }
+
+    #[test]
+    fn escape_closes_the_top_dialog() {
+        type Open = fn(&mut ProjectWindow);
+        type IsOpen = fn(&ProjectWindow) -> bool;
+        let dialogs: [(&str, Open, IsOpen); 4] = [
+            (
+                "Über",
+                |w| w.about = about::About::Open,
+                |w| w.about != about::About::Closed,
+            ),
+            (
+                "Tastaturbefehle",
+                |w| w.key_dialog.open = true,
+                |w| w.key_dialog.open,
+            ),
+            (
+                "Geräte",
+                |w| w.open_device_dialog(),
+                |w| w.device_dialog.open,
+            ),
+            (
+                "Quantisierung",
+                |w| w.show_quantize = true,
+                |w| w.show_quantize,
+            ),
+        ];
+        for (name, open, is_open) in dialogs {
+            let (mut w, _) = one_event_window();
+            open(&mut w);
+            let mut h = window_harness(w);
+            assert!(is_open(h.state()), "{name} did not open");
+            h.key_press(Key::Escape);
+            h.run_steps(2);
+            assert!(!is_open(h.state()), "Escape left {name} open");
+        }
+    }
+
+    #[test]
+    fn escape_closes_only_one_dialog_at_a_time() {
+        let (mut w, _) = one_event_window();
+        w.about = about::About::Open;
+        w.show_quantize = true;
+        let mut h = window_harness(w);
+        h.key_press(Key::Escape);
+        h.run_steps(2);
+        let open = [
+            h.state().about != about::About::Closed,
+            h.state().show_quantize,
+        ];
+        assert_eq!(open.iter().filter(|o| **o).count(), 1, "{open:?}");
+        h.key_press(Key::Escape);
+        h.run_steps(2);
+        assert!(h.state().about == about::About::Closed && !h.state().show_quantize);
+    }
+
+    #[test]
+    fn escape_in_a_text_field_keeps_the_dialog_open() {
+        let (mut w, _) = one_event_window();
+        w.key_dialog.open = true;
+        let mut h = window_harness(w);
+        h.get_by_label("Suche").focus();
+        h.run_steps(1);
+        h.key_press(Key::Escape);
+        h.run_steps(2);
+        assert!(h.state().key_dialog.open);
+    }
+
+    #[test]
+    fn escape_while_recording_a_key_only_cancels_the_recording() {
+        let (mut w, _) = one_event_window();
+        w.key_dialog.open = true;
+        w.key_dialog.capturing = Some(keymap::Cmd::Snap);
+        let before = w.keymap.bindings(keymap::Cmd::Snap).to_vec();
+        let mut h = window_harness(w);
+        h.key_press(Key::Escape);
+        h.run_steps(2);
+        assert!(h.state().key_dialog.open);
+        assert!(h.state().key_dialog.capturing.is_none());
+        assert_eq!(h.state().keymap.bindings(keymap::Cmd::Snap), &before[..]);
+    }
+
+    #[test]
+    fn escape_on_the_unsaved_changes_prompt_leaves_dialogs_open() {
+        let (mut w, _) = one_event_window();
+        w.about = about::About::Open;
+        w.pending = Some(menu::Action::New);
+        let mut h = window_harness(w);
+        h.key_press(Key::Escape);
+        h.run_steps(2);
+        assert!(h.state().pending.is_none(), "Escape cancels the prompt");
+        assert!(h.state().about != about::About::Closed, "and nothing else");
     }
 
     #[test]

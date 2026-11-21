@@ -106,6 +106,11 @@ impl ProjectWindow {
         let (in_ch, out_ch) = (self.input_channels(), self.output_channels);
         let mut new_io = io.clone();
         let mut removal: Option<(bool, u32)> = None;
+        self.dialogs.escape_closes(
+            ctx,
+            crate::dialog::window_id(tr("Audio-Anschlüsse")),
+            &mut open,
+        );
         egui::Window::new(tr("Audio-Anschlüsse"))
             .open(&mut open)
             .resizable(false)
