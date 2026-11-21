@@ -8345,6 +8345,62 @@ mod tests {
         assert!(h.state().project.tracks.is_empty(), "neues leeres Projekt");
     }
 
+    /// Fenster schließen oder „Neu“ während einer Aufnahme: Der Take kommt ins Projekt, und
+    /// die Rückfrage bietet an, ihn zu speichern (AGENTS.md: ein Absturz oder Beenden darf
+    /// keine Takes kosten).
+    #[test]
+    fn closing_while_recording_keeps_the_take() {
+        for close in [true, false] {
+            let tmp = temp_dir(if close { "rec-close" } else { "rec-new" });
+            let (mut core, ctl) = studiocraft_engine::engine(48_000, TempoMap::default());
+            let mut w = ProjectWindow::new(Project::default(), Some(ctl), String::new());
+            w.project_path = Some(tmp.join("P.studiocraft"));
+            let t = w.project.add_track(TrackKind::Audio, "Mikro");
+            w.project.tracks[t].record = true;
+            w.saved = Some(w.project.clone());
+            let (mut tx, rx) = rtrb::RingBuffer::new(1 << 18);
+            w.recorder = Some(studiocraft_engine::Recorder::spawn(
+                rx,
+                2,
+                48_000,
+                std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0)),
+            ));
+            w.start_recording();
+            assert!(w.recording && w.audio_recording, "{:?}", w.message);
+            let mut out = vec![0.0f32; 2 * 512];
+            core.process(&mut out);
+            for i in 0..24_000 {
+                tx.push(i as f32 / 48_000.0).unwrap();
+                tx.push(0.5).unwrap();
+            }
+            for _ in 0..50 {
+                core.process(&mut out);
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+
+            let mut h = window_harness(w);
+            if close {
+                h.input_mut()
+                    .viewports
+                    .entry(egui::ViewportId::ROOT)
+                    .or_default()
+                    .events
+                    .push(egui::ViewportEvent::Close);
+                h.run_steps(1);
+                assert_eq!(h.state().pending, Some(menu::Action::Quit));
+            } else {
+                h.key_press_modifiers(egui::Modifiers::COMMAND, Key::N);
+                h.run_steps(2);
+                assert_eq!(h.state().pending, Some(menu::Action::New));
+            }
+            let w = h.state();
+            assert!(!w.recording, "Aufnahme beendet");
+            assert_eq!(w.project.tracks[t].events.len(), 1, "Take im Projekt");
+            assert!(w.is_modified(), "Rückfrage bietet Speichern an");
+            assert!(tmp.join("Audio").read_dir().unwrap().next().is_some());
+        }
+    }
+
     /// Zweikanal-Aufnahme: links eine Rampe (Frame-Index / 1e6), rechts konstant 0,5.
     fn two_channel_recording(dir: &Path, frames: u64) -> studiocraft_engine::Recording {
         let samples: Vec<f32> = (0..frames).flat_map(|i| [i as f32 / 1e6, 0.5]).collect();
@@ -8356,6 +8412,7 @@ mod tests {
             channels: 2,
             sample_rate: 48_000,
             first_captured_at: None,
+            problem: None,
         }
     }
 

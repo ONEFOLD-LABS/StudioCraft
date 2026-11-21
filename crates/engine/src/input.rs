@@ -47,10 +47,21 @@ pub struct Recording {
     pub sample_rate: u32,
     /// Wann der erste Frame erfasst wurde (Uhr aus [`crate::clock`]), falls bekannt.
     pub first_captured_at: Option<u64>,
+    /// Die Aufnahme wurde unterbrochen (z. B. Platte voll): `frames` ist, was bis dahin sicher
+    /// in der Datei steht.
+    pub problem: Option<String>,
 }
 
+/// Wie oft der WAV-Kopf während der Aufnahme nachgeführt wird: Nach einem Absturz ist die
+/// Datei bis dahin lesbar.
+const FLUSH_EVERY: Duration = if cfg!(test) {
+    Duration::from_millis(20)
+} else {
+    Duration::from_secs(1)
+};
+
 enum Control {
-    Start(PathBuf),
+    Start(PathBuf, mpsc::Sender<Result<(), String>>),
     Stop(mpsc::Sender<Result<Recording, String>>),
     Quit,
 }
@@ -395,9 +406,15 @@ impl Recorder {
         }
     }
 
-    /// Beginnt eine Aufnahme nach `path`. Was vorher im Puffer lag, wird verworfen.
-    pub fn start(&self, path: &Path) {
-        let _ = self.control.send(Control::Start(path.to_path_buf()));
+    /// Beginnt eine Aufnahme nach `path`. Was vorher im Puffer lag, wird verworfen. Fehler,
+    /// wenn die Datei sich nicht anlegen lässt: dann läuft keine Aufnahme.
+    pub fn start(&self, path: &Path) -> Result<(), String> {
+        let (tx, rx) = mpsc::channel();
+        self.control
+            .send(Control::Start(path.to_path_buf(), tx))
+            .map_err(|_| "Recorder läuft nicht".to_string())?;
+        rx.recv_timeout(Duration::from_secs(5))
+            .map_err(|_| "Recorder antwortet nicht".to_string())?
     }
 
     /// Beendet die Aufnahme und wartet, bis die Datei vollständig geschrieben ist.
@@ -423,8 +440,41 @@ impl Drop for Recorder {
 struct Active {
     writer: hound::WavWriter<std::io::BufWriter<std::fs::File>>,
     path: PathBuf,
-    samples: u64,
     first_captured_at: Option<u64>,
+    last_flush: std::time::Instant,
+}
+
+/// Schließt die Datei ab, auch nach einem Schreibfehler, und liest ihre wirkliche Länge: Was
+/// in der Datei steht, wird der Take (AGENTS.md: ein Absturz darf keine Takes kosten).
+fn finish(
+    a: Active,
+    failed: Option<String>,
+    channels: u16,
+    rate: u32,
+) -> Result<Recording, String> {
+    let Active {
+        writer,
+        path,
+        first_captured_at,
+        ..
+    } = a;
+    let finalized = writer
+        .finalize()
+        .map_err(|e| format!("{}: {e}", path.display()));
+    let problem = failed.or(finalized.err());
+    let frames = hound::WavReader::open(&path).map(|r| u64::from(r.duration()));
+    match frames {
+        Ok(frames) if frames > 0 || problem.is_none() => Ok(Recording {
+            path,
+            frames,
+            channels,
+            sample_rate: rate,
+            first_captured_at,
+            problem,
+        }),
+        Ok(_) => Err(problem.unwrap_or_default()),
+        Err(e) => Err(problem.unwrap_or_else(|| format!("{}: {e}", path.display()))),
+    }
 }
 
 fn recorder_loop(
@@ -458,13 +508,21 @@ fn recorder_loop(
                         break;
                     }
                 }
-                a.samples += n as u64;
+                // Kopf nachführen: nach einem Absturz ist die Datei bis hierher lesbar. Mitten
+                // in einem Frame meldet hound das, schreibt aber trotzdem.
+                if failed.is_none() && a.last_flush.elapsed() >= FLUSH_EVERY {
+                    a.last_flush = std::time::Instant::now();
+                    match a.writer.flush() {
+                        Ok(()) | Err(hound::Error::UnfinishedSample) => {}
+                        Err(e) => failed = Some(format!("{}: {e}", a.path.display())),
+                    }
+                }
             }
             chunk.commit_all();
             consumed += n as u64;
         }
         match msg {
-            Ok(Control::Start(path)) => {
+            Ok(Control::Start(path, reply)) => {
                 // Puffer leeren: die Aufnahme beginnt jetzt.
                 let n = consumer.slots();
                 if let Ok(c) = consumer.read_chunk(n) {
@@ -473,37 +531,30 @@ fn recorder_loop(
                 }
                 failed = None;
                 let first_captured_at = clock.time_of(consumed / ch, rate);
+                // Eine noch laufende Aufnahme abschließen, nicht verwerfen.
+                if let Some(old) = active.take() {
+                    let _ = finish(old, None, channels, rate);
+                }
                 active = match hound::WavWriter::create(&path, spec) {
-                    Ok(writer) => Some(Active {
-                        writer,
-                        path,
-                        samples: 0,
-                        first_captured_at,
-                    }),
+                    Ok(writer) => {
+                        let _ = reply.send(Ok(()));
+                        Some(Active {
+                            writer,
+                            path,
+                            first_captured_at,
+                            last_flush: std::time::Instant::now(),
+                        })
+                    }
                     Err(e) => {
-                        failed = Some(format!("{}: {e}", path.display()));
+                        let _ = reply.send(Err(format!("{}: {e}", path.display())));
                         None
                     }
                 };
             }
             Ok(Control::Stop(reply)) => {
-                let result = match (active.take(), failed.take()) {
-                    (_, Some(e)) => Err(e),
-                    (None, None) => Err("Es lief keine Aufnahme".into()),
-                    (Some(a), None) => {
-                        let frames = a.samples / ch;
-                        let first_captured_at = a.first_captured_at;
-                        a.writer
-                            .finalize()
-                            .map(|()| Recording {
-                                path: a.path,
-                                frames,
-                                channels,
-                                sample_rate: rate,
-                                first_captured_at,
-                            })
-                            .map_err(|e| e.to_string())
-                    }
+                let result = match active.take() {
+                    Some(a) => finish(a, failed.take(), channels, rate),
+                    None => Err("Es lief keine Aufnahme".into()),
                 };
                 let _ = reply.send(result);
             }
@@ -552,7 +603,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("sc-rec-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("take.wav");
-        rec.start(&path);
+        rec.start(&path).unwrap();
         std::thread::sleep(Duration::from_millis(30));
         for i in 0..100 {
             for c in 0..3 {
@@ -572,5 +623,79 @@ mod tests {
         let st = extract_channels(&done, 0, true).unwrap();
         assert_eq!(&st[..4], &[0.0, 0.25, 1.0, 1.25]);
         assert!(rec.stop().is_err(), "zweites Stopp ohne Aufnahme");
+        assert_eq!(done.problem, None);
+    }
+
+    fn recorder(channels: u16) -> (rtrb::Producer<f32>, Recorder, PathBuf) {
+        let (tx, rx) = rtrb::RingBuffer::new(1 << 16);
+        let rec = Recorder::spawn_with_clock(
+            rx,
+            channels,
+            48_000,
+            Arc::new(AtomicU64::new(0)),
+            Arc::new(CaptureClock::default()),
+        );
+        let dir =
+            std::env::temp_dir().join(format!("sc-rec-{}-{}", std::process::id(), now_nanos()));
+        std::fs::create_dir_all(&dir).unwrap();
+        (tx, rec, dir)
+    }
+
+    #[test]
+    fn a_file_that_cannot_be_created_fails_the_start() {
+        let (_tx, rec, dir) = recorder(2);
+        let err = rec.start(&dir.join("fehlt").join("take.wav")).unwrap_err();
+        assert!(err.contains("take.wav"), "{err}");
+        assert!(rec.stop().is_err(), "keine Aufnahme gestartet");
+        // Danach geht eine Aufnahme wie gewohnt.
+        rec.start(&dir.join("take.wav")).unwrap();
+        assert!(rec.stop().is_ok());
+    }
+
+    #[test]
+    fn the_file_stays_readable_while_recording() {
+        // Ein Absturz mitten in der Aufnahme: was bis zum letzten Nachführen geschrieben war,
+        // ist eine gültige WAV-Datei.
+        let (mut tx, rec, dir) = recorder(2);
+        let path = dir.join("take.wav");
+        rec.start(&path).unwrap();
+        for i in 0..4800 {
+            tx.push(i as f32).unwrap();
+        }
+        std::thread::sleep(Duration::from_millis(40));
+        tx.push(0.0).unwrap();
+        tx.push(0.0).unwrap();
+        std::thread::sleep(Duration::from_millis(40));
+        let frames = hound::WavReader::open(&path).unwrap().duration();
+        assert!(frames >= 2400, "{frames} Frames vor dem Stopp lesbar");
+        assert_eq!(rec.stop().unwrap().frames, 2401);
+    }
+
+    #[test]
+    fn a_write_error_keeps_what_was_recorded() {
+        let dir = std::env::temp_dir().join(format!("sc-rec-fail-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("take.wav");
+        let spec = hound::WavSpec {
+            channels: 2,
+            sample_rate: 48_000,
+            bits_per_sample: 32,
+            sample_format: hound::SampleFormat::Float,
+        };
+        let mut writer = hound::WavWriter::create(&path, spec).unwrap();
+        for i in 0..2000 {
+            writer.write_sample(i as f32).unwrap();
+        }
+        let a = Active {
+            writer,
+            path: path.clone(),
+            first_captured_at: Some(7),
+            last_flush: std::time::Instant::now(),
+        };
+        let r = finish(a, Some("Platte voll".into()), 2, 48_000).unwrap();
+        assert_eq!((r.frames, r.first_captured_at), (1000, Some(7)));
+        assert_eq!(r.problem.as_deref(), Some("Platte voll"));
+        let back = extract_channels(&r, 1, false).unwrap();
+        assert_eq!(&back[..4], &[1.0, 1.0, 3.0, 3.0]);
     }
 }
