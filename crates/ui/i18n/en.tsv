@@ -51,9 +51,9 @@ Speichern …	Save…
 Laden …	Load…
 Gespielte Tonhöhe, wenn sie von der Zeile abweicht	Pitch that is played, if it differs from the row
 Werkzeugzeile	Toolbar
-Nach oben	Move Up
-Nach unten	Move Down
-Zeile löschen	Delete Row
+Nach oben	Move up
+Nach unten	Move down
+Zeile löschen	Delete row
 Datei zu groß	File too large
 Wie Spur „{spur}“ ({map})	Like track “{spur}” ({map})
 Bearbeiten …	Edit…
@@ -224,7 +224,7 @@ MIDI-Ausgänge des Systems neu einlesen	Rescan the system's MIDI outputs
 Monitor	Monitor
 Mono	Mono
 Mute	Mute
-nach dem Fader	post-fader
+nach dem Fader	Post-fader
 Name	Name
 Name von {ports}	Name of {ports}
 Nr.	No.
@@ -367,7 +367,7 @@ Ende	End
 Ersetzen	Replace
 Event auf Auswahl	Event to Selection
 Event fehlt	Event missing
-Event-Farbe	Event color
+Event-Farbe	Event Color
 Events	Events
 Events + Cursor	Events + Cursor
 Events + Raster + Cursor	Events + Grid + Cursor
@@ -396,7 +396,7 @@ High-Shelf	High shelf
 Hinspringen	Go there
 Höchstens {max} Controller-Spuren	At most {max} controller lanes
 Höchstens {max} Stücke; der Rest bleibt ein Event	At most {max} pieces; the rest stays one event
-Im Cycle	In loop
+Im Cycle	In Loop
 Inhalt strecken geht bisher nur bei MIDI-Parts	Stretching content only works on MIDI parts so far
 kein Audio-Event	not an audio event
 kein Bereich	no range
@@ -416,7 +416,7 @@ Länge {len}	Length {len}
 Marker {id} gibt es nicht	Marker {id} does not exist
 Metronom	Metronome
 MIDI	MIDI
-MIDI-Aufnahme	MIDI recording
+MIDI-Aufnahme	MIDI Recording
 MIDI: aus	MIDI: off
 MIDI: kein Eingang	MIDI: no input
 Mischen	Merge
@@ -456,7 +456,7 @@ Sekunden	Seconds
 Snap-Modus	Snap mode
 Spur {name} entfernen	Remove lane {name}
 Spuren: ziehen oder daneben klicken	Tracks: drag or click beside it
-Spurfarbe übernehmen	Use track color
+Spurfarbe übernehmen	Use Track Color
 Stereo kombiniert	Stereo combined
 Stereo-Balance	Stereo balance
 Stumm	Mute
@@ -483,8 +483,8 @@ Umkehren	Reverse
 Velocity	Velocity
 Velocity „{t}“ nicht verstanden	Velocity “{t}” not understood
 Violett	Violet
-Vorzähler	Count-in
-Weitere Controller	More controllers
+Vorzähler	Count-In
+Weitere Controller	More Controllers
 Werte der ersten Note; Änderungen wirken relativ auf alle	Values of the first note; changes apply relatively to all
 Werte des ersten Events; Zeitwerte ändern alle relativ	Values of the first event; time values change all relatively
 Wiedergabe	Play
@@ -499,7 +499,7 @@ Zählzeit	Beat
 {n} Noten	{n} notes
 {n} Take(s) aufgenommen, aber {overruns} Samples verloren (Puffer voll)	{n} take(s) recorded, but {overruns} samples lost (buffer full)
 {rows} Spuren	{rows} tracks
-Über bestehenden Parts	Over existing parts
+Über bestehenden Parts	Over Existing Parts
 + Befehl	+ Command
 Abtastrate	Sample rate
 Aktuelles speichern	Save Current
@@ -510,7 +510,7 @@ Alle 2 Minuten	Every 2 minutes
 Alle 5 Minuten	Every 5 minutes
 An Ort und Stelle rendern	Render in Place
 Anzahl	Count
-Anzahl Sicherungen	Number of backups
+Anzahl Sicherungen	Number of Backups
 Audio importieren …	Import Audio…
 Audio- und MIDI-Geräte	Audio and MIDI Devices
 Audio-Dateien des Projekts (Pool)	The project's audio files (pool)
@@ -709,7 +709,7 @@ Zu Marker 8	Go to Marker 8
 Zu Marker 9	Go to Marker 9
 {key} gehört schon zu „{name}“.	{key} already belongs to “{name}”.
 Öffnen	Open
-Link-Gruppe	Link group
+Link-Gruppe	Link Group
 Gruppe {nr}	Group {nr}
 Rechtsklick: Link-Gruppe	Right-click: link group
 Link-Gruppe {nr} – Rechtsklick: ändern	Link group {nr} – right-click: change
@@ -721,23 +721,23 @@ Sinus	Sine
 Rechteck	Square
 Auch an: {name}	Also to: {name}
 Weiteren Ausgang entfernen	Remove extra output
-+ Weiterer Ausgang	+ Extra output
++ Weiterer Ausgang	+ Extra Output
 Drum-Map	Drum map
-GM-Schlagzeug	GM drums
+GM-Schlagzeug	GM Drums
 Drum-Editor – {map}	Drum editor – {map}
 {name} stumm	Mute {name}
 {name} solo	Solo {name}
 Raster für {name}	Grid for {name}
 Empfindlichkeit	Sensitivity
-Hitpoints erkennen	Detect hitpoints
-In Slices teilen	Slice at hitpoints
+Hitpoints erkennen	Detect Hitpoints
+In Slices teilen	Slice at Hitpoints
 Teilt das Event an {n} Hitpoints	Splits the event at {n} hitpoints
 {n} Hitpoints	{n} hitpoints
-Tempo erkennen	Detect tempo
+Tempo erkennen	Detect Tempo
 Schätzt das Tempo der Auswahl bzw. des Events	Estimates the tempo of the selection or the event
 ≈ {bpm} BPM	≈ {bpm} BPM
-Als Projekttempo	Use as project tempo
-kein Tempo gefunden	no tempo found
+Als Projekttempo	Use as Project Tempo
+kein Tempo gefunden	No tempo found
 Stille	Silence
 Phase drehen	Invert phase
 DC-Offset entfernen	Remove DC offset
@@ -750,13 +750,13 @@ Normalisieren auf {db} dB	Normalize to {db} dB
 Bearbeitung {nr} nach oben	Move process {nr} up
 Bearbeitung {nr} entfernen	Remove process {nr}
 Bearbeitungen: {e}	Processes: {e}
-hoch	up
-Plugin anwenden	Apply plugin
-Inserts der Spur	Track inserts
+hoch	Up
+Plugin anwenden	Apply Plugin
+Inserts der Spur	Track Inserts
 Plugin-Bearbeitung abgebrochen	Plugin processing aborted
 Plugin	Plugin
 Steuerkanal: {fehler}	Control channel: {fehler}
-KI-Assistent	AI assistant
+KI-Assistent	AI Assistant
 API-Schlüssel	API key
 Abgebrochen.	Cancelled.
 Adresse	Address
@@ -786,7 +786,7 @@ Keine Antwort in der Zeit.	No reply in time.
 Lokal: nichts verlässt diesen Rechner.	Local: nothing leaves this computer.
 Modell	Model
 Modell wählen	Choose model
-Modelle abfragen	List models
+Modelle abfragen	List Models
 Nach {n} Schritten angehalten; schreib weiter, um fortzufahren.	Stopped after {n} steps; write again to continue.
 Nachricht	Message
 Neues Gespräch beginnen	Start a new conversation
@@ -799,7 +799,7 @@ Verbindung gesichert.	Connection saved.
 Zu viele Anfragen oder Kontingent aufgebraucht	Too many requests or quota used up
 Zum Beispiel: Lege eine Bass-Spur mit einem Part über 4 Takte an	For example: add a bass track with a 4-bar part
 http:// nur zu diesem Rechner; sonst https:// verwenden.	http:// only to this computer; use https:// otherwise.
-leer für lokale Server	empty for local servers
+leer für lokale Server	Empty for local servers
 {n} Modelle gefunden.	{n} models found.
 Keine Zertifikate des Systems gefunden.	No system certificates found.
 Eigener Prozess ist hier nicht verfügbar	Own process is not available here
@@ -815,8 +815,8 @@ Dieses Plugin stürzte beim Scan ab und läuft daher nur im eigenen Prozess	This
 eigener Prozess	own process
 Immer in eigenem Prozess	Always in its own process
 Neue Inserts dieses Plugins laufen im eigenen Prozess: Ein Absturz lässt nur den Insert verstummen	New inserts of this plugin run in their own process: a crash silences only the insert
-Noten-Editor	Score editor
-Noten-Editor im eigenen Fenster	Score editor in its own window
+Noten-Editor	Score Editor
+Noten-Editor im eigenen Fenster	Score Editor in Its Own Window
 Erst einen MIDI-Part auswählen	Select a MIDI part first
 Einen MIDI-Part wählen oder öffnen, um ihn hier als Noten zu sehen	Select or open a MIDI part to see it here as notation
 Anzeige-Quantisierung	Display quantize
@@ -835,7 +835,7 @@ Kreuz	Sharp
 Gewählte Noten einen Halbton höher, mit Kreuz	Selected notes a semitone higher, with a sharp
 Be	Flat
 Gewählte Noten einen Halbton tiefer, mit Be	Selected notes a semitone lower, with a flat
-Enharmonisch verwechseln	Respell enharmonically
+Enharmonisch verwechseln	Respell Enharmonically
 Kreuz als Be schreiben und umgekehrt	Write sharps as flats and the other way round
 Ganze	Whole
 Halbe	Half
@@ -843,8 +843,8 @@ Viertel	Quarter
 Achtel	Eighth
 Sechzehntel	Sixteenth
 Zweiunddreißigstel	Thirty-second
-Noten exportieren …	Export notation …
-Noten exportieren	Export notation
+Noten exportieren …	Export Notation …
+Noten exportieren	Export Notation
 {n} MIDI-Part(s)	{n} MIDI part(s)
 PDF (Druck)	PDF (print)
 Titel:	Title:
@@ -857,11 +857,11 @@ Notengröße	Staff size
 Abstand zweier Notenlinien	Distance between two staff lines
 Gespeichert: {file}	Saved: {file}
 Nur Audio-Events einer Audiospur lassen sich zu einem Part zusammenfassen	Only audio events of one audio track can be grouped into a part
-Audio-Part bilden	Make audio part
+Audio-Part bilden	Make Audio Part
 Die gewählten Audio-Events einer Spur zu einem Part zusammenfassen	Group the selected audio events of one track into a part
-Audio-Part auflösen	Dissolve audio part
+Audio-Part auflösen	Dissolve Audio Part
 Einen Audio-Part doppelklicken oder wählen, um seine Events hier zu bearbeiten	Double-click or select an audio part to edit its events here
-Part-Editor	Part editor
+Part-Editor	Part Editor
 AAF/OMF importieren …	Import AAF/OMF …
 AAF/OMF importieren	Import AAF/OMF
 AAF- und OMF-Dateien	AAF and OMF files
@@ -893,7 +893,7 @@ Kein Bild an dieser Stelle	No picture at this position
 Bild an der Cursor-Position	Picture at the cursor position
 Täglich nach Updates suchen	Check for updates daily
 Fragt einmal am Tag bei GitHub nach einer neuen Version; sonst wird nichts gesendet.	Asks GitHub once a day for a new version; nothing else is sent.
-Jetzt nach Updates suchen	Check for updates now
+Jetzt nach Updates suchen	Check for Updates Now
 StudioCraft {version} ist aktuell.	StudioCraft {version} is up to date.
 Update-Suche fehlgeschlagen: {e}	Update check failed: {e}
 Update nicht installiert: {e}	Update not installed: {e}

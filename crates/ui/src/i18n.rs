@@ -251,6 +251,37 @@ mod tests {
         }
     }
 
+    /// English style: Title Case on tabs and buttons, the editor tabs of the lower zone read alike.
+    #[test]
+    fn english_tabs_and_buttons_use_title_case() {
+        set_language(Language::English);
+        let tabs = [
+            "Sample-Editor",
+            "List-Editor",
+            "Noten-Editor",
+            "Part-Editor",
+        ]
+        .map(tr);
+        let buttons = [
+            "Hitpoints erkennen",
+            "Tempo erkennen",
+            "Plugin anwenden",
+            "Enharmonisch verwechseln",
+        ]
+        .map(tr);
+        set_language(Language::German);
+        for t in tabs {
+            assert!(t.ends_with(" Editor"), "{t}");
+        }
+        for b in buttons {
+            let lower = b
+                .split(' ')
+                .filter(|w| w.len() > 3)
+                .any(|w| w.starts_with(char::is_lowercase));
+            assert!(!lower, "{b}");
+        }
+    }
+
     #[test]
     fn switching_the_language_changes_texts_and_falls_back_to_german() {
         set_language(Language::English);
