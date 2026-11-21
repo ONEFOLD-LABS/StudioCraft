@@ -12,7 +12,7 @@ anderen Craft-Apps. Es gibt zwei Betriebsarten:
 | Betriebsart | Aufruf | Was gesteuert wird |
 |---|---|---|
 | **Kopflos** (Standard) | `studiocraft-cli mcp …` | Ein eigenes `ProjectWindow` ohne Fenster und ohne Audiogerät |
-| **Connect** | `studiocraft --control 7850` und `studiocraft-cli mcp … --connect 7850` | Das offene Fenster der laufenden App; zusätzlich `transport` und `ui_screenshot` |
+| **Connect** | `studiocraft --control 7850` und `studiocraft-cli mcp … --connect 7850` | Das offene Fenster der laufenden App; zusätzlich `transport`, `ui_screenshot`, `ui_inspect` und `ui_click` |
 
 In beiden Fällen laufen die Werkzeuge über denselben Code (`exec.rs`) auf einem
 `ProjectWindow`. Undo-Verlauf, Import, Speichern und Mixdown verhalten sich also wie in der App.
@@ -69,6 +69,11 @@ studiocraft-cli mcp --automation-read-root /arbeit/projekt --automation-write-ro
 - Eine Bearbeitung wird nie zweimal geschickt: Reißt die Verbindung mitten in einer Anfrage ab,
   meldet das Werkzeug einen Fehler, und der Agent prüft mit `inspect_project`, ob sie angekommen
   ist.
+- `ui_inspect` liest den Baum, den egui für Bildschirmleser (AccessKit) baut. Die App baut ihn nur
+  für die Anfrage und schaltet ihn danach wieder ab, außer ein Bildschirmleser braucht ihn.
+  Beschriftungen folgen der Sprache der App. Ids gelten, solange das Element da ist.
+- `ui_click` klickt wie die Maus in der Mitte des Elements, also nur, was im Fenster sichtbar
+  ist. Ein Dialog, der durch den Klick aufgeht, ist beim nächsten `ui_inspect` zu sehen.
 - Die App selbst prüft keine Pfade. Wer die Token-Datei lesen kann (also derselbe Benutzer), kann
   sie direkt steuern, wie bei den anderen Craft-Apps. Die Begrenzung gilt für den MCP-Server.
 
@@ -115,6 +120,8 @@ Ordner halten also den Agenten bei seinen Dateien, sie schützen nicht vor ander
 | `undo`, `redo` | Verlauf |
 | `transport` | Nur mit `--connect`: Play, Stopp, Cursor setzen |
 | `ui_screenshot` | Nur mit `--connect`: PNG des App-Fensters, wie es gerade aussieht |
+| `ui_inspect` | Nur mit `--connect`: Bedienelemente des Fensters, wie ein Bildschirmleser sie sieht (Id, Rolle, Beschriftung, Wert, Rechteck in Punkten, Zustand); Filter nach Text und Rolle |
+| `ui_click` | Nur mit `--connect`: Mausklick auf ein Element (Id oder exakte Beschriftung) oder einen Punkt; linke, rechte oder mittlere Taste, Doppelklick, gehaltene Tasten |
 
 Ressource: `studiocraft://project` (wie `inspect_project`).
 
@@ -134,6 +141,6 @@ Konventionen:
   keine Aufnahme und kein MIDI-Gerät. Mit `--connect` spielt die App selbst ab.
 - Der Mixdown rendert in beiden Betriebsarten ohne Plugins. MIDI-Parts bleiben darin stumm; das
   Ergebnis von `export_mixdown` sagt das dazu.
-- Klicks, Tastendrücke und das Auslesen der Bedienelemente (wie `ui_inspect` in anderen
-  Craft-Apps) gibt es noch nicht, ebenso wenig Aufnahme über den Agenten.
+- Tastendrücke, Texteingabe, Ziehen und Scrollen gibt es noch nicht, ebenso wenig Aufnahme über
+  den Agenten. Klicks erreichen keine Plugin-Fenster (eigene Fenster der Plugins).
 - Mixer-Routing, Sends, Inserts, Automation und Spuren löschen fehlen noch als Werkzeuge.

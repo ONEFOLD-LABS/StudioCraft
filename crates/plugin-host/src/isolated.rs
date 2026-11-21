@@ -10,16 +10,19 @@
 pub use crate::info::{SCAN_FLAG, ScanOptions, ScanReport};
 use std::{
     collections::HashMap,
-    io::Read,
+    io::{Read, Write},
     path::{Path, PathBuf},
     process::{Command, Stdio},
     time::{Duration, Instant},
 };
 
-use crate::scan::{PluginInfo, find_all, scan_bundle, sort_plugins};
+use crate::scan::{PluginInfo, find_all, scan_bundle_then, sort_plugins};
 
 /// Letzte Zeile eines vollständigen Scans; fehlt sie, gilt der Kindprozess als abgestürzt.
 const DONE: &str = "DONE";
+/// Folgt auf die Plugin-Zeilen, bevor die Bibliothek entladen wird: Stürzt erst das Entladen
+/// (oder das Prozessende) ab, ist die Liste trotzdem vollständig.
+const LISTED: &str = "L";
 
 /// Höchstens so viel Ausgabe je Kindprozess (Schutz gegen endlose Ausgabe).
 const MAX_OUTPUT: u64 = 4 << 20;
@@ -35,13 +38,19 @@ pub fn run_scan_child(args: &[String]) -> Option<i32> {
         println!("{DONE}");
         return Some(2);
     };
-    let out = match scan_bundle(Path::new(path)) {
-        Ok(list) => list.iter().map(plugin_line).collect::<Vec<_>>().join("\n"),
-        Err(e) => format!("E\t{}", escape(&e)),
-    };
-    if !out.is_empty() {
-        println!("{out}");
-    }
+    scan_bundle_then(Path::new(path), |r| {
+        let out = match r {
+            Ok(list) => list
+                .iter()
+                .map(plugin_line)
+                .chain([LISTED.to_owned()])
+                .collect::<Vec<_>>()
+                .join("\n"),
+            Err(e) => format!("E\t{}", escape(&e)),
+        };
+        let mut stdout = std::io::stdout().lock();
+        let _ = writeln!(stdout, "{out}").and_then(|()| stdout.flush());
+    });
     println!("{DONE}");
     Some(0)
 }
@@ -102,7 +111,27 @@ fn unescape(s: &str) -> String {
 enum Outcome {
     Plugins(Vec<PluginInfo>),
     Error(String),
-    Blocked(String),
+    /// Gesperrt mit Grund; die Plugins, die der Scan vor dem Absturz vollständig gemeldet
+    /// hat, lassen sich noch im eigenen Prozess laden.
+    Blocked(String, Vec<PluginInfo>),
+}
+
+/// Die Plugins, die ein Kindprozess vollständig gemeldet hat (Zeile [`LISTED`]), auch wenn
+/// er danach abgestürzt ist oder hing.
+fn listed(text: &str, path: &Path) -> Vec<PluginInfo> {
+    let mut head = String::new();
+    for line in text.lines() {
+        if line == LISTED {
+            head.push_str(DONE);
+            return match parse_child(&head, path) {
+                Some(Outcome::Plugins(list)) => list,
+                _ => Vec::new(),
+            };
+        }
+        head.push_str(line);
+        head.push('\n');
+    }
+    Vec::new()
 }
 
 /// Ausgabe eines Kindprozesses lesen; `None`, wenn sie unvollständig ist.
@@ -183,14 +212,17 @@ fn scan_in_child(opts: &ScanOptions, path: &Path) -> Outcome {
     };
     let text = reader.and_then(|r| r.join().ok()).unwrap_or_default();
     let Some(status) = status else {
-        return Outcome::Blocked(format!(
-            "Zeitüberschreitung beim Scan (über {} s)",
-            opts.timeout.as_secs()
-        ));
+        return Outcome::Blocked(
+            format!(
+                "Zeitüberschreitung beim Scan (über {} s)",
+                opts.timeout.as_secs()
+            ),
+            listed(&text, path),
+        );
     };
     match parse_child(&text, path) {
         Some(outcome) if status.success() => outcome,
-        _ => Outcome::Blocked(crash_reason(&status)),
+        _ => Outcome::Blocked(crash_reason(&status), listed(&text, path)),
     }
 }
 
@@ -252,15 +284,18 @@ fn load_cache(path: &Path) -> Cache {
             .or_insert(((mtime, size), Outcome::Plugins(Vec::new())));
         entry.0 = (mtime, size);
         match *kind {
-            "B" => entry.1 = Outcome::Blocked(unescape(rest)),
+            "B" => entry.1 = Outcome::Blocked(unescape(rest), Vec::new()),
             "E" => entry.1 = Outcome::Error(unescape(rest)),
             "N" => {}
-            "P" => {
+            // Q: Plugin einer gesperrten Datei (folgt auf deren B-Zeile).
+            "P" | "Q" => {
                 let text = format!("P\t{rest}\n{DONE}");
-                if let (Some(Outcome::Plugins(found)), Outcome::Plugins(list)) =
-                    (parse_child(&text, &file), &mut entry.1)
-                {
-                    list.extend(found);
+                match (parse_child(&text, &file), &mut entry.1, *kind) {
+                    (Some(Outcome::Plugins(found)), Outcome::Plugins(list), "P")
+                    | (Some(Outcome::Plugins(found)), Outcome::Blocked(_, list), "Q") => {
+                        list.extend(found);
+                    }
+                    _ => {}
                 }
             }
             _ => {}
@@ -279,7 +314,14 @@ fn save_cache(path: &Path, cache: &Cache) {
         };
         let head = format!("{}\t{mtime}\t{size}", escape(&file.to_string_lossy()));
         match outcome {
-            Outcome::Blocked(r) => out.push_str(&format!("B\t{head}\t{}\n", escape(r))),
+            Outcome::Blocked(r, list) => {
+                out.push_str(&format!("B\t{head}\t{}\n", escape(r)));
+                for p in list {
+                    let line = plugin_line(p);
+                    let rest = line.strip_prefix("P\t").unwrap_or(&line);
+                    out.push_str(&format!("Q\t{head}\t{rest}\n"));
+                }
+            }
             Outcome::Error(e) => out.push_str(&format!("E\t{head}\t{}\n", escape(e))),
             Outcome::Plugins(list) if list.is_empty() => {
                 out.push_str(&format!("N\t{head}\t\n"));
@@ -352,7 +394,11 @@ pub fn scan_isolated(paths: &[PathBuf], opts: &ScanOptions) -> ScanReport {
         match outcome {
             Outcome::Plugins(list) => report.plugins.extend(list),
             Outcome::Error(e) => report.errors.push(format!("{}: {e}", f.display())),
-            Outcome::Blocked(r) => report.blocked.push((f, r)),
+            Outcome::Blocked(r, list) => {
+                report.blocked.push((f, r));
+                report.own_process.extend(list.iter().map(|p| p.id.clone()));
+                report.plugins.extend(list);
+            }
         }
     }
     sort_plugins(&mut report.plugins);
@@ -414,7 +460,14 @@ mod tests {
         );
         cache.insert(
             PathBuf::from("/x/b.clap"),
-            ((3, 4), Outcome::Blocked("Signal 11".into())),
+            (
+                (3, 4),
+                Outcome::Blocked("Signal 11".into(), vec![info("q", "Q")]),
+            ),
+        );
+        cache.insert(
+            PathBuf::from("/x/f.clap"),
+            ((9, 10), Outcome::Blocked("Zeit".into(), Vec::new())),
         );
         cache.insert(
             PathBuf::from("/x/c.clap"),
@@ -429,10 +482,10 @@ mod tests {
         text.push_str("Müll ohne Felder\nB\t/x/e\tkeine-zahl\t1\tgrund\n");
         std::fs::write(&path, text).unwrap();
         let back = load_cache(&path);
-        assert_eq!(back.len(), 4);
+        assert_eq!(back.len(), 5);
         for (k, v) in &cache {
             let mut want = v.1.clone();
-            if let Outcome::Plugins(list) = &mut want {
+            if let Outcome::Plugins(list) | Outcome::Blocked(_, list) = &mut want {
                 for p in list.iter_mut() {
                     p.path = k.clone();
                 }

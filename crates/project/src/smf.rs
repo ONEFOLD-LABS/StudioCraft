@@ -366,6 +366,7 @@ fn convert(raw: &[RawTrack], ppq: u16) -> MidiFile {
                                 velocity,
                                 start: as_i64(start),
                                 length: (tick - start).max(1),
+                                spelling: 0,
                             });
                         }
                     }
@@ -398,6 +399,7 @@ fn convert(raw: &[RawTrack], ppq: u16) -> MidiFile {
                         velocity,
                         start: as_i64(start),
                         length: last.saturating_sub(start).max(1),
+                        spelling: 0,
                     });
                 }
             }
@@ -467,6 +469,8 @@ impl Project {
                 musical: None,
                 stretch_mode: crate::StretchMode::Standard,
                 warp: Vec::new(),
+                score_quantize: None,
+                children: Vec::new(),
             });
             added.push(i);
         }
@@ -670,13 +674,15 @@ mod tests {
                     pitch: 60,
                     velocity: 100,
                     start: 0,
-                    length: 960
+                    length: 960,
+                    spelling: 0,
                 },
                 Note {
                     pitch: 64,
                     velocity: 90,
                     start: 960,
-                    length: 480
+                    length: 480,
+                    spelling: 0,
                 },
             ]
         );
@@ -845,6 +851,7 @@ mod tests {
                 velocity: 100,
                 start: 0,
                 length: 480,
+                spelling: 0,
             },
             // Ragt über das Part-Ende hinaus: endet dort.
             Note {
@@ -852,6 +859,7 @@ mod tests {
                 velocity: 80,
                 start: 3600,
                 length: 960,
+                spelling: 0,
             },
             // Vor dem Part-Anfang ausgeblendet: fehlt.
             Note {
@@ -859,6 +867,7 @@ mod tests {
                 velocity: 80,
                 start: -480,
                 length: 240,
+                spelling: 0,
             },
         ];
         e.controllers = vec![CtrlPoint {
@@ -872,6 +881,7 @@ mod tests {
             velocity: 127,
             start: 0,
             length: 120,
+            spelling: 0,
         }];
         let muted = p.create_event(b, 1920, 960).unwrap();
         let m = p.event_mut(muted).unwrap();
@@ -881,6 +891,7 @@ mod tests {
             velocity: 127,
             start: 0,
             length: 120,
+            spelling: 0,
         }];
 
         let bytes = p.export_midi().unwrap();

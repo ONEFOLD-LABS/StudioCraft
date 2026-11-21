@@ -19,7 +19,7 @@ use craft_control::{ControlRequest, Effect};
 use serde_json::{Value, json};
 use studiocraft_ui::ProjectWindow;
 
-use crate::exec;
+use crate::{exec, ui_agent};
 
 /// StudioCraft's control channel: where its token files live (`<config>/control/<port>.token`),
 /// its environment (`STUDIOCRAFT_CONTROL_DIR`, `STUDIOCRAFT_CONTROL_TOKEN`) and its default port.
@@ -46,7 +46,7 @@ fn utc_text(secs: u64) -> String {
 /// What a tool does if it outlasts its wait, for the client's messages.
 pub fn effect(tool: &str) -> Effect {
     match tool {
-        "inspect_project" | "get_notes" | "ui_screenshot" => Effect::ReadsOnly,
+        "inspect_project" | "get_notes" | "ui_screenshot" | "ui_inspect" => Effect::ReadsOnly,
         "save_project" | "export_mixdown" | "export_midi" => Effect::WritesFile,
         _ => Effect::Changes,
     }
@@ -144,8 +144,8 @@ impl Control {
         self.port
     }
 
-    /// Answer the requests that came in since the last frame. `ctx` takes screenshots; without
-    /// it (tests) `ui_screenshot` is refused.
+    /// Answer the requests that came in since the last frame. `ctx` is the window's: it takes
+    /// screenshots and runs `ui_inspect` and `ui_click`; without it these are refused.
     pub fn poll(&mut self, window: &mut ProjectWindow, ctx: Option<&egui::Context>) {
         while let Ok(req) = self.requests.try_recv() {
             if !req.ticket.take() {
@@ -153,6 +153,17 @@ impl Control {
             }
             req.started
                 .store(true, std::sync::atomic::Ordering::Relaxed);
+            if matches!(req.method.as_str(), "ui_inspect" | "ui_click") {
+                match ctx {
+                    Some(ctx) => ui_agent::submit(ctx, &req.method, &req.params, req.reply.clone()),
+                    None => {
+                        let _ = req
+                            .reply
+                            .send(json!({"ok": false, "error": "no window to inspect or click"}));
+                    }
+                }
+                continue;
+            }
             if req.method == "ui_screenshot" {
                 match ctx {
                     Some(ctx) => {

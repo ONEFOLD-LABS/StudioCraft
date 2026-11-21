@@ -17,6 +17,7 @@ use crate::{LowerZone, ProjectWindow};
 pub(crate) enum EditorWindow {
     Key,
     Sample,
+    Score,
 }
 
 /// Zustand der eigenen Fenster.
@@ -78,6 +79,11 @@ impl ProjectWindow {
             return;
         };
         let (id, audio) = (ev.id, ev.clip.is_some());
+        // Audio-Parts haben ihren Editor in der unteren Zone.
+        if ev.is_audio_part() {
+            self.open_audio_part_editor(id);
+            return;
+        }
         let kind = if audio {
             self.open_sample_editor(id);
             EditorWindow::Sample
@@ -91,6 +97,16 @@ impl ProjectWindow {
         self.windows.open_editor = self.windows.rects.editor;
     }
 
+    /// Noten-Editor des aktiven bzw. gewählten MIDI-Parts im eigenen Fenster.
+    pub(crate) fn open_score_window(&mut self) {
+        if self.list_part().is_none() {
+            self.message = Some(tr("Erst einen MIDI-Part auswählen").into());
+            return;
+        }
+        self.windows.editor = Some(EditorWindow::Score);
+        self.windows.open_editor = self.windows.rects.editor;
+    }
+
     /// Steht `zone` gerade im eigenen Fenster?
     pub(crate) fn in_own_window(&self, zone: LowerZone) -> bool {
         match zone {
@@ -98,6 +114,8 @@ impl ProjectWindow {
             LowerZone::Editor => self.windows.editor == Some(EditorWindow::Key),
             LowerZone::SampleEditor => self.windows.editor == Some(EditorWindow::Sample),
             LowerZone::List => false,
+            LowerZone::Score => self.windows.editor == Some(EditorWindow::Score),
+            LowerZone::AudioPart => false,
         }
     }
 
@@ -136,6 +154,7 @@ impl ProjectWindow {
             let (title, zone) = match kind {
                 EditorWindow::Key => (tr("Key-Editor"), LowerZone::Editor),
                 EditorWindow::Sample => (tr("Sample-Editor"), LowerZone::SampleEditor),
+                EditorWindow::Score => (tr("Noten-Editor"), LowerZone::Score),
             };
             let b = builder(title, self.windows.open_editor, EDITOR_SIZE);
             let (open, rect) = ctx.show_viewport_immediate(
@@ -180,14 +199,20 @@ impl ProjectWindow {
                 LowerZone::Editor => crate::keyeditor::show(w, ui),
                 LowerZone::SampleEditor => crate::sampleeditor::show(w, ui),
                 LowerZone::List => crate::listeditor::show(w, ui),
+                LowerZone::Score => crate::score::show(w, ui),
+                LowerZone::AudioPart => crate::audio_part_editor::show(w, ui),
             }
         };
         if class == ViewportClass::EmbeddedWindow {
             body(self, ui, &mut open);
             return (open, None);
         }
-        // Tasten, die in diesem Fenster gedrückt werden, kommen nur in seiner Eingabe an.
+        // Tasten, die in diesem Fenster gedrückt werden, kommen nur in seiner Eingabe an. In
+        // einem Editorfenster gelten Entf und Co. den Noten, nicht den Events.
+        let focused = self.key_editor.focused;
+        self.key_editor.focused = matches!(zone, LowerZone::Editor | LowerZone::Score);
         self.handle_window_keys(ui);
+        self.key_editor.focused = focused;
         // Drücken hier beginnt eine Geste für den Rückgängig-Verlauf (panel_undo.rs).
         let (press, down) = ui.input(|i| {
             (

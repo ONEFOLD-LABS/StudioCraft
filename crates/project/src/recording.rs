@@ -87,6 +87,7 @@ fn to_notes(notes: &[TakeNote], origin: u64) -> impl Iterator<Item = Note> + '_ 
             velocity: n.velocity.clamp(1, 127),
             start: n.start as i64 - origin as i64,
             length: n.end.saturating_sub(n.start).max(1),
+            spelling: 0,
         })
 }
 
@@ -200,7 +201,13 @@ impl Project {
                     .events
                     .iter()
                     .rev()
-                    .find(|e| !e.muted && e.clip.is_none() && e.start.0 < b && e.end() > a)
+                    .find(|e| {
+                        !e.muted
+                            && e.clip.is_none()
+                            && !e.is_audio_part()
+                            && e.start.0 < b
+                            && e.end() > a
+                    })
                     .map(|e| e.id);
                 let Some(id) = target else {
                     return self
@@ -269,12 +276,14 @@ mod tests {
                 velocity: 90,
                 start: 0,
                 length: 240,
+                spelling: 0,
             },
             Note {
                 pitch: 41,
                 velocity: 90,
                 start: 1920,
                 length: 240,
+                spelling: 0,
             },
         ];
         let take = [note(960, 60, 0)];

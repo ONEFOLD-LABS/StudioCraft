@@ -83,6 +83,47 @@ mod tests {
     use super::*;
     use crate::{PoolClip, TrackKind};
 
+    /// `isolated` (Plugin-Bridge) steht nur in der Datei, wenn es gesetzt ist; ältere Dateien
+    /// ohne das Feld laden mit `false`.
+    #[test]
+    fn isolated_inserts_round_trip_and_old_files_load() {
+        let mut p = Project::default();
+        let t = p.add_track(TrackKind::Audio, "A");
+        let slot = |isolated| crate::InsertSlot {
+            plugin_id: "x".into(),
+            name: "X".into(),
+            bypass: false,
+            params: Vec::new(),
+            state: None,
+            isolated,
+        };
+        p.tracks[t].inserts.push(slot(false));
+        p.tracks[t].inserts.push(slot(true));
+        let text = to_json(&p);
+        assert_eq!(text.matches("\"isolated\"").count(), 1);
+        let back = from_json(&text).unwrap();
+        assert!(!back.tracks[t].inserts[0].isolated);
+        assert!(back.tracks[t].inserts[1].isolated);
+        // A file of an older version: no field at all.
+        fn strip(v: &mut serde_json::Value) {
+            match v {
+                serde_json::Value::Object(o) => {
+                    o.remove("isolated");
+                    o.values_mut().for_each(strip);
+                }
+                serde_json::Value::Array(a) => a.iter_mut().for_each(strip),
+                _ => {}
+            }
+        }
+        let mut v: serde_json::Value = serde_json::from_str(&text).unwrap();
+        strip(&mut v);
+        let old = v.to_string();
+        assert!(!old.contains("isolated"));
+        assert!(!from_json(&old).unwrap().tracks[t].inserts[1].isolated);
+        // Switching it is a different plugin instance (the chain is rebuilt).
+        assert!(!slot(false).same_plugin(&slot(true)));
+    }
+
     /// A project that uses every numeric field the file format has.
     fn rich_project() -> Project {
         let mut p = Project::demo(3);
@@ -103,6 +144,7 @@ mod tests {
             velocity: 100,
             start: -120,
             length: 480,
+            spelling: 0,
         }];
         p.tracks[a].automation.push(crate::AutomationLane {
             param: crate::AutoParam::Volume,

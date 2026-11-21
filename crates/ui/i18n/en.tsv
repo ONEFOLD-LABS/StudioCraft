@@ -15,6 +15,7 @@ Audiodatei importieren …	Import Audio File…
 Audiodateien	Audio files
 Hilfe	Help
 Über StudioCraft …	About StudioCraft…
+StudioCraft unterstützen …	Support StudioCraft…
 Über StudioCraft	About StudioCraft
 Version {v}	Version {v}
 Freie Software unter der MIT- oder der Apache-2.0-Lizenz, nach Wahl.	Free software under the MIT or the Apache-2.0 licence, at your option.
@@ -752,3 +753,109 @@ Inserts der Spur	Track inserts
 Plugin-Bearbeitung abgebrochen	Plugin processing aborted
 Plugin	Plugin
 Steuerkanal: {fehler}	Control channel: {fehler}
+KI-Assistent	AI assistant
+API-Schlüssel	API key
+Abgebrochen.	Cancelled.
+Adresse	Address
+Antwort nicht lesbar: {fehler}	Cannot read the reply: {fehler}
+Assistent	Assistant
+Cloud: Daten gehen an {host}.	Cloud: data goes to {host}.
+Das Modell hat leer geantwortet.	The model sent an empty reply.
+Deine Nachrichten und Projektdaten (Spurnamen, Noten, Tempo) gehen an {host}. Der Anbieter kann sie speichern.	Your messages and project data (track names, notes, tempo) go to {host}. The provider may store them.
+Denkt nach …	Thinking …
+Der Dienst hat die Antwort gefiltert.	The service filtered the reply.
+Der Endpunkt hat den Schlüssel abgelehnt	The endpoint refused the key
+Der Endpunkt hat kein JSON geschickt: {fehler}	The endpoint sent no JSON: {fehler}
+Der Endpunkt hat keine Nachricht geschickt.	The endpoint sent no message.
+Der Endpunkt nennt keine Modelle.	The endpoint lists no models.
+Die Adresse muss mit http:// oder https:// beginnen.	The address must start with http:// or https://.
+Die Anfrage ist ohne Antwort abgebrochen.	The request ended without a reply.
+Die Antwort wurde abgeschnitten (Grenze des Modells).	The reply was cut off (model limit).
+Du	You
+Endpunkt nicht erreichbar (läuft der Server?).	Cannot reach the endpoint (is the server running?).
+Endpunkt oder Modell nicht gefunden	Endpoint or model not found
+Erlauben	Allow
+Fehler: {fehler}	Error: {fehler}
+Frage Modelle ab …	Asking for models …
+Im Einstellungsordner, nur für dich lesbar	In the settings folder, readable only by you
+Kein Modell gewählt.	No model chosen.
+Keine Antwort in der Zeit.	No reply in time.
+Lokal: nichts verlässt diesen Rechner.	Local: nothing leaves this computer.
+Modell	Model
+Modell wählen	Choose model
+Modelle abfragen	List models
+Nach {n} Schritten angehalten; schreib weiter, um fortzufahren.	Stopped after {n} steps; write again to continue.
+Nachricht	Message
+Neues Gespräch beginnen	Start a new conversation
+Sag dem Assistenten, was er im Projekt tun soll. Jede Änderung lässt sich mit Strg+Z zurücknehmen.	Tell the assistant what to do in the project. Every change can be undone with Ctrl+Z.
+Schlüssel speichern	Remember key
+Senden	Send
+Sichern	Save
+Verbindung	Connection
+Verbindung gesichert.	Connection saved.
+Zu viele Anfragen oder Kontingent aufgebraucht	Too many requests or quota used up
+Zum Beispiel: Lege eine Bass-Spur mit einem Part über 4 Takte an	For example: add a bass track with a 4-bar part
+http:// nur zu diesem Rechner; sonst https:// verwenden.	http:// only to this computer; use https:// otherwise.
+leer für lokale Server	empty for local servers
+{n} Modelle gefunden.	{n} models found.
+Keine Zertifikate des Systems gefunden.	No system certificates found.
+Eigener Prozess ist hier nicht verfügbar	Own process is not available here
+{name} ist abgestürzt und schweigt; das Programm läuft weiter (Insert-Menü: Neu laden)	{name} crashed and is silent; the program keeps running (insert menu: Reload)
+{name} (abgestürzt)	{name} (crashed)
+Läuft in einem eigenen Prozess	Runs in its own process
+In eigenem Prozess	In its own process
+Stürzt das Plugin ab oder hängt es, verstummt nur dieser Insert (ein Block mehr Latenz)	If the plugin crashes or hangs, only this insert falls silent (one block more latency)
+Den abgestürzten Prozess neu starten	Restart the crashed process
+Insert-Menü	Insert menu
+{n} Plugin(s) daraus laufen nur im eigenen Prozess	{n} plugin(s) from them run only in their own process
+Dieses Plugin stürzte beim Scan ab und läuft daher nur im eigenen Prozess	This plugin crashed during the scan, so it runs only in its own process
+eigener Prozess	own process
+Immer in eigenem Prozess	Always in its own process
+Neue Inserts dieses Plugins laufen im eigenen Prozess: Ein Absturz lässt nur den Insert verstummen	New inserts of this plugin run in their own process: a crash silences only the insert
+Noten-Editor	Score editor
+Noten-Editor im eigenen Fenster	Score editor in its own window
+Erst einen MIDI-Part auswählen	Select a MIDI part first
+Einen MIDI-Part wählen oder öffnen, um ihn hier als Noten zu sehen	Select or open a MIDI part to see it here as notation
+Anzeige-Quantisierung	Display quantize
+Rundet Anfang und Dauer nur für die Anzeige; der Part bleibt, wie er ist	Rounds start and length for display only; the part stays as it is
+Tonart	Key
+Keine Vorzeichen	No accidentals
+{n} Kreuz(e)	{n} sharp(s)
+{n} Be	{n} flat(s)
+Partitur: {name}, {bars} Takte	Score: {name}, {bars} bars
+Anzeige-Quantisierung:	Display quantize:
+Tonart:	Key:
+Notenwert:	Note value:
+Wert für neue Noten; ändert auch die gewählten	Value for new notes; also changes the selected ones
+Punktiert	Dotted
+Kreuz	Sharp
+Gewählte Noten einen Halbton höher, mit Kreuz	Selected notes a semitone higher, with a sharp
+Be	Flat
+Gewählte Noten einen Halbton tiefer, mit Be	Selected notes a semitone lower, with a flat
+Enharmonisch verwechseln	Respell enharmonically
+Kreuz als Be schreiben und umgekehrt	Write sharps as flats and the other way round
+Ganze	Whole
+Halbe	Half
+Viertel	Quarter
+Achtel	Eighth
+Sechzehntel	Sixteenth
+Zweiunddreißigstel	Thirty-second
+Noten exportieren …	Export notation …
+Noten exportieren	Export notation
+{n} MIDI-Part(s)	{n} MIDI part(s)
+PDF (Druck)	PDF (print)
+Titel:	Title:
+Titel	Title
+Papier:	Paper:
+Ränder:	Margins:
+Ränder	Margins
+Notengröße:	Staff size:
+Notengröße	Staff size
+Abstand zweier Notenlinien	Distance between two staff lines
+Gespeichert: {file}	Saved: {file}
+Nur Audio-Events einer Audiospur lassen sich zu einem Part zusammenfassen	Only audio events of one audio track can be grouped into a part
+Audio-Part bilden	Make audio part
+Die gewählten Audio-Events einer Spur zu einem Part zusammenfassen	Group the selected audio events of one track into a part
+Audio-Part auflösen	Dissolve audio part
+Einen Audio-Part doppelklicken oder wählen, um seine Events hier zu bearbeiten	Double-click or select an audio part to edit its events here
+Part-Editor	Part editor

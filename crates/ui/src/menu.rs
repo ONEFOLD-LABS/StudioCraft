@@ -67,6 +67,12 @@ impl ProjectWindow {
                         self.open_stem_dialog();
                         ui.close();
                     }
+                    if action == Action::ExportMixdown
+                        && ui.button(tr("Noten exportieren …")).clicked()
+                    {
+                        self.open_score_export();
+                        ui.close();
+                    }
                 }
             });
             ui.menu_button(tr("Bearbeiten"), |ui| {
@@ -102,6 +108,7 @@ impl ProjectWindow {
                         ui.close();
                     }
                 }
+                self.audio_part_menu(ui);
                 self.render_menu(ui);
                 self.freeze_menu(ui);
                 self.event_color_menu(ui);
@@ -209,6 +216,9 @@ impl ProjectWindow {
                 ui.checkbox(&mut self.show_transport, tr("Transportleiste (F2)"));
                 ui.checkbox(&mut self.show_status, tr("Statuszeile"));
                 ui.checkbox(&mut self.show_right, tr("Rechte Zone (Alt+R)"));
+                if self.assistant_available {
+                    ui.checkbox(&mut self.show_assistant, tr("KI-Assistent"));
+                }
                 ui.menu_button(tr("Layouts"), |ui| self.layouts_menu(ui));
                 if ui
                     .selectable_label(self.windows.mixer, tr("Mixer-Fenster (F3)"))
@@ -255,6 +265,20 @@ impl ProjectWindow {
                     self.show_lower = true;
                     self.lower = crate::LowerZone::List;
                 }
+                if ui
+                    .selectable_label(
+                        self.show_lower && self.lower == crate::LowerZone::Score,
+                        tr("Noten-Editor"),
+                    )
+                    .clicked()
+                {
+                    self.show_lower = true;
+                    self.lower = crate::LowerZone::Score;
+                }
+                if ui.button(tr("Noten-Editor im eigenen Fenster")).clicked() {
+                    self.open_score_window();
+                    ui.close();
+                }
                 ui.checkbox(&mut self.show_lower, tr("Untere Zone"));
                 ui.separator();
                 ui.menu_button(tr("Erscheinungsbild"), |ui| {
@@ -290,6 +314,7 @@ impl ProjectWindow {
                     self.about = crate::about::About::Open;
                     ui.close();
                 }
+                crate::sponsor::menu_item(ui);
             });
         });
     }

@@ -307,17 +307,47 @@ mod connected {
 
     impl App {
         fn start(setup: impl FnOnce(&mut ProjectWindow) + Send + 'static) -> Self {
+            Self::run(setup, false)
+        }
+
+        /// As [`App::start`], drawing the window into an egui context each frame, as the
+        /// desktop app does (`ui_inspect`, `ui_click`).
+        fn with_window() -> Self {
+            Self::run(|_| {}, true)
+        }
+
+        fn run(setup: impl FnOnce(&mut ProjectWindow) + Send + 'static, window_ui: bool) -> Self {
             let stop = Arc::new(AtomicBool::new(false));
             let (tx, rx) = mpsc::channel();
             let flag = Arc::clone(&stop);
             let thread = std::thread::spawn(move || {
                 let mut window = ProjectWindow::new(Project::default(), None, String::new());
+                // Labels as the tests name them, whatever the system's language and the
+                // settings say (the language is per thread).
+                studiocraft_ui::i18n::set_language(studiocraft_ui::i18n::Language::German);
                 setup(&mut window);
                 let listener = TcpListener::bind("127.0.0.1:0").unwrap();
                 let mut control = Control::serve(listener, TOKEN.into(), || {}).unwrap();
                 tx.send(control.port()).unwrap();
+                let ctx = egui::Context::default();
                 while !flag.load(Ordering::Relaxed) {
-                    control.poll(&mut window, None);
+                    if window_ui {
+                        let input = egui::RawInput {
+                            screen_rect: Some(egui::Rect::from_min_size(
+                                egui::Pos2::ZERO,
+                                egui::vec2(1280.0, 800.0),
+                            )),
+                            ..Default::default()
+                        };
+                        let mut out = ctx.run_ui(input, |ui| {
+                            control.poll(&mut window, Some(ui.ctx()));
+                            window.ui(ui);
+                        });
+                        // Nothing renders here: drop the textures on purpose.
+                        out.textures_delta.clear();
+                    } else {
+                        control.poll(&mut window, None);
+                    }
                     std::thread::sleep(Duration::from_millis(2));
                 }
             });
@@ -441,5 +471,74 @@ mod connected {
         let mut a = Agent::connected(&dir, &dir, &format!("127.0.0.1:{port}"), TOKEN);
         let e = a.call("inspect_project", json!({})).unwrap_err();
         assert!(!e.is_empty());
+    }
+
+    /// The widgets `ui_inspect` lists for `label`.
+    fn widgets(a: &mut Agent, label: &str) -> Vec<Value> {
+        a.ok("ui_inspect", json!({"label": label}))["widgets"]
+            .as_array()
+            .unwrap()
+            .clone()
+    }
+
+    #[test]
+    fn the_agent_finds_and_clicks_widgets_in_the_window() {
+        let dir = temp("connect-click");
+        let app = App::with_window();
+        let mut a = Agent::connected(&dir, &dir, &app.addr, TOKEN);
+
+        let all = a.ok("ui_inspect", json!({}));
+        assert_eq!(all["window"], json!([1280.0, 800.0]));
+        assert_eq!(all["truncated"], false);
+        let menu = widgets(&mut a, "Projekt");
+        let button = menu
+            .iter()
+            .find(|w| w["label"] == "Projekt" && w["clickable"] == true)
+            .unwrap_or_else(|| panic!("no Projekt menu in {menu:?}"));
+        assert_eq!(button["rect"].as_array().unwrap().len(), 4);
+        // Nothing of the menu is open yet.
+        assert!(widgets(&mut a, "Gruppen-Spur hinzufügen").is_empty());
+
+        // Open the menu by id, then click an entry by its label: a group track appears.
+        let clicked = a.ok("ui_click", json!({"id": button["id"]}));
+        assert_eq!(clicked["clicked"]["label"], "Projekt");
+        a.ok("ui_click", json!({"label": "Gruppen-Spur hinzufügen"}));
+        let tracks = a.ok("inspect_project", json!({}))["tracks"].clone();
+        assert!(
+            tracks
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|t| t["kind"] == "group"),
+            "{tracks}"
+        );
+
+        // A click at a point: on an empty spot of the window it lands, without effect.
+        let at = a.ok("ui_click", json!({"x": 1270, "y": 790}));
+        assert_eq!(at["clicked"]["at"], json!([1270.0, 790.0]));
+
+        // Wrong targets are errors the agent can read.
+        for bad in [
+            json!({}),
+            json!({"label": "Gibt es nicht"}),
+            json!({"id": 1, "label": "Projekt"}),
+            json!({"x": 10}),
+            json!({"x": -1, "y": 10}),
+            json!({"label": "Projekt", "button": "fourth"}),
+            json!({"label": "Projekt", "modifiers": ["hyper"]}),
+        ] {
+            assert!(a.call("ui_click", bad.clone()).is_err(), "{bad}");
+        }
+        // The tree is built again after a click and stays readable.
+        assert!(!widgets(&mut a, "Projekt").is_empty());
+    }
+
+    #[test]
+    fn without_a_window_inspect_and_click_are_refused() {
+        let dir = temp("connect-nowindow");
+        let app = App::start(|_| {});
+        let mut a = Agent::connected(&dir, &dir, &app.addr, TOKEN);
+        assert!(a.call("ui_inspect", json!({})).is_err());
+        assert!(a.call("ui_click", json!({"x": 1, "y": 1})).is_err());
     }
 }

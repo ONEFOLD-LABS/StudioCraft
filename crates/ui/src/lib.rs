@@ -17,6 +17,8 @@
 )]
 
 mod about;
+mod audio_part_editor;
+mod audio_parts_ui;
 mod automation_panel;
 mod automation_write;
 mod autosave;
@@ -60,10 +62,12 @@ mod rightzone;
 mod routing;
 mod ruler_ui;
 mod sampleeditor;
+mod score;
 mod session;
 pub mod settings;
 mod shortcuts;
 mod snap;
+mod sponsor;
 mod stems;
 mod tempo_ui;
 pub mod theme;
@@ -94,6 +98,7 @@ pub struct LoadedClip {
 }
 
 pub use inserts::enable_isolated_plugin_scan;
+pub use studiocraft_plugin_host::run_bridge_child as run_plugin_bridge_child;
 pub use studiocraft_plugin_host::run_scan_child as run_plugin_scan_child;
 pub use tools::{Grid, Tool};
 
@@ -188,6 +193,9 @@ pub struct ProjectWindow {
     clipboard: shortcuts::Clipboard,
     /// Rechte Zone (Medien, Plugins) sichtbar.
     show_right: bool,
+    /// KI-Assistent: die App bietet ihn an (`enable_assistant`) und zeigt ihn gerade.
+    assistant_available: bool,
+    show_assistant: bool,
     right: rightzone::RightZone,
     view: timeline::View,
     selected_track: Option<usize>,
@@ -285,6 +293,10 @@ pub struct ProjectWindow {
     key_editor: keyeditor::KeyEditor,
     /// Filter des List-Editors (welche Event-Typen die Tabelle zeigt).
     list_filter: listeditor::ListFilter,
+    /// Noten-Editor: Schrift und gemerkter Satz.
+    score_view: score::ScoreView,
+    /// Audio-Part im Part-Editor.
+    audio_part: Option<EventId>,
     midi_inputs: Option<studiocraft_engine::midi::MidiInputs>,
     /// Anzeige der MIDI-Eingänge für die Statuszeile.
     midi_status: String,
@@ -329,6 +341,10 @@ pub(crate) enum LowerZone {
     SampleEditor,
     /// List-Editor: Events des aktiven Parts als Tabelle.
     List,
+    /// Noten-Editor: der aktive Part als Partitur.
+    Score,
+    /// Part-Editor: die Events eines Audio-Parts.
+    AudioPart,
 }
 
 impl ProjectWindow {
@@ -385,6 +401,8 @@ impl ProjectWindow {
             show_status: true,
             clipboard: shortcuts::Clipboard::default(),
             show_right: false,
+            assistant_available: false,
+            show_assistant: false,
             right: rightzone::RightZone::default(),
             view: timeline::View::default(),
             selected_track: Some(0),
@@ -447,6 +465,8 @@ impl ProjectWindow {
             lower: LowerZone::Mixer,
             key_editor: keyeditor::KeyEditor::default(),
             list_filter: listeditor::ListFilter::default(),
+            score_view: score::ScoreView::default(),
+            audio_part: None,
             midi_inputs: None,
             midi_status: String::new(),
             midi_target_sent: None,
@@ -476,6 +496,7 @@ impl ProjectWindow {
                 Err(e) => w.message = Some(e),
             }
         }
+        w.plugins.preferred = prefs.own_process.into_iter().collect();
         w.saved = Some(w.project.clone());
         w.send_locators();
         w
@@ -773,6 +794,7 @@ impl ProjectWindow {
             autosave_minutes: self.autosave.minutes,
             autosave_keep: self.autosave.keep,
             language: i18n::language(),
+            own_process: self.plugins.preferred.iter().cloned().collect(),
         };
         if let Err(e) = s.save() {
             self.message = Some(crate::i18n::trf(
@@ -1011,6 +1033,13 @@ impl ProjectWindow {
 
     /// Zeichnet das ganze Projektfenster.
     pub fn ui(&mut self, ui: &mut Ui) {
+        self.ui_with(ui, &mut |_, _| {});
+    }
+
+    /// Wie [`Self::ui`]; `side` zeichnet eine Leiste der App (den KI-Assistenten) unter
+    /// Menü und Werkzeugzeile und über der Transportleiste, rechts neben Arrangement und
+    /// unterer Zone.
+    pub fn ui_with(&mut self, ui: &mut Ui, side: &mut dyn FnMut(&mut Ui, &mut ProjectWindow)) {
         if !self.theme_installed {
             theme::install(ui.ctx(), self.theme);
             self.theme_installed = true;
@@ -1062,6 +1091,7 @@ impl ProjectWindow {
         if self.show_transport {
             egui::Panel::bottom("transportleiste").show(ui, |ui| self.transport_bar(ui));
         }
+        side(ui, self);
         let mut zones = focus::ZoneRects::default();
         if self.show_lower {
             let r = egui::Panel::bottom(("untere-zone", self.layout_gen))
@@ -1088,6 +1118,16 @@ impl ProjectWindow {
                                 LowerZone::List,
                                 tr("List-Editor"),
                             );
+                            ui.selectable_value(
+                                &mut self.lower,
+                                LowerZone::Score,
+                                tr("Noten-Editor"),
+                            );
+                            ui.selectable_value(
+                                &mut self.lower,
+                                LowerZone::AudioPart,
+                                tr("Part-Editor"),
+                            );
                             if self.lower == LowerZone::Editor
                                 && let Some(ev) =
                                     self.key_editor.part.and_then(|p| self.project.event(p))
@@ -1111,6 +1151,8 @@ impl ProjectWindow {
                                 LowerZone::Editor => keyeditor::show(self, ui),
                                 LowerZone::SampleEditor => sampleeditor::show(self, ui),
                                 LowerZone::List => listeditor::show(self, ui),
+                                LowerZone::Score => score::show(self, ui),
+                                LowerZone::AudioPart => audio_part_editor::show(self, ui),
                             }
                         });
                     });
@@ -1170,6 +1212,7 @@ impl ProjectWindow {
         self.key_commands_dialog(ui.ctx());
         self.repeat_dialog(ui.ctx());
         self.stem_dialog(ui.ctx());
+        self.score_export_dialog(ui.ctx());
         #[cfg(target_arch = "wasm32")]
         self.poll_browser_files();
         self.io_dialog(ui.ctx());
@@ -1960,21 +2003,21 @@ mod tests {
     use studiocraft_project::TempoMap;
 
     /// Rendert das Projektfenster headless. Mit `STUDIOCRAFT_SHOTS=<ordner>`
-    /// werden die Bilder gespeichert, sonst wird nur geprüft, dass es rendert.
-    fn shot(name: &str, setup: impl FnOnce(&mut ProjectWindow)) {
+    /// werden die Bilder gespeichert (dazu jede Ansicht ein zweites Mal im hellen Theme als
+    /// `<name>-hell.png`), sonst wird nur geprüft, dass es rendert.
+    fn shot(name: &str, setup: impl Fn(&mut ProjectWindow)) {
         shot_sized(name, egui::vec2(1400.0, 860.0), setup);
     }
 
-    fn shot_sized(name: &str, size: egui::Vec2, setup: impl FnOnce(&mut ProjectWindow)) {
+    /// Wie [`shot`], nur dunkel: für Einrichtungen, die etwas verbrauchen (eine Engine).
+    fn shot_once(name: &str, setup: impl FnOnce(&mut ProjectWindow)) {
         let mut w = ProjectWindow::new(Project::demo(100), None, "kein Audio (Test)".into());
         setup(&mut w);
         let mut harness = Harness::builder()
-            .with_size(size)
+            .with_size(egui::vec2(1400.0, 860.0))
             .with_step_dt(1.0 / 60.0)
             .wgpu()
             .build_ui(move |ui| w.ui(ui));
-        // Pegelanzeigen klingen ab und fordern weitere Frames an: feste Schrittzahl,
-        // danach die Barrierefreiheit ausdrücklich prüfen.
         harness.run_steps(4);
         harness.check_accessibility();
         let Ok(img) = harness.render() else {
@@ -1984,6 +2027,42 @@ mod tests {
         if let Ok(dir) = std::env::var("STUDIOCRAFT_SHOTS") {
             img.save(std::path::Path::new(&dir).join(format!("{name}.png")))
                 .unwrap();
+        }
+    }
+
+    fn shot_sized(name: &str, size: egui::Vec2, setup: impl Fn(&mut ProjectWindow)) {
+        let dir = std::env::var("STUDIOCRAFT_SHOTS").ok();
+        let light_too = dir.is_some() && !name.ends_with("hell");
+        for light in [false, true] {
+            if light && !light_too {
+                break;
+            }
+            let mut w = ProjectWindow::new(Project::demo(100), None, "kein Audio (Test)".into());
+            setup(&mut w);
+            if light {
+                w.theme = egui::ThemePreference::Light;
+            }
+            let mut harness = Harness::builder()
+                .with_size(size)
+                .with_step_dt(1.0 / 60.0)
+                .wgpu()
+                .build_ui(move |ui| w.ui(ui));
+            // Pegelanzeigen klingen ab und fordern weitere Frames an: feste Schrittzahl,
+            // danach die Barrierefreiheit ausdrücklich prüfen.
+            harness.run_steps(4);
+            harness.check_accessibility();
+            let Ok(img) = harness.render() else {
+                eprintln!("kein GPU-Renderer verfügbar, Bild übersprungen");
+                return;
+            };
+            if let Some(dir) = &dir {
+                let file = if light {
+                    format!("{name}-hell.png")
+                } else {
+                    format!("{name}.png")
+                };
+                img.save(std::path::Path::new(dir).join(file)).unwrap();
+            }
         }
     }
 
@@ -2846,6 +2925,47 @@ mod tests {
         }
         h.event(button(to, false));
         h.run_steps(2);
+    }
+
+    /// Plugin-Liste: „Immer in eigenem Prozess“ im Kontextmenü; neue Inserts übernehmen es,
+    /// bestehende bleiben, wie sie sind. Ein Plugin von der Sperrliste ist fest so markiert.
+    #[test]
+    fn the_plugin_list_sets_the_own_process_default() {
+        let mut p = Project::default();
+        let audio = p.add_track(TrackKind::Audio, "Gesang");
+        let mut w = ProjectWindow::new(p, None, String::new());
+        w.plugins.list = Some(vec![
+            fake_plugin("test.hall", "Hall", false),
+            fake_plugin("test.blocked", "Gesperrt", false),
+        ]);
+        w.plugins.own_process.insert("test.blocked".into());
+        let hall = fake_plugin("test.hall", "Hall", false);
+        w.add_insert(audio, &hall);
+        w.show_inspector = false;
+        w.show_right = true;
+        w.right.tab = rightzone::Tab::Plugins;
+        let mut h = window_harness(w);
+        h.get_by_label("Gesperrt  ·  eigener Prozess");
+        h.get_by_label("Hall").click_secondary();
+        h.run_steps(2);
+        h.get_by_label("Immer in eigenem Prozess").click();
+        h.run_steps(2);
+        assert!(h.state().plugins.preferred.contains("test.hall"));
+        h.get_by_label("Hall  ·  eigener Prozess");
+        let w = h.state_mut();
+        w.add_insert(audio, &hall);
+        let isolated: Vec<bool> = w.project.tracks[audio]
+            .inserts
+            .iter()
+            .map(|s| s.isolated)
+            .collect();
+        assert_eq!(isolated, [false, true], "only the new insert");
+        w.set_own_process_default("test.hall", false);
+        w.add_insert(audio, &hall);
+        assert!(!w.project.tracks[audio].inserts[2].isolated);
+        let blocked = fake_plugin("test.blocked", "Gesperrt", false);
+        w.add_insert(audio, &blocked);
+        assert!(w.project.tracks[audio].inserts[3].isolated);
     }
 
     #[test]
@@ -3791,6 +3911,7 @@ mod tests {
                 bypass: false,
                 params: Vec::new(),
                 state: None,
+                isolated: false,
             });
         let range = w.render_range(0).unwrap();
         w.render_in_place(render::RenderSpec::track(0, range, false));
@@ -3830,6 +3951,7 @@ mod tests {
             bypass: false,
             params: Vec::new(),
             state: None,
+            isolated: false,
         };
         w.add_plugin_process(id, slot, (0, 24_000))
             .unwrap_or_else(|e| panic!("{}: {e}", fx.name));
@@ -3923,6 +4045,7 @@ mod tests {
                 bypass: false,
                 params: Vec::new(),
                 state: None,
+                isolated: false,
             });
         w.selected_track = Some(0);
         w
@@ -4325,6 +4448,7 @@ mod tests {
                     velocity: 70 + i as u8 * 4,
                     start: i64::from(i) * 480,
                     length: 480,
+                    spelling: 0,
                 })
                 .collect();
             ev.controllers = vec![
@@ -4344,6 +4468,356 @@ mod tests {
             w.key_editor.selection = vec![1];
             w.show_lower = true;
             w.lower = LowerZone::List;
+        });
+    }
+
+    /// Ein Part mit Melodie (Achtel, Sechzehntel, punktierte Werte, Vorzeichen, Bindung über
+    /// den Taktstrich) und Bass: Klaviersystem.
+    fn score_part(w: &mut ProjectWindow) -> studiocraft_project::EventId {
+        w.project = Project::default();
+        w.project.key = studiocraft_project::KeySignature {
+            fifths: 1,
+            minor: false,
+        };
+        let t = w.project.add_track(TrackKind::Instrument, "Klavier");
+        let part = w.project.create_event(t, 0, 4 * 3840).unwrap();
+        let n = |start: i64, length: u64, pitch: u8| studiocraft_project::Note {
+            start,
+            length,
+            pitch,
+            velocity: 100,
+            spelling: 0,
+        };
+        let q = 960i64;
+        let mut notes = vec![
+            n(0, 480, 67),
+            n(q / 2, 480, 69),
+            n(q, 240, 71),
+            n(q + 240, 240, 72),
+            n(q + 480, 480, 74),
+            n(2 * q, 1440, 76),
+            n(3 * q + q / 2, 480, 77),
+            n(4 * q, 960, 79),
+            n(5 * q, 1920, 78),
+            n(7 * q, 1920, 74),
+            n(12 * q, 3840, 67),
+            n(12 * q, 3840, 71),
+            n(12 * q, 3840, 74),
+        ];
+        for b in 0..4 {
+            notes.push(n(b * 4 * q, 1920, 43));
+            notes.push(n(b * 4 * q + 2 * q, 1920, 50));
+        }
+        w.project.event_mut(part).unwrap().notes = notes;
+        w.selection = vec![part];
+        w.key_editor.part = Some(part);
+        part
+    }
+
+    #[test]
+    fn renders_the_score_editor() {
+        shot("score", |w| {
+            score_part(w);
+            w.key_editor.selection = vec![3];
+            w.cursor = 5 * 960;
+            w.show_lower = true;
+            w.lower = LowerZone::Score;
+            w.project.layout.lower_height = 520.0;
+            w.apply_layout(w.project.layout.clone());
+        });
+    }
+
+    #[test]
+    fn the_score_editor_sets_quantize_and_key_as_undo_steps() {
+        let mut w = ProjectWindow::new(Project::default(), None, "kein Audio (Test)".into());
+        let part = score_part(&mut w);
+        w.show_lower = true;
+        w.lower = LowerZone::Score;
+        let mut h = window_harness(w);
+        h.run_steps(2);
+        h.get_by_label("Partitur: Part, 4 Takte");
+        h.get_by_label("Anzeige-Quantisierung").click();
+        h.run_steps(2);
+        h.get_by_label("1/8").click();
+        h.run_steps(2);
+        assert_eq!(
+            h.state().project.event(part).unwrap().score_quantize,
+            Some(480)
+        );
+        h.get_by_label("Tonart").click();
+        h.run_steps(2);
+        h.get_by_label("3 Be").click();
+        h.run_steps(2);
+        assert_eq!(h.state().project.key.fifths, -3);
+        h.state_mut().undo();
+        assert_eq!(h.state().project.key.fifths, 1);
+        h.state_mut().undo();
+        assert_eq!(h.state().project.event(part).unwrap().score_quantize, None);
+    }
+
+    /// Noten im Notenbild: Klick wählt, „Kreuz“ erhöht, Zeichnen setzt eine Note an Linie und
+    /// Zählzeit, Ziehen verschiebt in Zeit und Tonhöhe, Entf löscht; alles rückgängig machbar.
+    #[test]
+    fn notes_are_edited_in_the_score() {
+        let mut p = Project::default();
+        let t = p.add_track(TrackKind::Instrument, "Flöte");
+        let part = p.create_event(t, 0, 3840).unwrap();
+        p.event_mut(part).unwrap().notes = vec![studiocraft_project::Note {
+            pitch: 67,
+            velocity: 100,
+            start: 0,
+            length: 960,
+            spelling: 0,
+        }];
+        let mut w = ProjectWindow::new(p, None, "kein Audio (Test)".into());
+        w.selection = vec![part];
+        w.key_editor.part = Some(part);
+        w.show_lower = true;
+        w.lower = LowerZone::Score;
+        let mut h = window_harness(w);
+        h.run_steps(3);
+        let press = |h: &mut Harness<'_, ProjectWindow>, pos: egui::Pos2, down: bool| {
+            h.event(egui::Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Primary,
+                pressed: down,
+                modifiers: egui::Modifiers::NONE,
+            });
+        };
+        let click = |h: &mut Harness<'_, ProjectWindow>, pos: egui::Pos2| {
+            h.event(egui::Event::PointerMoved(pos));
+            h.run_steps(1);
+            press(h, pos, true);
+            h.run_steps(1);
+            press(h, pos, false);
+            h.run_steps(2);
+        };
+        let notes =
+            |h: &Harness<'_, ProjectWindow>| h.state().project.event(part).unwrap().notes.clone();
+        let head = |h: &Harness<'_, ProjectWindow>, n: usize| {
+            h.state()
+                .score_view
+                .last
+                .heads
+                .iter()
+                .find(|x| x.1 == n)
+                .map(|x| x.0.center())
+                .expect("head drawn")
+        };
+
+        // Select, then sharpen.
+        let g = head(&h, 0);
+        click(&mut h, g);
+        assert_eq!(h.state().key_editor.selection, vec![0]);
+        h.get_by_label("Kreuz").click();
+        h.run_steps(2);
+        assert_eq!((notes(&h)[0].pitch, notes(&h)[0].spelling), (68, 1));
+        h.state_mut().undo();
+        h.run_steps(2);
+        assert_eq!(notes(&h)[0].pitch, 67);
+
+        // Draw a note on the middle line (B4) at the second beat.
+        h.state_mut().tool = crate::tools::Tool::Draw;
+        let bar = h.state().score_view.last.bars[0].clone();
+        let x = bar
+            .pts
+            .iter()
+            .find(|p| p.0 == 960)
+            .map(|p| p.1)
+            .expect("column");
+        let y = bar.tops[0] + 2.0 * 8.0;
+        click(&mut h, egui::pos2(x + 2.0, y));
+        let n = notes(&h);
+        assert_eq!(n.len(), 2);
+        assert_eq!((n[1].start, n[1].pitch, n[1].length), (960, 71, 960));
+        assert_eq!(h.state().key_editor.selection, vec![1]);
+
+        // Drag the first note one space up (two steps: G4 → B4) and right to the next beat.
+        h.state_mut().tool = crate::tools::Tool::Select;
+        let from = head(&h, 0);
+        let to = egui::pos2(x + (from.x - bar.pts[0].1), from.y - 8.0);
+        h.event(egui::Event::PointerMoved(from));
+        h.run_steps(1);
+        press(&mut h, from, true);
+        h.run_steps(1);
+        for k in 1..=6 {
+            let f = k as f32 / 6.0;
+            h.event(egui::Event::PointerMoved(from + (to - from) * f));
+            h.run_steps(1);
+        }
+        press(&mut h, to, false);
+        h.run_steps(2);
+        let n = notes(&h);
+        assert_eq!(
+            (n[0].start, n[0].pitch),
+            (960, 71),
+            "moved in time and pitch"
+        );
+        h.state_mut().undo();
+        h.run_steps(2);
+        assert_eq!(
+            (notes(&h)[0].start, notes(&h)[0].pitch),
+            (0, 67),
+            "one undo step"
+        );
+
+        // Delete with the key while the score has the focus.
+        let g = head(&h, 0);
+        click(&mut h, g);
+        h.key_press(egui::Key::Delete);
+        h.run_steps(2);
+        assert_eq!(notes(&h).len(), 1);
+        assert_eq!(
+            h.state().project.tracks[0].events.len(),
+            1,
+            "the part stays"
+        );
+    }
+
+    /// Noten exportieren: gewählte Parts in Spur- und Zeitfolge als MusicXML und PDF; der
+    /// Dialog ist bedienbar beschriftet.
+    #[test]
+    fn selected_parts_export_as_musicxml_and_pdf() {
+        let mut w = ProjectWindow::new(Project::default(), None, "kein Audio (Test)".into());
+        let first = score_part(&mut w);
+        let t2 = w.project.add_track(TrackKind::Instrument, "Bass");
+        let second = w.project.create_event(t2, 0, 3840).unwrap();
+        w.project.event_mut(second).unwrap().notes = vec![studiocraft_project::Note {
+            pitch: 40,
+            velocity: 100,
+            start: 0,
+            length: 3840,
+            spelling: 0,
+        }];
+        w.selection = vec![second, first];
+        assert_eq!(w.score_export_parts(), vec![first, second]);
+        let dir = std::env::temp_dir().join(format!("sc-score-export-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        w.score_view.export.layout.title = "Duett".into();
+        let xml = dir.join("a.musicxml");
+        w.export_score_to(&xml, false).unwrap();
+        let text = std::fs::read_to_string(&xml).unwrap();
+        assert!(text.contains("<work-title>Duett</work-title>"));
+        assert_eq!(text.matches("<score-part ").count(), 2);
+        assert!(text.contains("<part-name>Bass"), "track name first");
+        let pdf = dir.join("a.pdf");
+        w.export_score_to(&pdf, true).unwrap();
+        assert!(std::fs::read(&pdf).unwrap().starts_with(b"%PDF-1.4"));
+        let _ = std::fs::remove_dir_all(dir);
+
+        w.open_score_export();
+        w.score_view.export.pdf = true;
+        let mut h = window_harness(w);
+        h.run_steps(2);
+        h.get_by_label("Notengröße");
+        h.get_by_label("Ränder");
+        h.get_by_label("2 MIDI-Part(s)");
+    }
+
+    /// Zwei Audio-Events auf einer Spur, nebeneinander mit Lücke.
+    fn two_audio_events(
+        w: &mut ProjectWindow,
+    ) -> (studiocraft_project::EventId, studiocraft_project::EventId) {
+        w.project = Project::default();
+        let a = w
+            .import_clip("Strophe", None, tone_clip(2.0, 220.0), None)
+            .unwrap();
+        let b = w
+            .import_clip("Refrain", None, tone_clip(2.0, 330.0), Some((0, 6 * 960)))
+            .unwrap();
+        (a, b)
+    }
+
+    /// Bearbeiten → „Audio-Part bilden“ fasst zusammen, „auflösen“ gibt die Events zurück;
+    /// beides rückgängig machbar.
+    #[test]
+    fn audio_events_group_into_a_part_and_back() {
+        let mut w = ProjectWindow::new(Project::default(), None, "kein Audio (Test)".into());
+        let (a, b) = two_audio_events(&mut w);
+        w.selection = vec![a, b];
+        let mut h = window_harness(w);
+        h.get_by_label("Bearbeiten").click();
+        h.run_steps(2);
+        h.get_by_label("Audio-Part bilden").click();
+        h.run_steps(2);
+        let events = &h.state().project.tracks[0].events;
+        assert_eq!(events.len(), 1);
+        assert!(events[0].is_audio_part());
+        let part = events[0].id;
+        assert_eq!(h.state().selection, vec![part]);
+        h.get_by_label("Bearbeiten").click();
+        h.run_steps(2);
+        h.get_by_label("Audio-Part auflösen").click();
+        h.run_steps(2);
+        assert_eq!(h.state().project.tracks[0].events.len(), 2);
+        h.state_mut().undo();
+        assert!(h.state().project.tracks[0].events[0].is_audio_part());
+        h.state_mut().undo();
+        assert_eq!(h.state().project.tracks[0].events.len(), 2);
+    }
+
+    /// Part-Editor: Doppelklick-Ziel für Audio-Parts; Anfang, Stumm und Löschen ändern die
+    /// Events im Part als Rückgängig-Schritte; ein leerer Part verschwindet.
+    #[test]
+    fn the_part_editor_edits_the_events_of_an_audio_part() {
+        let mut w = ProjectWindow::new(Project::default(), None, "kein Audio (Test)".into());
+        let (a, b) = two_audio_events(&mut w);
+        let part = w.project.group_audio(&[a, b]).unwrap();
+        w.open_audio_part_editor(part);
+        assert_eq!((w.show_lower, w.lower), (true, LowerZone::AudioPart));
+        let mut h = window_harness(w);
+        h.run_steps(2);
+        h.get_by_label("2 Events");
+        // A new start for the second event (as the start field hands it over).
+        assert!(h.query_all_by_label("Anfang").count() >= 2);
+        h.state_mut()
+            .edit_part_child(part, 1, crate::audio_part_editor::PartEdit::Start(10 * 960));
+        let ev = h.state().project.event(part).unwrap().clone();
+        assert_eq!(ev.children[1].start.0, 10 * 960);
+        h.state_mut().undo();
+        assert_eq!(
+            h.state().project.event(part).unwrap().children[1].start.0,
+            6 * 960
+        );
+        // Mute through the checkbox, delete through the button.
+        // The info line has its own "Stumm" first; the part editor's rows follow.
+        let n = h.query_all_by_label("Stumm").count();
+        h.get_all_by_label("Stumm").nth(n - 2).unwrap().click();
+        h.run_steps(2);
+        assert!(h.state().project.event(part).unwrap().children[0].muted);
+        h.get_all_by_label("Löschen").next().unwrap().click();
+        h.run_steps(2);
+        assert_eq!(h.state().project.event(part).unwrap().children.len(), 1);
+        h.get_all_by_label("Löschen").next().unwrap().click();
+        h.run_steps(2);
+        assert!(
+            h.state().project.event(part).is_none(),
+            "an empty part goes"
+        );
+        h.state_mut().undo();
+        assert!(h.state().project.event(part).is_some());
+    }
+
+    #[test]
+    fn renders_the_part_editor() {
+        shot("audio_part_editor", |w| {
+            let (a, b) = two_audio_events(w);
+            let part = w.project.group_audio(&[a, b]).unwrap();
+            w.project.event_mut(part).unwrap().children[1].gain_db = -4.5;
+            w.selection = vec![part];
+            w.open_audio_part_editor(part);
+        });
+    }
+
+    #[test]
+    fn renders_an_audio_part() {
+        shot("audio_part", |w| {
+            let (a, b) = two_audio_events(w);
+            let part = w.project.group_audio(&[a, b]).unwrap();
+            let ev = w.project.event_mut(part).unwrap();
+            ev.fade_in = 480;
+            ev.gain_db = -3.0;
+            w.selection = vec![part];
         });
     }
 
@@ -4402,6 +4876,20 @@ mod tests {
             h.query_by_label_contains("StudioCraft – third-party licences")
                 .is_some()
         );
+    }
+
+    #[test]
+    fn the_help_menu_opens_the_donation_page() {
+        let (w, _) = one_event_window();
+        let mut h = window_harness(w);
+        h.get_by_label("Hilfe").click();
+        h.run_steps(2);
+        h.get_by_label("StudioCraft unterstützen …").click();
+        h.step();
+        let opened = h.output().platform_output.commands.iter().any(
+            |c| matches!(c, egui::OutputCommand::OpenUrl(u) if u.url == sponsor::URL && u.new_tab),
+        );
+        assert!(opened, "the donation page was not opened");
     }
 
     #[test]
@@ -4812,6 +5300,7 @@ mod tests {
             velocity: 100,
             start: 0,
             length: 480,
+            spelling: 0,
         }];
         let mut w = ProjectWindow::new(p, None, String::new());
         w.view.scroll_ticks = 0.0;
@@ -4944,12 +5433,14 @@ mod tests {
                 velocity: 100,
                 start: 0,
                 length: 480,
+                spelling: 0,
             },
             studiocraft_project::Note {
                 pitch: 64,
                 velocity: 100,
                 start: 480,
                 length: 480,
+                spelling: 0,
             },
         ];
         let mut w = ProjectWindow::new(p, None, String::new());
@@ -5002,6 +5493,7 @@ mod tests {
                 velocity: 96,
                 start: 960,
                 length: 960,
+                spelling: 0,
             }];
             w.open_key_editor(part);
             w.key_editor.selection = vec![0];
@@ -5025,6 +5517,7 @@ mod tests {
                         velocity: 100,
                         start: i * 960,
                         length: 720,
+                        spelling: 0,
                     })
                     .collect();
                 ids.push(id);
@@ -5047,6 +5540,7 @@ mod tests {
                 velocity: 100,
                 start: 0,
                 length: 960,
+                spelling: 0,
             }];
         }
         let mut w = ProjectWindow::new(p, None, String::new());
@@ -5421,6 +5915,7 @@ mod tests {
                     velocity: 70 + (k % 2) as u8 * 40,
                     start: k * q / 2,
                     length: 120,
+                    spelling: 0,
                 });
             }
             for (pitch, beat) in [(36, 0), (38, 1), (36, 2), (38, 3), (10, 3)] {
@@ -5429,6 +5924,7 @@ mod tests {
                     velocity: 110,
                     start: beat * q,
                     length: 120,
+                    spelling: 0,
                 });
             }
             let mut map = studiocraft_project::DrumMap::general_midi();
@@ -5454,6 +5950,7 @@ mod tests {
                 velocity: 100,
                 start: 0,
                 length: 3840,
+                spelling: 0,
             }];
             ev.controllers = (0..16)
                 .map(|i| CtrlPoint {
@@ -5526,12 +6023,14 @@ mod tests {
                 velocity: 100,
                 start: 0,
                 length: 480,
+                spelling: 0,
             },
             studiocraft_project::Note {
                 pitch: 64,
                 velocity: 100,
                 start: 480,
                 length: 480,
+                spelling: 0,
             },
         ];
         let mut w = ProjectWindow::new(p, None, String::new());
@@ -6154,6 +6653,7 @@ mod tests {
                 velocity: 100,
                 start: 2 * q as i64,
                 length: q,
+                spelling: 0,
             }];
         }
         w.snap = false;
@@ -6722,6 +7222,7 @@ mod tests {
                 bypass: false,
                 params: Vec::new(),
                 state: None,
+                isolated: false,
             });
         let first = w.project.tracks[0].name.clone();
         w.show_lower = true;
@@ -6820,6 +7321,7 @@ mod tests {
                     bypass: true,
                     params: Vec::new(),
                     state: None,
+                    isolated: false,
                 });
         });
     }
@@ -7235,7 +7737,7 @@ mod tests {
     #[test]
     fn renders_recording_in_progress() {
         let (mut core, ctl) = studiocraft_engine::engine(48_000, TempoMap::default());
-        shot("aufnahme", move |w| {
+        shot_once("aufnahme", move |w| {
             w.project = Project::default();
             let bar = 4 * TICKS_PER_QUARTER;
             w.import_clip("Playback", None, tone_clip(8.0, 110.0), None)
@@ -7301,6 +7803,7 @@ mod tests {
                 bypass: false,
                 params: Vec::new(),
                 state: None,
+                isolated: false,
             });
         w.checkpoint(before);
         w.sync_inserts();
@@ -7349,6 +7852,7 @@ mod tests {
                 bypass: false,
                 params: Vec::new(),
                 state: None,
+                isolated: false,
             });
         w.sync_inserts();
         let h = w.plugins.sent[0].handles[0].as_ref().unwrap();
@@ -7368,6 +7872,7 @@ mod tests {
                 bypass: false,
                 params: Vec::new(),
                 state: None,
+                isolated: false,
             });
         w.sync_inserts();
         assert!(
@@ -7443,6 +7948,94 @@ mod tests {
         h.get_by_label("Kein Kanal");
     }
 
+    /// Insert-Menü „…“: „In eigenem Prozess“ ist ein Undo-Schritt; ohne Helferprogramm (Tests)
+    /// meldet das Laden das, statt abzustürzen; „Neu laden“ nach einem Absturz.
+    #[test]
+    fn an_insert_can_be_switched_to_its_own_process() {
+        let mut p = Project::default();
+        let t = p.add_track(TrackKind::Audio, "A");
+        p.tracks[t].inserts.push(studiocraft_project::InsertSlot {
+            plugin_id: "test.missing".into(),
+            name: "Fehlt".into(),
+            bypass: false,
+            params: Vec::new(),
+            state: None,
+            isolated: false,
+        });
+        let mut w = ProjectWindow::new(p, None, String::new());
+        w.selected_track = Some(t);
+        w.show_inspector = true;
+        let mut h = window_harness(w);
+        h.get_by_label("Insert-Menü").click();
+        h.run_steps(2);
+        h.get_by_label("In eigenem Prozess").click();
+        h.run_steps(2);
+        assert!(h.state().project.tracks[t].inserts[0].isolated);
+        h.state_mut().undo();
+        assert!(!h.state().project.tracks[t].inserts[0].isolated);
+
+        // Isoliert, aber ohne Helferprogramm: eine Meldung, kein Absturz.
+        let w = h.state_mut();
+        w.project.tracks[t].inserts[0].isolated = true;
+        w.plugins.list = Some(vec![studiocraft_plugin_host::PluginInfo {
+            id: "test.missing".into(),
+            name: "Fehlt".into(),
+            ..Default::default()
+        }]);
+        let slot = w.project.tracks[t].inserts[0].clone();
+        let e = w.instantiate(&slot).err().unwrap_or_default();
+        assert!(e.contains("Eigener Prozess"), "{e}");
+
+        // Nach einem gemeldeten Absturz baut „Neu laden“ die Kette neu.
+        w.plugins.crashed.insert((t, 0));
+        w.reload_insert(t, 0);
+        assert!(!w.plugins.crashed.contains(&(t, 0)));
+    }
+
+    /// Ein Plugin, dessen Datei beim Scan abstürzte, läuft nur im eigenen Prozess: Der Schalter
+    /// steht fest an, das Laden geht über die Bridge, auch wenn der Slot es nicht verlangt.
+    #[test]
+    fn a_plugin_blocked_by_the_scan_runs_only_in_its_own_process() {
+        let mut p = Project::default();
+        let t = p.add_track(TrackKind::Audio, "A");
+        p.tracks[t].inserts.push(studiocraft_project::InsertSlot {
+            plugin_id: "test.blocked".into(),
+            name: "Gesperrt".into(),
+            bypass: false,
+            params: Vec::new(),
+            state: None,
+            isolated: false,
+        });
+        let mut w = ProjectWindow::new(p, None, String::new());
+        w.selected_track = Some(t);
+        w.show_inspector = true;
+        w.plugins.list = Some(vec![studiocraft_plugin_host::PluginInfo {
+            id: "test.blocked".into(),
+            name: "Gesperrt".into(),
+            ..Default::default()
+        }]);
+        w.plugins.own_process.insert("test.blocked".into());
+        let slot = w.project.tracks[t].inserts[0].clone();
+        let e = w.instantiate(&slot).err().unwrap_or_default();
+        assert!(
+            e.contains("Eigener Prozess"),
+            "loads through the bridge: {e}"
+        );
+
+        // Auch mit gesetztem Schalter lässt er sich nicht ausschalten.
+        w.project.tracks[t].inserts[0].isolated = true;
+        let mut h = window_harness(w);
+        h.get_by_label("Insert-Menü").click();
+        h.run_steps(2);
+        let before = h.state().project.clone();
+        h.get_by_label("In eigenem Prozess").click();
+        h.run_steps(2);
+        assert!(
+            h.state().project == before,
+            "the switch is fixed: no change, no undo step"
+        );
+    }
+
     #[test]
     fn renders_inserts_in_inspector() {
         shot("inserts", |w| {
@@ -7458,6 +8051,7 @@ mod tests {
                         bypass: false,
                         params: Vec::new(),
                         state: None,
+                        isolated: false,
                     });
                 w.sync_inserts();
             }
@@ -7475,6 +8069,7 @@ mod tests {
                 velocity: 100,
                 start: (i as u64 * q) as i64,
                 length: q - 120,
+                spelling: 0,
             });
         }
         id
@@ -7959,6 +8554,7 @@ mod tests {
                 bypass: false,
                 params: Vec::new(),
                 state: None,
+                isolated: false,
             });
         w.sync_inserts();
         core.process(&mut [0.0; 512]);
@@ -8012,6 +8608,7 @@ mod tests {
             bypass: false,
             params: Vec::new(),
             state: None,
+            isolated: false,
         };
         w.add_audio_track();
         w.project.tracks[0].inserts.push(slot(&fx));
@@ -8133,6 +8730,7 @@ mod tests {
                         bypass: false,
                         params: Vec::new(),
                         state: None,
+                        isolated: false,
                     });
             }
             w.selected_track = Some(0);
