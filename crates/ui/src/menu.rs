@@ -293,6 +293,7 @@ impl ProjectWindow {
                     self.about = crate::about::About::Open;
                     ui.close();
                 }
+                crate::sponsor::menu_item(ui);
             });
         });
     }
