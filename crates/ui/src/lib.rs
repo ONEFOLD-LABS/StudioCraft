@@ -166,6 +166,9 @@ pub struct ProjectWindow {
     keymap: keymap::Keymap,
     /// Thumbnails der Videospuren (Issue #174).
     videos: video::Cache,
+    /// Videofenster offen (Issue #219) und sein Bild.
+    show_video: bool,
+    video_view: Option<video::Viewer>,
     key_dialog: keymap::KeyDialog,
     /// Nummernblock-Drücke aus der App (ohne: Nummernblock wie Zahlenreihe).
     keypad: Option<keypad::KeypadTap>,
@@ -389,6 +392,8 @@ impl ProjectWindow {
             tool_palette_age: 0,
             keymap: keymap::Keymap::default(),
             videos: video::Cache::default(),
+            show_video: false,
+            video_view: None,
             key_dialog: keymap::KeyDialog::default(),
             keypad: None,
             fade_editor: None,
@@ -1226,6 +1231,7 @@ impl ProjectWindow {
         self.color_popup(ui.ctx());
         self.tool_palette(ui.ctx());
         self.key_commands_dialog(ui.ctx());
+        self.video_window(ui.ctx());
         self.repeat_dialog(ui.ctx());
         self.stem_dialog(ui.ctx());
         self.score_export_dialog(ui.ctx());
@@ -4843,6 +4849,27 @@ mod tests {
                 .add_video_track("Film", "/test/Film.webm", 6 * 960, None);
             w.videos.insert("/test/Film.webm", thumbs);
             w.selected_track = Some(t);
+        });
+    }
+
+    #[test]
+    fn renders_the_video_window() {
+        shot("video_window", |w| {
+            w.project = Project::default();
+            let bytes = crate::video::tests::webm(30);
+            let mut player = crate::video::Player::open(bytes).unwrap();
+            let image = crate::video::tests::frame_image(&mut player, 1.5);
+            let t = w
+                .project
+                .add_video_track("Film", "/test/Film.webm", 6 * 960, None);
+            w.selected_track = Some(t);
+            w.cursor = 1440;
+            w.show_video = true;
+            w.video_view = Some(crate::video::Viewer::with_image(
+                "/test/Film.webm",
+                1.5,
+                image,
+            ));
         });
     }
 

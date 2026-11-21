@@ -223,6 +223,13 @@ impl ProjectWindow {
                 ui.checkbox(&mut self.show_transport, tr("Transportleiste (F2)"));
                 ui.checkbox(&mut self.show_status, tr("Statuszeile"));
                 ui.checkbox(&mut self.show_right, tr("Rechte Zone (Alt+R)"));
+                if ui
+                    .checkbox(&mut self.show_video, tr("Videofenster"))
+                    .changed()
+                    && !self.show_video
+                {
+                    self.video_view = None;
+                }
                 if self.assistant_available {
                     ui.checkbox(&mut self.show_assistant, tr("KI-Assistent"));
                 }
