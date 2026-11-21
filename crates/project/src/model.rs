@@ -31,6 +31,9 @@ pub enum TrackKind {
     Tempo,
     /// Lineal-Spur: ein weiteres Zeitlineal mit eigenem Anzeigeformat (beliebig viele).
     Ruler,
+    /// Videospur (Issue #174): ein Video als Event mit Thumbnails; das Event legt fest, wo das
+    /// Video beginnt, und trägt seinen Ton (stumm = Ton aus).
+    Video,
 }
 
 /// Anzeigeformat einer Lineal-Spur.
@@ -119,6 +122,7 @@ impl TrackKind {
             Self::Marker => "Marker",
             Self::Tempo => "Tempo",
             Self::Ruler => "Lineal",
+            Self::Video => "Video",
         }
     }
 
@@ -483,6 +487,9 @@ pub struct Track {
     /// Lineal-Spuren: Anzeigeformat.
     #[serde(default, skip_serializing_if = "RulerFormat::is_bars")]
     pub ruler: RulerFormat,
+    /// Videospuren: Pfad der Videodatei.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub video: Option<String>,
     /// MIDI-Spuren: Kanal 1–16.
     #[serde(default = "default_channel", skip_serializing_if = "is_channel_one")]
     pub midi_channel: u8,
@@ -1167,6 +1174,7 @@ impl Project {
                 order: None,
                 midi_port: None,
                 ruler: RulerFormat::Bars,
+                video: None,
                 midi_channel: 1,
                 program: None,
                 solo_defeat: false,
@@ -1418,6 +1426,12 @@ impl Project {
         if !kind.holds_events() || length == 0 {
             return None;
         }
+        Some(self.insert_blank(track, start, length))
+    }
+
+    /// Legt ohne Prüfung ein leeres Event an (für [`Self::create_event`] und Videospuren).
+    fn insert_blank(&mut self, track: usize, start: u64, length: u64) -> EventId {
+        let kind = self.tracks[track].kind;
         let id = self.next_event_id();
         let name = if kind == TrackKind::Audio {
             "Audio"
@@ -1455,7 +1469,38 @@ impl Project {
                 fade_out_curve: FadeCurve::Linear,
             },
         );
-        Some(id)
+        id
+    }
+
+    /// Legt eine Videospur für die Datei `path` an: ein Event von `length` Ticks ab
+    /// Projektanfang, mit dem Ton des Videos (`clip`), falls es einen hat. Ohne Ton bleibt das
+    /// Event stumm und ohne Clip.
+    pub fn add_video_track(
+        &mut self,
+        name: impl Into<String>,
+        path: impl Into<String>,
+        length: u64,
+        clip: Option<ClipId>,
+    ) -> usize {
+        let name = name.into();
+        let t = self.add_track(TrackKind::Video, name.clone());
+        self.tracks[t].video = Some(path.into());
+        let length = length.max(1);
+        let id = match clip.and_then(|c| self.add_audio_event(t, 0, c)) {
+            Some(id) => id,
+            None => {
+                let id = self.insert_blank(t, 0, length);
+                if let Some(ev) = self.event_mut(id) {
+                    ev.muted = true;
+                }
+                id
+            }
+        };
+        if let Some(ev) = self.event_mut(id) {
+            ev.length = length;
+            ev.name = name;
+        }
+        t
     }
 
     /// Wie weit ein Audio-Event höchstens nach links (Start früher) und
@@ -1820,6 +1865,7 @@ impl Project {
             order: None,
             midi_port: None,
             ruler: RulerFormat::Bars,
+            video: None,
             midi_channel: 1,
             program: None,
             solo_defeat: false,
@@ -1856,7 +1902,10 @@ impl Project {
     /// Legt ein Audio-Event an, das den ganzen Clip abspielt.
     pub fn add_audio_event(&mut self, track: usize, start: u64, clip: ClipId) -> Option<EventId> {
         let c = self.pool.get(clip as usize)?;
-        if self.tracks.get(track)?.kind != TrackKind::Audio {
+        if !matches!(
+            self.tracks.get(track)?.kind,
+            TrackKind::Audio | TrackKind::Video
+        ) {
             return None;
         }
         let length = self.tempo.ticks(c.frames, c.sample_rate).max(1);

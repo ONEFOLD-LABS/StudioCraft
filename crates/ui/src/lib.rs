@@ -75,6 +75,7 @@ pub mod theme;
 mod timeline;
 pub mod titlebar;
 mod tools;
+mod video;
 pub mod waveform;
 mod windows;
 
@@ -163,6 +164,8 @@ pub struct ProjectWindow {
     tool_palette_age: u8,
     /// Tastaturbelegung (Standard plus eigene Änderungen) und der Dialog dazu.
     keymap: keymap::Keymap,
+    /// Thumbnails der Videospuren (Issue #174).
+    videos: video::Cache,
     key_dialog: keymap::KeyDialog,
     /// Nummernblock-Drücke aus der App (ohne: Nummernblock wie Zahlenreihe).
     keypad: Option<keypad::KeypadTap>,
@@ -385,6 +388,7 @@ impl ProjectWindow {
             tool_palette: None,
             tool_palette_age: 0,
             keymap: keymap::Keymap::default(),
+            videos: video::Cache::default(),
             key_dialog: keymap::KeyDialog::default(),
             keypad: None,
             fade_editor: None,
@@ -1681,6 +1685,9 @@ impl ProjectWindow {
         }
         if kind == TrackKind::Ruler {
             inspector_section(ui, tr("Lineal"), true, |ui| self.ruler_ui(ui, idx));
+        }
+        if kind == TrackKind::Video {
+            inspector_section(ui, tr("Video"), true, |ui| self.video_ui(ui, idx));
         }
         if channel {
             inspector_section(ui, tr("Pre"), false, |ui| self.pre_ui(ui, idx));
@@ -4818,6 +4825,24 @@ mod tests {
             w.project.event_mut(part).unwrap().children[1].gain_db = -4.5;
             w.selection = vec![part];
             w.open_audio_part_editor(part);
+        });
+    }
+
+    #[test]
+    fn renders_a_video_track() {
+        shot("video_track", |w| {
+            w.project = Project::default();
+            let a = w
+                .import_clip("Dialog", None, tone_clip(4.0, 220.0), None)
+                .unwrap();
+            let _ = a;
+            let bytes = crate::video::tests::webm(60);
+            let thumbs = crate::video::thumbnails(&bytes).unwrap();
+            let t = w
+                .project
+                .add_video_track("Film", "/test/Film.webm", 6 * 960, None);
+            w.videos.insert("/test/Film.webm", thumbs);
+            w.selected_track = Some(t);
         });
     }
 

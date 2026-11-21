@@ -717,6 +717,7 @@ pub(crate) fn kind_name(kind: TrackKind) -> &'static str {
         TrackKind::Marker => "marker",
         TrackKind::Tempo => "tempo",
         TrackKind::Ruler => "ruler",
+        TrackKind::Video => "video",
     }
 }
 

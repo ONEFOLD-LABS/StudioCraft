@@ -32,6 +32,11 @@ craft-keymap = { git = "https://github.com/storytold/craft-libs", rev = "56c3c83
 
 # AAF- und OMF-Projekte lesen (storytold/craft-libs, MIT OR Apache-2.0; reines Rust).
 craft-aaf = { git = "https://github.com/storytold/craft-libs", rev = "56c3c833bb869a140271e2aceec2112322cacc58" }
+# Videospur: Container (WebM/Matroska, MP4/MOV) und lizenzfreie Video-Decoder (AV1, VP9, VP8,
+# MPEG-2) in reinem Rust (storytold/craft-libs, MIT OR Apache-2.0). Kein H.264/HEVC
+# (docs/video-dekodierung.md).
+craft-media = { git = "https://github.com/storytold/craft-libs", rev = "56c3c833bb869a140271e2aceec2112322cacc58", features = ["matroska", "isobmff"] }
+craft-video = { git = "https://github.com/storytold/craft-libs", rev = "56c3c833bb869a140271e2aceec2112322cacc58", features = ["av1-decode", "vp9-decode", "vp8-decode", "mpeg2-decode"] }
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 rfd = "0.17"
 
@@ -47,3 +52,5 @@ web-sys = { version = "0.3", features = ["Window", "Document", "Element", "HtmlE
 [dev-dependencies]
 egui_kittest = { version = "0.37", features = ["wgpu", "snapshot"] }
 image = { version = "0.25", default-features = false, features = ["png"] }
+# Tests der Videospur: ein kleines VP9-Video erzeugen.
+craft-video = { git = "https://github.com/storytold/craft-libs", rev = "56c3c833bb869a140271e2aceec2112322cacc58", features = ["av1-decode", "vp9-decode", "vp8-decode", "mpeg2-decode", "vp9-encode"] }

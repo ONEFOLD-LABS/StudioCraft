@@ -26,6 +26,8 @@ reproduced below with other components:
       Copyright (c) the craft-time authors
   - craft-timeline 0.1.0 (MIT OR Apache-2.0)
       Copyright (c) the craft-timeline authors
+  - craft-video 0.1.0 (MIT OR Apache-2.0)
+      Copyright (c) the craft-video authors
   - craft-window 0.1.0 (MIT OR Apache-2.0)
       Copyright (c) the craft-window authors
   - craft-xml 0.1.0 (MIT OR Apache-2.0)
@@ -13375,7 +13377,6 @@ windows-result 0.4.1 (MIT OR Apache-2.0)
 windows-strings 0.5.1 (MIT OR Apache-2.0)
 windows-sys 0.45.0 (MIT OR Apache-2.0)
 windows-sys 0.52.0 (MIT OR Apache-2.0)
-windows-sys 0.59.0 (MIT OR Apache-2.0)
 windows-sys 0.61.2 (MIT OR Apache-2.0)
 windows-targets 0.42.2 (MIT OR Apache-2.0)
 windows-targets 0.52.6 (MIT OR Apache-2.0)
@@ -13613,7 +13614,6 @@ windows-result 0.4.1 (MIT OR Apache-2.0)
 windows-strings 0.5.1 (MIT OR Apache-2.0)
 windows-sys 0.45.0 (MIT OR Apache-2.0)
 windows-sys 0.52.0 (MIT OR Apache-2.0)
-windows-sys 0.59.0 (MIT OR Apache-2.0)
 windows-sys 0.61.2 (MIT OR Apache-2.0)
 windows-targets 0.42.2 (MIT OR Apache-2.0)
 windows-targets 0.52.6 (MIT OR Apache-2.0)

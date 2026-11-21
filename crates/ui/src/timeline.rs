@@ -614,6 +614,11 @@ impl Geo {
 }
 
 pub(crate) fn show(w: &mut ProjectWindow, ui: &mut Ui) {
+    // Thumbnails der Videospuren nachladen (im Hintergrund erzeugt).
+    let videos = w.video_paths();
+    if !videos.is_empty() {
+        w.videos.poll(ui.ctx(), &videos);
+    }
     let (resp, painter) = ui.allocate_painter(ui.available_size(), Sense::click_and_drag());
     let r = resp.rect;
     let header = Rect::from_min_max(
@@ -2306,7 +2311,9 @@ fn paint_event(
             color.lerp_to_gamma(Color32::WHITE, 0.45),
         );
     }
-    if let Some(clip) = ev.clip.and_then(|c| w.clip(c)) {
+    if track.kind == TrackKind::Video {
+        crate::video::paint(w, painter, track, ev, rect, body.intersect(g.lanes));
+    } else if let Some(clip) = ev.clip.and_then(|c| w.clip(c)) {
         let wave = if ev.muted {
             crate::theme::tokens(painter.ctx())
                 .event_text_muted
