@@ -191,6 +191,11 @@ impl ProjectWindow {
                     ui.close();
                     self.add_ruler_track();
                 }
+                #[cfg(not(target_arch = "wasm32"))]
+                if ui.button(tr("Videospur hinzufügen …")).clicked() {
+                    ui.close();
+                    self.add_video_dialog();
+                }
                 let insert = egui::Button::new(tr("Marker einfügen"))
                     .shortcut_text(self.key_label(ui.ctx(), Cmd::InsertMarker));
                 if ui.add(insert).clicked() {

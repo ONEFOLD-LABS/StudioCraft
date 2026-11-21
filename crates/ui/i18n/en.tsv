@@ -878,3 +878,15 @@ keine Audio-Clips in der Datei	no audio clips in the file
 Audiodatei fehlt: {name}	Audio file missing: {name}
 {n} Teile der Datei wurden nicht übernommen	{n} parts of the file were not imported
 Audio {n}	Audio {n}
+Videoformat nicht unterstützt (AV1, VP9, VP8 oder MPEG-2 in WebM, MKV, MP4 oder MOV umwandeln)	Video format not supported (convert to AV1, VP9, VP8 or MPEG-2 in WebM, MKV, MP4 or MOV)
+keine Videospur in der Datei	no video track in the file
+Video zu groß	Video too large
+Video nicht lesbar	Video not readable
+Videos gehen im Browser noch nicht	Videos do not work in the browser yet
+Thumbnails werden erstellt …	Creating thumbnails …
+Video	Video
+Videodateien	Video files
+Beginn	Start
+Ton	Sound
+Das Video hat keinen lesbaren Ton	The video has no readable sound
+Videospur hinzufügen …	Add Video Track …

@@ -82,6 +82,16 @@ patentrelevant sind die enthaltenen Codecs.
 4. **Nach Ablauf der US-Patente (frühestens Ende 2027):** H.264 mit eigenem oder permissivem
    Decoder neu bewerten **[Anwalt]**.
 
+## Umsetzung (0.10, #174)
+
+Die erste Stufe nutzt keine C-Bibliotheken und kein GStreamer: `craft-video` aus craft-libs
+(MIT OR Apache-2.0, reines Rust, ohne `unsafe`) bringt Decoder für AV1, VP9, VP8 und MPEG-2,
+`craft-media` die Container WebM/Matroska und MP4/MOV. Eingeschaltet sind nur diese Decoder
+(Cargo-Features `av1-decode`, `vp9-decode`, `vp8-decode`, `mpeg2-decode`); die H.264-, HEVC-,
+ProRes- und DNx-Module bleiben aus. Damit erledigen sich die beiden Maintainer-Fragen unten
+(GStreamer, C-Abhängigkeiten) für die erste Stufe; der Ton eines Videos läuft über den
+vorhandenen Audio-Import. Im Browser gibt es die Videospur noch nicht.
+
 ## Offene Risiken und Fragen
 
 - **[Anwalt]** Sisvel-Pools für AV1/VP9: Gelten sie für Software-Decoder in einer kostenlosen

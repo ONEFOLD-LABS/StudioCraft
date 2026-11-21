@@ -267,6 +267,8 @@ impl Song {
                         | TrackKind::Midi
                         | TrackKind::Group
                         | TrackKind::Fx
+                        // Der Ton eines Videos (Issue #174): ein Audio-Event, stumm = Ton aus.
+                        | TrackKind::Video
                 ) && project.audible(*i)
             })
             .map(|(slot, t)| {
@@ -1151,6 +1153,33 @@ mod tests {
         // Muting the part silences all its events.
         p.event_mut(part).unwrap().muted = true;
         assert!(frames(&p).is_empty());
+    }
+
+    #[test]
+    fn a_video_track_plays_its_sound_unless_muted() {
+        let mut p = Project::default();
+        let c = p.add_clip(PoolClip {
+            name: "Film".into(),
+            path: None,
+            sample_rate: 48_000,
+            frames: 96_000,
+        });
+        let t = p.add_video_track("Film", "/film.webm", 4 * TICKS_PER_QUARTER, Some(c));
+        let clips = HashMap::from([(c, ones(96_000, 1.0))]);
+        let events = |p: &Project| {
+            Song::build(p, &clips, 48_000)
+                .tracks
+                .first()
+                .map_or(0, |t| t.events.len())
+        };
+        assert_eq!(events(&p), 1);
+        p.tracks[t].events[0].muted = true;
+        assert_eq!(events(&p), 0, "Ton aus");
+        // Without sound the video track has a silent event and plays nothing.
+        let mut q = Project::default();
+        let v = q.add_video_track("Stumm", "/stumm.webm", 960, None);
+        assert!(q.tracks[v].events[0].muted && q.tracks[v].events[0].clip.is_none());
+        assert_eq!(q.tracks[v].events[0].length, 960);
     }
 
     #[test]
