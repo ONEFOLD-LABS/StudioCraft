@@ -25,6 +25,8 @@ mod web;
 #[cfg(not(target_arch = "wasm32"))]
 mod au;
 #[cfg(not(target_arch = "wasm32"))]
+mod bridge;
+#[cfg(not(target_arch = "wasm32"))]
 mod clap;
 #[cfg(not(target_arch = "wasm32"))]
 mod clap_presets;
@@ -47,6 +49,11 @@ mod vst3;
 #[cfg(not(target_arch = "wasm32"))]
 mod vst3_gui;
 
+#[cfg(not(target_arch = "wasm32"))]
+pub use bridge::{
+    BRIDGE_FLAG, BridgeArgs, BridgeHandle, BridgeInstance, BridgedAudio, BridgedMain, Hosted,
+    run_bridge_child, run_bridge_child_with,
+};
 pub use info::{
     MAX_LATENCY, ParamInfo, PluginFormat, PluginInfo, Preset as PluginPreset, SCAN_FLAG,
     ScanOptions, ScanReport,

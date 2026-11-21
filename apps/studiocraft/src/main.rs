@@ -204,6 +204,10 @@ fn main() -> ExitCode {
     if let Some(code) = studiocraft_ui::run_plugin_scan_child(&raw) {
         return ExitCode::from(u8::try_from(code).unwrap_or(1));
     }
+    // Plugin im eigenen Prozess (Bridge, Issue #146): dieser Prozess ist der Helfer.
+    if let Some(code) = studiocraft_ui::run_plugin_bridge_child(&raw) {
+        return ExitCode::from(u8::try_from(code).unwrap_or(1));
+    }
     if let Ok(exe) = std::env::current_exe() {
         studiocraft_ui::enable_isolated_plugin_scan(exe);
     }

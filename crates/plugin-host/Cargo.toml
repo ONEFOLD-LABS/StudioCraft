@@ -57,3 +57,7 @@ harness = false
 [[test]]
 name = "au_window_main_thread"
 harness = false
+
+[[test]]
+name = "bridge_child"
+harness = false
