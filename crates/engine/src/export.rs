@@ -7,6 +7,25 @@ use crate::Song;
 /// Blockgröße beim Offline-Rendern.
 const BLOCK: usize = 4096;
 
+/// Längster Bereich einer Exportdatei in Frames: WAV und AIFF zählen ihre Größe in 32 Bit
+/// (24 Bit Stereo, 6 Byte je Frame, Platz für den Kopf); FLAC entsteht erst im Speicher, die
+/// gleiche Grenze hält diesen Puffer klein genug. Gut vier Stunden bei 48 kHz.
+pub const MAX_EXPORT_FRAMES: u64 = (u32::MAX as u64 - 1024) / 6;
+
+/// Die Länge von `start..end` in Frames, oder ein Fehler, wenn keine Datei sie fasst.
+fn export_frames(start: u64, end: u64, rate: u32) -> Result<u64, String> {
+    let frames = end.saturating_sub(start);
+    if frames <= MAX_EXPORT_FRAMES {
+        return Ok(frames);
+    }
+    let secs = MAX_EXPORT_FRAMES / u64::from(rate.max(1));
+    Err(format!(
+        "Der Bereich ist zu lang für eine Exportdatei: höchstens {} h {} min bei {rate} Hz. Locatoren enger setzen oder in Teilen exportieren.",
+        secs / 3600,
+        secs % 3600 / 60
+    ))
+}
+
 /// Rendert `start..end` (Frames) der Abspielliste als 24-Bit-WAV.
 /// Werte über 0 dBFS werden begrenzt. Gibt die Spitze (linear) zurück.
 pub fn render_wav(
@@ -16,6 +35,7 @@ pub fn render_wav(
     end: u64,
     path: &Path,
 ) -> Result<f32, String> {
+    export_frames(start, end, rate)?;
     let spec = hound::WavSpec {
         channels: 2,
         sample_rate: rate,
@@ -63,7 +83,8 @@ pub fn render_file(
         Some("aif" | "aiff") => craft_audio::EncodeFormat::Aiff,
         _ => return render_wav(song, rate, start, end, path),
     };
-    let frames = (end.saturating_sub(start)) as usize;
+    let frames = usize::try_from(export_frames(start, end, rate)?)
+        .map_err(|_| "Der Bereich ist zu lang für eine Exportdatei.".to_owned())?;
     let mut inter = vec![0.0f32; frames * 2];
     let mut pos = 0usize;
     while pos < frames {
@@ -263,5 +284,28 @@ mod tests {
         let raw = wav_f32_bytes(&samples, 44_100).unwrap();
         let clip = AudioClip::from_bytes(&raw, Some("wav")).unwrap();
         assert_eq!(clip.samples[..], samples[..]);
+    }
+
+    /// A range longer than a file can hold is refused before anything is written: WAV and
+    /// AIFF count their size in 32 bits, FLAC would need the whole range in memory first.
+    #[test]
+    fn ranges_too_long_for_a_file_are_refused() {
+        let song = Song::default();
+        for ext in ["wav", "flac", "aif"] {
+            let path = temp(&format!("zu-lang.{ext}"));
+            let _ = std::fs::remove_file(&path);
+            let err = render_file(&song, 48_000, 0, MAX_EXPORT_FRAMES + 1, &path)
+                .err()
+                .unwrap_or_default();
+            assert!(err.contains("zu lang"), "{ext}: {err}");
+            assert!(!path.exists(), "{ext}: nothing written");
+            let err = render_file(&song, 48_000, 10, u64::MAX, &path)
+                .err()
+                .unwrap_or_default();
+            assert!(err.contains("zu lang"), "{ext}: {err}");
+        }
+        // The limit itself fits a WAV header and holds over four hours at 48 kHz.
+        const _: () = assert!(MAX_EXPORT_FRAMES * 6 + 44 <= u32::MAX as u64);
+        const _: () = assert!(MAX_EXPORT_FRAMES / 48_000 > 4 * 3600);
     }
 }
