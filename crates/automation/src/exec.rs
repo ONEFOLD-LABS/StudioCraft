@@ -5,6 +5,7 @@
 use std::path::{Path, PathBuf};
 
 use serde_json::{Value, json};
+use studiocraft_project::sanitize::MAX_TICKS;
 use studiocraft_project::{
     EventId, MAX_DB, MIN_DB, Note, Position, TICKS_PER_QUARTER, TimeSignature, TrackKind,
     file::EXTENSION, smf,
@@ -390,9 +391,13 @@ impl Exec<'_> {
                 .filter(|p| *p <= 127)
                 .ok_or_else(|| bad("`pitch` must be 0–127 (60 = middle C)"))?;
             let start = match n.get("start") {
-                Some(Value::Number(v)) => v.as_i64().ok_or_else(|| bad("`start` must be ticks"))?,
+                Some(Value::Number(v)) => v
+                    .as_i64()
+                    .filter(|t| t.unsigned_abs() <= MAX_TICKS)
+                    .ok_or_else(|| bad("`start` must be ticks within the project"))?,
                 Some(Value::String(s)) => tempo
                     .parse_length(s)
+                    .filter(|t| *t <= MAX_TICKS)
                     .and_then(|t| i64::try_from(t).ok())
                     .ok_or_else(|| bad("`start` is not a length like `0.2.0.0`"))?,
                 _ => return Err(bad("missing `start` (ticks from the part start)")),
@@ -402,7 +407,7 @@ impl Exec<'_> {
                 Some(Value::String(s)) => tempo.parse_length(s),
                 _ => None,
             }
-            .filter(|l| *l > 0)
+            .filter(|l| *l > 0 && *l <= MAX_TICKS)
             .ok_or_else(|| bad("`length` must be ticks above 0 or a length like `0.1.0.0`"))?;
             let velocity = match n.get("velocity") {
                 None | Some(Value::Null) => 100,
@@ -668,7 +673,12 @@ impl Exec<'_> {
     }
 
     /// A position: ticks, or text like `5.1.1.0` (bar.beat.sixteenth.tick, counted from 1).
+    /// Never beyond the longest project, so that no event end overflows.
     fn position(&self, v: Option<&Value>) -> Result<Option<u64>, String> {
+        within_project(self.position_unbounded(v)?)
+    }
+
+    fn position_unbounded(&self, v: Option<&Value>) -> Result<Option<u64>, String> {
         match v {
             None | Some(Value::Null) => Ok(None),
             Some(Value::Number(n)) => n
@@ -687,7 +697,12 @@ impl Exec<'_> {
     }
 
     /// A length: ticks, or text like `2.0.0.0` (bars.beats.sixteenths.ticks, counted from 0).
+    /// Never longer than the longest project.
     fn length(&self, v: Option<&Value>) -> Result<Option<u64>, String> {
+        within_project(self.length_unbounded(v)?)
+    }
+
+    fn length_unbounded(&self, v: Option<&Value>) -> Result<Option<u64>, String> {
         match v {
             None | Some(Value::Null) => Ok(None),
             Some(Value::Number(n)) => n
@@ -703,6 +718,16 @@ impl Exec<'_> {
                 .ok_or_else(|| format!("`{s}` is not a length like `2.0.0.0` (two bars)")),
             Some(_) => Err("a length is ticks or text like `2.0.0.0`".into()),
         }
+    }
+}
+
+/// Refuses ticks beyond the longest project (as files are limited when they load).
+fn within_project(ticks: Option<u64>) -> Result<Option<u64>, String> {
+    match ticks {
+        Some(t) if t > MAX_TICKS => Err(format!(
+            "{t} ticks is beyond the longest project ({MAX_TICKS} ticks = 100 000 bars of 4/4)"
+        )),
+        t => Ok(t),
     }
 }
 

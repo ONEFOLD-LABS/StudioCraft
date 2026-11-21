@@ -267,6 +267,26 @@ fn hostile_arguments_come_back_as_tool_errors() {
         ("split_event", json!({"event": part, "at": 999_999})),
         ("set_tempo", json!({"numerator": 4})),
         ("move_event", json!({"event": part, "track": "nobody"})),
+        // Beyond the longest project (100 000 bars): an event there would overflow its end.
+        ("move_event", json!({"event": part, "start": u64::MAX})),
+        (
+            "move_event",
+            json!({"event": part, "start": "999999999.1.1.0"}),
+        ),
+        (
+            "create_part",
+            json!({"track": 0, "start": 0, "length": u64::MAX}),
+        ),
+        (
+            "add_notes",
+            json!({"event": part, "notes": [{"pitch": 60, "start": i64::MAX, "length": 1}]}),
+        ),
+        (
+            "add_notes",
+            json!({"event": part, "notes": [{"pitch": 60, "start": 0, "length": u64::MAX}]}),
+        ),
+        ("split_event", json!({"event": part, "at": u64::MAX})),
+        ("set_locators", json!({"left": 0, "right": u64::MAX})),
         (
             "open_project",
             json!({"path": dir.join("missing.studiocraft")}),
