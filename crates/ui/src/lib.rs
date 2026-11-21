@@ -1200,6 +1200,7 @@ impl ProjectWindow {
         self.key_commands_dialog(ui.ctx());
         self.repeat_dialog(ui.ctx());
         self.stem_dialog(ui.ctx());
+        self.score_export_dialog(ui.ctx());
         #[cfg(target_arch = "wasm32")]
         self.poll_browser_files();
         self.io_dialog(ui.ctx());
@@ -4659,6 +4660,46 @@ mod tests {
             1,
             "the part stays"
         );
+    }
+
+    /// Noten exportieren: gewählte Parts in Spur- und Zeitfolge als MusicXML und PDF; der
+    /// Dialog ist bedienbar beschriftet.
+    #[test]
+    fn selected_parts_export_as_musicxml_and_pdf() {
+        let mut w = ProjectWindow::new(Project::default(), None, "kein Audio (Test)".into());
+        let first = score_part(&mut w);
+        let t2 = w.project.add_track(TrackKind::Instrument, "Bass");
+        let second = w.project.create_event(t2, 0, 3840).unwrap();
+        w.project.event_mut(second).unwrap().notes = vec![studiocraft_project::Note {
+            pitch: 40,
+            velocity: 100,
+            start: 0,
+            length: 3840,
+            spelling: 0,
+        }];
+        w.selection = vec![second, first];
+        assert_eq!(w.score_export_parts(), vec![first, second]);
+        let dir = std::env::temp_dir().join(format!("sc-score-export-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        w.score_view.export.layout.title = "Duett".into();
+        let xml = dir.join("a.musicxml");
+        w.export_score_to(&xml, false).unwrap();
+        let text = std::fs::read_to_string(&xml).unwrap();
+        assert!(text.contains("<work-title>Duett</work-title>"));
+        assert_eq!(text.matches("<score-part ").count(), 2);
+        assert!(text.contains("<part-name>Bass"), "track name first");
+        let pdf = dir.join("a.pdf");
+        w.export_score_to(&pdf, true).unwrap();
+        assert!(std::fs::read(&pdf).unwrap().starts_with(b"%PDF-1.4"));
+        let _ = std::fs::remove_dir_all(dir);
+
+        w.open_score_export();
+        w.score_view.export.pdf = true;
+        let mut h = window_harness(w);
+        h.run_steps(2);
+        h.get_by_label("Notengröße");
+        h.get_by_label("Ränder");
+        h.get_by_label("2 MIDI-Part(s)");
     }
 
     /// Zwei Audio-Events auf einer Spur, nebeneinander mit Lücke.

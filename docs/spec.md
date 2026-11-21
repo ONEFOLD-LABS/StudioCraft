@@ -283,7 +283,7 @@ Doppelklick auf ein Event öffnet den Standard-Editor seines Typs: Audio → Sam
 | Drum-Editor | Noten als Rauten pro Instrument-Zeile, Namen aus der Drum-Map | Eigene Quantisierung pro Zeile, Länge ignoriert, Mute/Solo pro Zeile | 0.6 (Drum-Maps bearbeiten: #161) |
 | List-Editor | Alle Events als Tabelle (Position, Länge, Wert, Kanal) | Werte direkt eingeben, filtern nach Event-Typ | 0.6 |
 | Sample-Editor | Wellenform eines Clips in voller Größe | Bereich wählen, Offline-Effekte, Hitpoints, Tempo-Erkennung | ja (ohne Hitpoints) |
-| Noten-Editor | Partitur | Anzeige und Bearbeiten (0.9), MusicXML- und PDF-Export (#183) | 0.9 |
+| Noten-Editor | Partitur | Anzeige, Bearbeiten, MusicXML- und PDF-Export | 0.9 |
 
 **Gemeinsames Verhalten**
 
@@ -296,6 +296,8 @@ Doppelklick auf ein Event öffnet den Standard-Editor seines Typs: Audio → Sam
 **Noten-Editor (seit 0.9, Anzeige):** Zeigt den aktiven MIDI-Part als Partitur, in der unteren Zone (Reiter „Noten-Editor“) oder im eigenen Fenster (Ansicht → „Noten-Editor im eigenen Fenster“). Der Schlüssel folgt dem Tonumfang: Violin- oder Bassschlüssel, bei großem Umfang ein Klaviersystem mit Trennung beim eingestrichenen c. Taktarten kommen aus dem Projekt, die Tonart ist eine Projekteinstellung (Werkzeugzeile, rückgängig machbar). Die Anzeige-Quantisierung (1/4 bis 1/32, je Part gespeichert) rundet Anfang und Dauer nur für die Darstellung. Notenwerte zeigen den Schlag; was über einen Schlag oder Taktstrich hinausreicht, wird geteilt und übergebunden. Achtel und kürzere Werte werden je Schlag (bei 6/8, 9/8, 12/8 je drei Achtel) mit Balken verbunden. Vorzeichen gelten bis zum Taktende, Auflösungszeichen werden gesetzt. Leere Takte zeigen eine ganze Pause. Je Notensystem eine Stimme: Noten, die über den nächsten Einsatz hinaus klingen, werden dort beendet. Der Cursor läuft mit; „Folgen“ blättert beim Abspielen mit. Notenschrift: Leland (SIL OFL 1.1).
 
 **Noten-Editor bearbeiten (seit 0.9):** Klick auf einen Notenkopf wählt die Note (Umschalt fügt hinzu oder nimmt weg); die Auswahl ist dieselbe wie im Key-Editor. Ziehen verschiebt die gewählten Noten in der Zeit (im Raster der Anzeige-Quantisierung) und auf den Linien (Stufen der Tonart). Das Zeichenwerkzeug setzt mit Klick eine Note an Linie und Zählzeit, mit dem Notenwert aus der Werkzeugzeile (Ganze bis Zweiunddreißigstel, punktiert); der Radierer und Entf löschen. Ein anderer Notenwert gilt auch für die gewählten Noten. „Kreuz“ und „Be“ verschieben um einen Halbton und schreiben die Note so, „Enharmonisch verwechseln“ tauscht Kreuz und Be (die Schreibweise wird je Note gespeichert). Jede Änderung ist ein Rückgängig-Schritt und landet im MIDI-Part; die Anzeige-Quantisierung ändert die gespeicherten Zeiten nicht.
+
+**Noten exportieren (seit 0.9):** Datei → „Noten exportieren …“ (oder „Exportieren …“ im Noten-Editor) schreibt die gewählten MIDI-Parts in Spur- und Zeitfolge, ohne Auswahl den aktiven Part, als MusicXML 4.0 (offenes Format, je Part ein `<part>`, Klaviersystem als zwei Notensysteme) oder als druckfertiges PDF. Für das PDF: Papier A4 oder Letter, Ränder, Notengröße (Abstand zweier Notenlinien in mm) und Titel; Systeme werden auf Seiten umbrochen. Notenzeichen stehen als Vektorpfade aus der Notenschrift im PDF, Texte in einer Standardschrift jedes PDF-Lesers; eingebettet wird nichts.
 
 **Controller-Lanes im Key-Editor:** Beliebig viele Lanes, jede zeigt einen Datentyp (Velocity, Pitchbend, CC 1–127, Aftertouch). Zeichnen mit Linien-, Parabel-, Sinus- und Rechteck-Formen (seit 0.6).
 
