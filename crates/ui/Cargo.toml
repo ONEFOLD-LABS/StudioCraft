@@ -62,3 +62,6 @@ egui_kittest = { version = "0.37", features = ["wgpu", "snapshot"] }
 image = { version = "0.25", default-features = false, features = ["png"] }
 # Tests der Videospur: ein kleines VP9-Video erzeugen.
 craft-video = { git = "https://github.com/storytold/craft-libs", rev = "56c3c833bb869a140271e2aceec2112322cacc58", features = ["av1-decode", "vp9-decode", "vp8-decode", "mpeg2-decode", "vp9-encode"] }
+
+[lints]
+workspace = true

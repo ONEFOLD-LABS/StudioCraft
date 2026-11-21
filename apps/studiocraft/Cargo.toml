@@ -29,3 +29,6 @@ objc2-app-kit = { version = "0.3", default-features = false, features = ["std", 
 [build-dependencies]
 # Symbol und VERSIONINFO für studiocraft.exe; build.rs nutzt es nur für Windows-Ziele.
 winresource = "0.1"
+
+[lints]
+workspace = true

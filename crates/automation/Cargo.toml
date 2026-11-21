@@ -24,3 +24,6 @@ studiocraft-project.workspace = true
 [[test]]
 name = "it"
 path = "tests/it/main.rs"
+
+[lints]
+workspace = true

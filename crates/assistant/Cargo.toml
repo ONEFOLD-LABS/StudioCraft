@@ -20,3 +20,6 @@ rustls-native-certs = "0.8"
 [dev-dependencies]
 studiocraft-project.workspace = true
 egui_kittest = { version = "0.37", features = ["wgpu", "snapshot"] }
+
+[lints]
+workspace = true

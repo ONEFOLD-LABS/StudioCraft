@@ -5,6 +5,10 @@
 //! STUDIOCRAFT_GUI_TEST=1 cargo test -p studiocraft-plugin-host --test gui_main_thread
 //! ```
 
+// A test program with its own main (harness = false): it may unwrap and panic like any test
+// (Cargo.toml lints, clippy.toml).
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+
 use std::time::{Duration, Instant};
 
 use studiocraft_plugin_host::{PluginInstance, default_paths, scan};
