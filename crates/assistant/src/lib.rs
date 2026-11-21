@@ -444,7 +444,7 @@ impl Assistant {
                         Some(e) => format!("! {name}  {args} – {e}"),
                     };
                     let color = if error.is_some() {
-                        t.meter_red
+                        t.danger
                     } else {
                         t.text_dim
                     };
@@ -452,7 +452,7 @@ impl Assistant {
                 }
                 Entry::Error(e) => {
                     ui.label(
-                        RichText::new(trf("Fehler: {fehler}", &[("fehler", e)])).color(t.meter_red),
+                        RichText::new(trf("Fehler: {fehler}", &[("fehler", e)])).color(t.danger),
                     );
                 }
             }

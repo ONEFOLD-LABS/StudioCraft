@@ -9,7 +9,9 @@ product. All trademarks belong to their respective owners.
 
 Theme: The colour tokens in crates/ui/src/theme.rs follow the DAW theme of
 SoundCraft (storytold/soundcraft, crates/ui-egui/src/theme.rs), licensed under
-MIT OR Apache-2.0, with adjusted neutrals and StudioCraft's wine red accent.
+MIT OR Apache-2.0. Their values come from the ONEFOLD LABS brand book
+(ONEFOLD-LABS/brand, tokens/tokens.json and apps/palette.json, MIT): neutrals,
+StudioCraft's wine red accent and the semantic colours.
 
 App icon: assets/app-icon is original StudioCraft artwork (see its README).
 
