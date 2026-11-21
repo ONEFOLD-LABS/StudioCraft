@@ -295,21 +295,6 @@ impl ProjectWindow {
                 }
                 ui.checkbox(&mut self.show_lower, tr("Untere Zone"));
                 ui.separator();
-                ui.menu_button(tr("Erscheinungsbild"), |ui| {
-                    for pref in [
-                        egui::ThemePreference::Dark,
-                        egui::ThemePreference::Light,
-                        egui::ThemePreference::System,
-                    ] {
-                        if ui
-                            .selectable_label(self.theme == pref, crate::theme::label(pref))
-                            .clicked()
-                        {
-                            self.set_theme(ui.ctx(), pref);
-                            ui.close();
-                        }
-                    }
-                });
                 ui.menu_button(tr("Sprache"), |ui| {
                     for lang in crate::i18n::Language::ALL {
                         if ui

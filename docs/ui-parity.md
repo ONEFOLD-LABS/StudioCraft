@@ -9,10 +9,10 @@ das Verhalten steht in der Spec.
 
 **Quellen:** nur öffentliches Material (Handbuch, Produktseiten, Videos), in eigenen Worten
 zusammengefasst. Keine Screenshots, Icons, Farben, Texte oder Produktnamen anderer Programme im Repo; Icons zeichnet
-StudioCraft selbst im Code (`crates/ui/src/icons.rs`). Farben kommen aus dem Markenbuch von ONEFOLD LABS
-(ONEFOLD-LABS/brand): dessen Neutraltöne für Flächen, Linien und Text, Weinrot
-(`theme::APP_COLOR`, im dunklen Theme ein helleres Weinrot mit dunkler Schrift) als Akzent,
-sparsam eingesetzt, und die semantischen Farben für Zustände. Ränder von Bedienelementen
+StudioCraft selbst im Code (`crates/ui/src/icons.rs`). StudioCraft hat nur ein dunkles Theme.
+Farben kommen aus dem Markenbuch von ONEFOLD LABS (ONEFOLD-LABS/brand): dessen Neutraltöne für
+Flächen, Linien und Text, ein helleres Weinrot als `theme::APP_COLOR` mit dunkler Schrift als
+Akzent, sparsam eingesetzt, und die semantischen Farben für Zustände. Ränder von Bedienelementen
 halten 3:1, Text 4,5:1 (Test in `theme.rs`).
 
 Status: ✅ umgesetzt · 🟡 teilweise · ⬜ offen

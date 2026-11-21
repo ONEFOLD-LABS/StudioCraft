@@ -92,15 +92,12 @@ Cycle an/aus	Loop On/Off
 Cycle-Marker aus Locatoren	Loop Marker from Locators
 Datei	File
 Die gewählte Spur kommt gleich in den neuen Ordner	The selected track goes straight into the new folder
-Dunkel	Dark
 Duplizieren	Duplicate
 Editor im eigenen Fenster (Strg+E)	Editor in Its Own Window (Ctrl+E)
 Einfügen	Paste
-Erscheinungsbild	Appearance
 FLAC (24 Bit, verlustfrei komprimiert)	FLAC (24-bit, lossless)
 FX-Kanal hinzufügen	Add FX Channel
 Gruppen-Spur hinzufügen	Add Group Track
-Hell	Light
 Info-Zeile	Event Info Bar
 Inserts vor dem Fader	Pre-Fader Inserts
 Inspector (Alt+I)	Inspector (Alt+I)
@@ -147,7 +144,6 @@ Unbenannt	Untitled
 Ungesicherte Änderungen	Unsaved Changes
 Untere Zone	Bottom Panel
 WAV (24 Bit)	WAV (24-bit)
-Wie das System	Same as System
 Wiederherstellen	Redo
 Wiederholen …	Repeat…
 Zum Anfang	Go to Start

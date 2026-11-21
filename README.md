@@ -27,7 +27,7 @@ come from third-party repositories; see [`NOTICE`](NOTICE).
   scan runs in child processes and blocks plugins that crash
 - Render in place, track freeze, stem export, audio mixdown (WAV, FLAC, AIFF)
 - Project folder with open JSON format, autosave and crash recovery
-- Dark and light theme
+- A dark theme built for long sessions (StudioCraft has no light theme)
 
 The full target behaviour is in [`docs/spec.md`](docs/spec.md); platforms and packages are in
 [`docs/plattformen.md`](docs/plattformen.md) (both in German).

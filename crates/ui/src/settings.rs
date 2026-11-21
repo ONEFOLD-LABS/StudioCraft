@@ -1,4 +1,4 @@
-//! Programmeinstellungen (nicht projektbezogen), z. B. das Erscheinungsbild.
+//! Programmeinstellungen (nicht projektbezogen), z. B. Sprache und Audiogeräte.
 //! Liegen als kleine JSON-Datei am üblichen Ort des Systems:
 //! Linux/BSD `$XDG_CONFIG_HOME/studiocraft` bzw. `~/.config/studiocraft`,
 //! macOS `~/Library/Application Support/StudioCraft`, Windows `%APPDATA%\StudioCraft`.
@@ -7,12 +7,10 @@
 use crate::i18n::tr;
 use std::path::PathBuf;
 
-use egui::ThemePreference;
 use studiocraft_engine::DeviceChoice;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Settings {
-    pub theme: ThemePreference,
     /// Beim Stoppen zur Position springen, an der die Wiedergabe begann.
     pub return_on_stop: bool,
     /// Wohin zweimal Stopp springt.
@@ -87,7 +85,6 @@ pub enum StopTarget {
 impl Default for Settings {
     fn default() -> Self {
         Self {
-            theme: ThemePreference::Dark,
             return_on_stop: false,
             stop_twice: StopTarget::Start,
             audio: DeviceChoice::default(),
@@ -107,7 +104,6 @@ impl Default for Settings {
 #[derive(serde::Serialize, serde::Deserialize)]
 #[serde(default)]
 struct File {
-    theme: String,
     return_on_stop: bool,
     stop_twice: String,
     audio: AudioFile,
@@ -181,18 +177,9 @@ fn dir() -> Option<PathBuf> {
     }
 }
 
-fn theme_name(t: ThemePreference) -> &'static str {
-    match t {
-        ThemePreference::Dark => "dark",
-        ThemePreference::Light => "light",
-        ThemePreference::System => "system",
-    }
-}
-
 impl Settings {
     fn to_file(&self) -> File {
         File {
-            theme: theme_name(self.theme).into(),
             return_on_stop: self.return_on_stop,
             stop_twice: match self.stop_twice {
                 StopTarget::Start => "start",
@@ -220,11 +207,6 @@ impl Settings {
     fn from_file(f: File) -> Self {
         let rate = |v: Option<u32>| v.filter(|r| (8_000..=768_000).contains(r));
         Self {
-            theme: match f.theme.as_str() {
-                "light" => ThemePreference::Light,
-                "system" => ThemePreference::System,
-                _ => ThemePreference::Dark,
-            },
             return_on_stop: f.return_on_stop,
             stop_twice: match f.stop_twice.as_str() {
                 "left_locator" => StopTarget::LeftLocator,
@@ -369,7 +351,6 @@ mod tests {
         // SAFETY: nur dieser Test setzt die Variable.
         unsafe { std::env::set_var("STUDIOCRAFT_CONFIG_DIR", &d) };
         let s = Settings {
-            theme: ThemePreference::System,
             return_on_stop: true,
             stop_twice: StopTarget::LeftLocator,
             audio: DeviceChoice {
@@ -396,10 +377,14 @@ mod tests {
         };
         s.save().unwrap();
         assert_eq!(Settings::load(), s);
-        // Older files with only the theme keep the defaults for the rest.
-        std::fs::write(d.join("settings.json"), "{\n  \"theme\": \"light\"\n}\n").unwrap();
+        // Older files with only the theme keep the defaults for the rest. StudioCraft has only
+        // a dark theme now: "light" and "system" load without complaint and are ignored.
+        for theme in ["light", "system", "dark"] {
+            let text = format!("{{\n  \"theme\": \"{theme}\"\n}}\n");
+            std::fs::write(d.join("settings.json"), text).unwrap();
+            assert_eq!(Settings::load(), Settings::default(), "{theme}");
+        }
         let old = Settings::load();
-        assert_eq!(old.theme, ThemePreference::Light);
         assert_eq!(
             (old.autosave_minutes, old.autosave_keep),
             (AUTOSAVE_MINUTES, AUTOSAVE_KEEP)
