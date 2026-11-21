@@ -187,10 +187,11 @@ impl ProjectWindow {
         let mut open = true;
         let mut run = false;
         let d = &mut self.stems;
-        self.dialogs.escape_closes(
+        self.dialogs.show(
             ctx,
             crate::dialog::window_id(tr("Stems exportieren")),
             &mut open,
+            crate::dialog::Kind::Modal,
         );
         egui::Window::new(tr("Stems exportieren"))
             .open(&mut open)

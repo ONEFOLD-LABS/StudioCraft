@@ -1050,6 +1050,10 @@ impl ProjectWindow {
     }
 
     fn handle_keys(&mut self, ui: &Ui) {
+        // Unter einem modalen Dialog wirken keine Kürzel (dialog.rs); die Engine läuft weiter.
+        if self.dialogs.modal_open() {
+            return;
+        }
         // Zuerst der Nummernblock: er nimmt seine Ereignisse, bevor die Tastenbelegung sie sieht.
         self.handle_keypad(ui);
         self.handle_window_keys(ui);
@@ -5323,6 +5327,102 @@ mod tests {
             img.save(std::path::Path::new(&dir).join("file_menu.png"))
                 .unwrap();
         }
+    }
+
+    /// Name des Widgets mit Tastaturfokus ("" ohne Fokus).
+    fn focused_label(h: &Harness<'_, ProjectWindow>) -> String {
+        h.query_all_by(|n| n.is_focused())
+            .next()
+            .map(|n| {
+                let d = format!("{n:?}");
+                d.split("label: \"")
+                    .nth(1)
+                    .and_then(|x| x.split('"').next())
+                    .unwrap_or("")
+                    .to_owned()
+            })
+            .unwrap_or_default()
+    }
+
+    #[test]
+    fn a_modal_dialog_keeps_tab_and_blocks_the_window_behind() {
+        let (mut w, _) = one_event_window();
+        w.open_device_dialog();
+        let mut h = window_harness(w);
+        h.run_steps(2);
+        let main = ["Datei", "Bearbeiten", "Trennen (3)", "Auswahl (1)", "Stopp"];
+        let mut seen = vec![focused_label(&h)];
+        for _ in 0..30 {
+            h.key_press(Key::Tab);
+            h.run_steps(1);
+            seen.push(focused_label(&h));
+        }
+        assert!(
+            seen.iter().all(|l| !main.contains(&l.as_str())),
+            "focus left the dialog: {seen:?}"
+        );
+        assert!(seen.iter().any(|l| l == "Übernehmen"), "{seen:?}");
+        // The window behind does not react while the dialog is open.
+        h.get_by_label("Trennen (3)").click();
+        h.run_steps(2);
+        assert_eq!(h.state().tool, Tool::Select);
+        // Escape closes it; then the window is usable again.
+        h.key_press(Key::Escape);
+        h.run_steps(2);
+        assert!(!h.state().device_dialog.open);
+        h.get_by_label("Trennen (3)").click();
+        h.run_steps(2);
+        assert_eq!(h.state().tool, Tool::Split);
+    }
+
+    #[test]
+    fn shortcuts_rest_while_a_modal_dialog_is_open() {
+        let (mut w, _) = one_event_window();
+        w.cursor = 3840;
+        w.about = about::About::Open;
+        let mut h = window_harness(w);
+        h.run_steps(2);
+        // A click beside the dialog lands on the shield and takes the focus from its button,
+        // so only the modal rule keeps the keys away.
+        h.get_by_label("Linke Zone (Alt+L)").click();
+        h.run_steps(2);
+        h.key_press(Key::Space);
+        h.key_press(Key::Num3);
+        h.run_steps(2);
+        assert_eq!(h.state().play_from, 0, "space started playback");
+        assert_eq!(h.state().tool, Tool::Select, "3 picked a tool");
+        // Closed: the same keys work again.
+        h.state_mut().about = about::About::Closed;
+        h.run_steps(2);
+        h.key_press(Key::Space);
+        h.key_press(Key::Num3);
+        h.run_steps(2);
+        assert_eq!(h.state().play_from, 3840);
+        assert_eq!(h.state().tool, Tool::Split);
+    }
+
+    #[test]
+    fn a_free_dialog_takes_focus_and_gives_it_back() {
+        let (w, _) = one_event_window();
+        let mut h = window_harness(w);
+        h.get_by_label("Trennen (3)").focus();
+        h.run_steps(1);
+        assert_eq!(focused_label(&h), "Trennen (3)");
+        h.state_mut().key_dialog.open = true;
+        h.run_steps(3);
+        let inside = focused_label(&h);
+        assert!(
+            !inside.is_empty() && inside != "Trennen (3)",
+            "the dialog did not take the focus: {inside:?}"
+        );
+        // Not modal: the window behind still works.
+        let right = h.state().show_right;
+        h.get_by_label("Rechte Zone (Alt+R)").click();
+        h.run_steps(2);
+        assert_ne!(h.state().show_right, right);
+        h.state_mut().key_dialog.open = false;
+        h.run_steps(3);
+        assert_eq!(focused_label(&h), "Trennen (3)", "focus went back");
     }
 
     #[test]

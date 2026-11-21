@@ -182,10 +182,11 @@ impl ProjectWindow {
         let status = self.audio_status.clone();
         let hosts: Vec<String> = available_hosts().into_iter().map(str::to_owned).collect();
         let d = &mut self.device_dialog;
-        self.dialogs.escape_closes(
+        self.dialogs.show(
             ctx,
             crate::dialog::window_id(tr("Audio- und MIDI-Geräte")),
             &mut open,
+            crate::dialog::Kind::Modal,
         );
         egui::Window::new(tr("Audio- und MIDI-Geräte"))
             .open(&mut open)

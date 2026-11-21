@@ -60,8 +60,12 @@ impl ProjectWindow {
         }
         let mut open = true;
         let mut run = false;
-        self.dialogs
-            .escape_closes(ctx, crate::dialog::window_id(tr("Wiederholen")), &mut open);
+        self.dialogs.show(
+            ctx,
+            crate::dialog::window_id(tr("Wiederholen")),
+            &mut open,
+            crate::dialog::Kind::Modal,
+        );
         egui::Window::new(tr("Wiederholen"))
             .open(&mut open)
             .resizable(false)
