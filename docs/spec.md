@@ -385,7 +385,7 @@ Der MVP ist erreicht, wenn man ein Lied mit Audio- und Instrument-Spuren aufnehm
 
 **MVP-Umfang**
 
-Stand 2026-11-20 (Version 0.6.1, 0.7 in Arbeit); offen heißt: fehlt oder ist nicht auf echter
+Stand 2026-11-21 (Version 0.10.1); offen heißt: fehlt oder ist nicht auf echter
 Hardware geprüft. Alle Punkte bis auf die Latenzmessung sind umgesetzt und durch Tests abgedeckt.
 
 - [ ] Audio-Engine über cpal auf allen Systemen, Latenz ≤ 10 ms bei 48 kHz / 256 Samples
@@ -404,7 +404,10 @@ Hardware geprüft. Alle Punkte bis auf die Latenzmessung sind umgesetzt und durc
 
 **Über den MVP hinaus umgesetzt:** Standard-MIDI-Dateien (0.6), Audio folgt dem Tempo mit
 Time-Stretch und Warp-Markern (0.7), Hitpoints und Tempo-Erkennung (0.7), Offline-Bearbeitung je
-Clip (0.7), Pakete für alle Plattformen und den Browser (0.5), englische Oberfläche (0.5).
+Clip (0.7), Pakete für alle Plattformen und den Browser (0.5), englische Oberfläche (0.5),
+Linealspuren (0.8), MCP-Server und KI-Assistent (0.8), Plugins im eigenen Prozess (0.8),
+Noten-Editor mit Export als MusicXML und PDF (0.9), Audio-Parts mit Part-Editor (0.9),
+AAF/OMF-Import (0.10), Videospur mit Videofenster (0.10).
 
 **Offene Fragen**
 
