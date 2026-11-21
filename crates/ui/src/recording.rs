@@ -386,7 +386,9 @@ impl ProjectWindow {
                 if let Some(rec) = self.recorder.as_ref()
                     && let Ok(r) = rec.stop()
                 {
-                    let _ = std::fs::remove_file(&r.path);
+                    for path in r.files() {
+                        let _ = std::fs::remove_file(path);
+                    }
                 }
             }
             self.message = Some(tr("Aufnahme im Vorzähler abgebrochen").into());
@@ -626,65 +628,105 @@ impl ProjectWindow {
             .into_owned();
         let mut placed = 0;
 
+        let files: Vec<PathBuf> = rec.files().map(Path::to_path_buf).collect();
         for track in self.armed_tracks() {
-            let t = &self.project.tracks[track];
             let inp = self.project.input_of(track);
-            let samples = input::extract_channels(rec, inp.first, inp.stereo)?;
-            let file = unique_name(&dir, &format!("{stem} - {}.wav", sanitize(&t.name)));
-            export::write_wav_f32(&samples, rec.sample_rate, &file)?;
-            let clip = AudioClip {
-                sample_rate: rec.sample_rate,
-                samples: samples.into(),
+            let track_name = sanitize(&self.project.tracks[track].name);
+            // Je Aufnahmedatei ein Clip; `(clip, erster Frame, Frames)` in Aufnahme-Frames.
+            let mut parts: Vec<(studiocraft_project::ClipId, u64, u64)> = Vec::new();
+            let mut at = 0u64;
+            for (i, path) in files.iter().enumerate() {
+                let samples =
+                    input::extract_file_channels(path, rec.channels, inp.first, inp.stereo)?;
+                let length = samples.len() as u64 / 2;
+                let suffix = if i == 0 {
+                    String::new()
+                } else {
+                    format!("-{:03}", i + 1)
+                };
+                let file = unique_name(&dir, &format!("{stem} - {track_name}{suffix}.wav"));
+                export::write_wav_f32(&samples, rec.sample_rate, &file)?;
+                let clip = AudioClip {
+                    sample_rate: rec.sample_rate,
+                    samples: samples.into(),
+                }
+                .resampled(rate);
+                let frames = clip.frames();
+                let id = self.project.add_clip(PoolClip {
+                    name: file
+                        .file_stem()
+                        .unwrap_or_default()
+                        .to_string_lossy()
+                        .into_owned(),
+                    path: Some(file.to_string_lossy().into_owned()),
+                    sample_rate: rate,
+                    frames,
+                });
+                let peaks = Peaks::new(&clip.samples);
+                self.clips.insert(
+                    id,
+                    LoadedClip {
+                        samples: clip.samples,
+                        peaks,
+                    },
+                );
+                parts.push((id, at, length));
+                at += length;
             }
-            .resampled(rate);
-            let frames = clip.frames();
-            let id = self.project.add_clip(PoolClip {
-                name: file
-                    .file_stem()
-                    .unwrap_or_default()
-                    .to_string_lossy()
-                    .into_owned(),
-                path: Some(file.to_string_lossy().into_owned()),
-                sample_rate: rate,
-                frames,
-            });
-            let peaks = Peaks::new(&clip.samples);
-            self.clips.insert(
-                id,
-                LoadedClip {
-                    samples: clip.samples,
-                    peaks,
-                },
-            );
 
             let base = self.project.tracks[track].name.clone();
             let existing = self.project.tracks[track].events.len();
             for (k, pass) in takes.iter().enumerate() {
                 let name = format!("{base} {:02}", existing + k + 1);
-                let Some(ev) = self.project.place_take(
-                    track,
-                    tempo.ticks(pass.start, rate),
-                    id,
-                    pass.offset,
-                    // Länge über das Ende, damit Tempowechsel im Take stimmen.
-                    tempo
-                        .ticks(pass.start.saturating_add(pass.length), rate)
-                        .saturating_sub(tempo.ticks(pass.start, rate))
-                        .max(1),
-                    &name,
-                ) else {
-                    continue;
-                };
-                if !self.punch(ev) {
-                    self.project.delete(ev);
-                    continue;
+                // Über mehrere Dateien: aufeinanderfolgende Events, die zusammen den Take bilden.
+                let mut pieces = Vec::new();
+                for &(id, first, length) in &parts {
+                    let lo = pass.offset.max(first);
+                    let hi = (pass.offset + pass.length).min(first + length);
+                    if lo >= hi {
+                        continue;
+                    }
+                    let from = pass.start + (lo - pass.offset);
+                    let Some(ev) = self.project.place_take(
+                        track,
+                        tempo.ticks(from, rate),
+                        id,
+                        lo - first,
+                        // Länge über das Ende, damit Tempowechsel im Take stimmen.
+                        tempo
+                            .ticks(from.saturating_add(hi - lo), rate)
+                            .saturating_sub(tempo.ticks(from, rate))
+                            .max(1),
+                        &name,
+                    ) else {
+                        continue;
+                    };
+                    if !self.punch(ev) {
+                        self.project.delete(ev);
+                        continue;
+                    }
+                    pieces.push(ev);
                 }
-                placed += 1;
-                self.selection = vec![ev];
+                // Mehrere Teile: als Audio-Part zusammengefasst, damit der Take ein Ganzes
+                // bleibt (verschieben, kopieren, Takes vergleichen).
+                if pieces.len() > 1
+                    && let Some(part) = self.project.group_audio(&pieces)
+                {
+                    if let Some(e) = self.project.event_mut(part) {
+                        e.name = name.clone();
+                    }
+                    pieces = vec![part];
+                }
+                if !pieces.is_empty() {
+                    placed += 1;
+                    self.selection = pieces;
+                }
             }
         }
-        // Die Mehrkanal-Rohdatei wird nicht mehr gebraucht.
-        let _ = std::fs::remove_file(&rec.path);
+        // Die Mehrkanal-Rohdateien werden nicht mehr gebraucht.
+        for path in &files {
+            let _ = std::fs::remove_file(path);
+        }
         self.checkpoint(before);
         Ok(placed)
     }

@@ -38,10 +38,13 @@ pub struct InputInfo {
     pub channels: u16,
 }
 
-/// Fertige Aufnahme: eine WAV-Datei mit allen Eingangskanälen.
+/// Fertige Aufnahme: WAV-Dateien mit allen Eingangskanälen, `path` und dahinter `more`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Recording {
     pub path: PathBuf,
+    /// Folgedateien in Reihenfolge, lückenlos an `path` anschließend: Eine WAV-Datei fasst
+    /// höchstens 4 GiB, längere Aufnahmen gehen in `Name-002.wav`, `Name-003.wav` … weiter.
+    pub more: Vec<PathBuf>,
     pub frames: u64,
     pub channels: u16,
     pub sample_rate: u32,
@@ -52,6 +55,27 @@ pub struct Recording {
     pub problem: Option<String>,
 }
 
+impl Recording {
+    /// Alle Dateien der Aufnahme in Reihenfolge.
+    pub fn files(&self) -> impl Iterator<Item = &Path> {
+        std::iter::once(self.path.as_path()).chain(self.more.iter().map(PathBuf::as_path))
+    }
+}
+
+/// Größte Datenmenge einer WAV-Datei in Byte: WAV zählt sie in 32 Bit.
+const MAX_WAV_DATA: u64 = u32::MAX as u64 - 1024;
+
+/// Frames je Aufnahmedatei: die Rohdatei (alle Eingänge, 32 Bit Float) und jeder Spur-Clip
+/// daraus (Stereo, 32 Bit Float) passen in eine WAV-Datei.
+fn frames_per_file(channels: u16, max_bytes: u64) -> u64 {
+    (max_bytes / (4 * u64::from(channels.max(2)))).max(1)
+}
+
+/// Die `n`-te Datei einer Aufnahme (ab 2): `Aufnahme 3.wav` → `Aufnahme 3-002.wav`.
+pub fn continuation_path(first: &Path, n: u32) -> PathBuf {
+    let stem = first.file_stem().unwrap_or_default().to_string_lossy();
+    first.with_file_name(format!("{stem}-{n:03}.wav"))
+}
 /// Wie oft der WAV-Kopf während der Aufnahme nachgeführt wird: Nach einem Absturz ist die
 /// Datei bis dahin lesbar.
 const FLUSH_EVERY: Duration = if cfg!(test) {
@@ -392,10 +416,30 @@ impl Recorder {
         overruns: Arc<AtomicU64>,
         clock: Arc<CaptureClock>,
     ) -> Self {
+        Self::spawn_limited(
+            consumer,
+            channels,
+            sample_rate,
+            overruns,
+            clock,
+            MAX_WAV_DATA,
+        )
+    }
+
+    /// Wie [`Self::spawn_with_clock`], mit einer anderen Dateigröße (für Tests).
+    fn spawn_limited(
+        consumer: rtrb::Consumer<f32>,
+        channels: u16,
+        sample_rate: u32,
+        overruns: Arc<AtomicU64>,
+        clock: Arc<CaptureClock>,
+        max_bytes: u64,
+    ) -> Self {
         let (tx, rx) = mpsc::channel();
+        let per_file = frames_per_file(channels, max_bytes);
         let thread = thread::Builder::new()
             .name("recorder".into())
-            .spawn(move || recorder_loop(consumer, rx, channels, sample_rate, &clock))
+            .spawn(move || recorder_loop(consumer, rx, channels, sample_rate, &clock, per_file))
             .ok();
         Self {
             control: tx,
@@ -439,9 +483,44 @@ impl Drop for Recorder {
 
 struct Active {
     writer: hound::WavWriter<std::io::BufWriter<std::fs::File>>,
+    /// Die Datei, in die gerade geschrieben wird.
     path: PathBuf,
     first_captured_at: Option<u64>,
     last_flush: std::time::Instant,
+    /// Schon abgeschlossene Dateien dieser Aufnahme, in Reihenfolge.
+    done: Vec<PathBuf>,
+    /// Samples in der aktuellen Datei.
+    in_file: u64,
+}
+
+impl Active {
+    fn new(writer: hound::WavWriter<std::io::BufWriter<std::fs::File>>, path: PathBuf) -> Self {
+        Self {
+            writer,
+            path,
+            first_captured_at: None,
+            last_flush: std::time::Instant::now(),
+            done: Vec::new(),
+            in_file: 0,
+        }
+    }
+
+    /// Schließt die aktuelle Datei ab und schreibt in der nächsten weiter (`Name-002.wav` …).
+    fn next_file(&mut self, spec: hound::WavSpec) -> Result<(), String> {
+        let first = self.done.first().unwrap_or(&self.path).clone();
+        let n = u32::try_from(self.done.len() + 2).unwrap_or(u32::MAX);
+        let next = continuation_path(&first, n);
+        let writer = hound::WavWriter::create(&next, spec)
+            .map_err(|e| format!("{}: {e}", next.display()))?;
+        let old = std::mem::replace(&mut self.writer, writer);
+        let old_path = std::mem::replace(&mut self.path, next);
+        old.finalize()
+            .map_err(|e| format!("{}: {e}", old_path.display()))?;
+        self.done.push(old_path);
+        self.in_file = 0;
+        self.last_flush = std::time::Instant::now();
+        Ok(())
+    }
 }
 
 /// Schließt die Datei ab, auch nach einem Schreibfehler, und liest ihre wirkliche Länge: Was
@@ -456,25 +535,43 @@ fn finish(
         writer,
         path,
         first_captured_at,
+        mut done,
         ..
     } = a;
     let finalized = writer
         .finalize()
         .map_err(|e| format!("{}: {e}", path.display()));
     let problem = failed.or(finalized.err());
-    let frames = hound::WavReader::open(&path).map(|r| u64::from(r.duration()));
-    match frames {
-        Ok(frames) if frames > 0 || problem.is_none() => Ok(Recording {
-            path,
-            frames,
-            channels,
-            sample_rate: rate,
-            first_captured_at,
-            problem,
-        }),
-        Ok(_) => Err(problem.unwrap_or_default()),
-        Err(e) => Err(problem.unwrap_or_else(|| format!("{}: {e}", path.display()))),
+    // Die Länge steht in den Dateien selbst; eine leere letzte Folgedatei zählt nicht.
+    let last = hound::WavReader::open(&path).map(|r| u64::from(r.duration()));
+    match last {
+        Ok(0) if !done.is_empty() => {
+            let _ = std::fs::remove_file(&path);
+        }
+        Ok(_) => done.push(path.clone()),
+        Err(e) if done.is_empty() => {
+            return Err(problem.unwrap_or_else(|| format!("{}: {e}", path.display())));
+        }
+        Err(_) => {}
     }
+    let frames: u64 = done
+        .iter()
+        .map(|p| hound::WavReader::open(p).map_or(0, |r| u64::from(r.duration())))
+        .sum();
+    if frames == 0 && problem.is_some() {
+        return Err(problem.unwrap_or_default());
+    }
+    let mut files = done.into_iter();
+    let first = files.next().unwrap_or(path);
+    Ok(Recording {
+        path: first,
+        more: files.collect(),
+        frames,
+        channels,
+        sample_rate: rate,
+        first_captured_at,
+        problem,
+    })
 }
 
 fn recorder_loop(
@@ -483,8 +580,11 @@ fn recorder_loop(
     channels: u16,
     rate: u32,
     clock: &CaptureClock,
+    frames_per_file: u64,
 ) {
     let ch = u64::from(channels.max(1));
+    // Samples je Datei: nur ganze Frames.
+    let per_file = frames_per_file.saturating_mul(ch).max(ch);
     // Wie viele Samples insgesamt aus dem Puffer geholt wurden (für die Zeitzuordnung).
     let mut consumed = 0u64;
     let mut active: Option<Active> = None;
@@ -503,10 +603,18 @@ fn recorder_loop(
             if let Some(a) = active.as_mut().filter(|_| failed.is_none()) {
                 let (x, y) = chunk.as_slices();
                 for &s in x.iter().chain(y) {
+                    // Vor der Größengrenze einer WAV-Datei nahtlos in der nächsten weiter.
+                    if a.in_file >= per_file
+                        && let Err(e) = a.next_file(spec)
+                    {
+                        failed = Some(e);
+                        break;
+                    }
                     if let Err(e) = a.writer.write_sample(s) {
                         failed = Some(format!("{}: {e}", a.path.display()));
                         break;
                     }
+                    a.in_file += 1;
                 }
                 // Kopf nachführen: nach einem Absturz ist die Datei bis hierher lesbar. Mitten
                 // in einem Frame meldet hound das, schreibt aber trotzdem.
@@ -539,10 +647,8 @@ fn recorder_loop(
                     Ok(writer) => {
                         let _ = reply.send(Ok(()));
                         Some(Active {
-                            writer,
-                            path,
                             first_captured_at,
-                            last_flush: std::time::Instant::now(),
+                            ..Active::new(writer, path)
                         })
                     }
                     Err(e) => {
@@ -572,9 +678,22 @@ fn recorder_loop(
 /// Liest eine Aufnahme und baut daraus Stereo für eine Spur: `first` ist der
 /// erste Eingangskanal, `stereo` nimmt `first` und `first + 1`, sonst Mono auf beide Seiten.
 pub fn extract_channels(rec: &Recording, first: u16, stereo: bool) -> Result<Vec<f32>, String> {
-    let reader =
-        hound::WavReader::open(&rec.path).map_err(|e| format!("{}: {e}", rec.path.display()))?;
-    let ch = usize::from(rec.channels.max(1));
+    let mut out = Vec::new();
+    for path in rec.files() {
+        out.extend(extract_file_channels(path, rec.channels, first, stereo)?);
+    }
+    Ok(out)
+}
+
+/// Wie [`extract_channels`] für eine einzelne Datei der Aufnahme (siehe [`Recording::files`]).
+pub fn extract_file_channels(
+    path: &Path,
+    channels: u16,
+    first: u16,
+    stereo: bool,
+) -> Result<Vec<f32>, String> {
+    let reader = hound::WavReader::open(path).map_err(|e| format!("{}: {e}", path.display()))?;
+    let ch = usize::from(channels.max(1));
     let all: Vec<f32> = reader
         .into_samples::<f32>()
         .collect::<Result<_, _>>()
@@ -687,15 +806,67 @@ mod tests {
             writer.write_sample(i as f32).unwrap();
         }
         let a = Active {
-            writer,
-            path: path.clone(),
             first_captured_at: Some(7),
-            last_flush: std::time::Instant::now(),
+            ..Active::new(writer, path.clone())
         };
         let r = finish(a, Some("Platte voll".into()), 2, 48_000).unwrap();
         assert_eq!((r.frames, r.first_captured_at), (1000, Some(7)));
         assert_eq!(r.problem.as_deref(), Some("Platte voll"));
         let back = extract_channels(&r, 1, false).unwrap();
         assert_eq!(&back[..4], &[1.0, 1.0, 3.0, 3.0]);
+    }
+
+    /// A take longer than a WAV file holds goes on in `Name-002.wav`, `Name-003.wav` … without
+    /// a gap: every sample is there once, in order, and the frames add up (small limit here;
+    /// the real one is 4 GiB).
+    #[test]
+    fn a_long_take_continues_seamlessly_in_further_files() {
+        let (mut tx, rx) = rtrb::RingBuffer::new(1 << 16);
+        // Three channels, 4 bytes each: 50 frames per file.
+        let rec = Recorder::spawn_limited(
+            rx,
+            3,
+            48_000,
+            Arc::new(AtomicU64::new(0)),
+            Arc::new(CaptureClock::default()),
+            50 * 3 * 4,
+        );
+        let dir = std::env::temp_dir().join(format!("sc-rec-long-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("Aufnahme 3.wav");
+        rec.start(&path).unwrap();
+        // In pieces that do not line up with the files: 37 + 80 + 3 frames.
+        let mut frame = 0u32;
+        for piece in [37, 80, 3] {
+            for _ in 0..piece {
+                for c in 0..3 {
+                    tx.push(frame as f32 + c as f32 * 0.25).unwrap();
+                }
+                frame += 1;
+            }
+            std::thread::sleep(Duration::from_millis(30));
+        }
+        let r = rec.stop().unwrap();
+        assert_eq!(r.problem, None);
+        assert_eq!(r.frames, 120);
+        assert_eq!(
+            r.more,
+            [
+                dir.join("Aufnahme 3-002.wav"),
+                dir.join("Aufnahme 3-003.wav")
+            ]
+        );
+        let lengths: Vec<u32> = r
+            .files()
+            .map(|p| hound::WavReader::open(p).unwrap().duration())
+            .collect();
+        assert_eq!(lengths, [50, 50, 20]);
+        // Channel 1 (the middle one) over all files: 0.25, 1.25, 2.25 … without a gap.
+        let mono = extract_channels(&r, 1, false).unwrap();
+        let left: Vec<f32> = mono.chunks_exact(2).map(|f| f[0]).collect();
+        let want: Vec<f32> = (0..120).map(|i| i as f32 + 0.25).collect();
+        assert_eq!(left, want);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
