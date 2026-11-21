@@ -47,6 +47,8 @@ mod vst3;
 #[cfg(not(target_arch = "wasm32"))]
 mod vst3_gui;
 
+#[cfg(not(target_arch = "wasm32"))]
+pub use gui::{MainWindow, set_main_window};
 pub use info::{
     MAX_LATENCY, ParamInfo, PluginFormat, PluginInfo, Preset as PluginPreset, SCAN_FLAG,
     ScanOptions, ScanReport,
