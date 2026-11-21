@@ -30,7 +30,7 @@ use std::{
     process::{Child, Command, Stdio},
     sync::{
         Arc, Mutex,
-        atomic::{AtomicBool, AtomicU32, Ordering},
+        atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering},
     },
     time::{Duration, Instant},
 };
@@ -63,6 +63,8 @@ struct Link {
     polled: Mutex<Polled>,
     /// Main thread only: the control connection and the process.
     main: Mutex<MainSide>,
+    /// Events (parameters, MIDI, notes) dropped because a block's event buffer was full.
+    dropped: AtomicU64,
 }
 
 #[derive(Default)]
@@ -228,6 +230,7 @@ impl BridgeInstance {
                 control: Some(control),
                 child,
             }),
+            dropped: AtomicU64::new(0),
         });
         Ok(Self {
             info: info.clone(),
@@ -251,19 +254,31 @@ impl BridgeInstance {
         }
     }
 
+    /// Into the event buffer of the next block; a full buffer drops the event and counts it
+    /// ([`BridgeHandle::dropped_events`]). Never waits, never allocates.
     fn push(&mut self, e: Event) {
         if let Some(slot) = self.events.get_mut(self.count) {
             *slot = e;
             self.count += 1;
+        } else {
+            self.link.dropped.fetch_add(1, Ordering::Relaxed);
         }
     }
 
-    /// Main thread, before the instance goes to the engine (restoring parameters).
+    /// Parameter value from the start of the next block. Called on the audio thread (the
+    /// engine's parameter commands) and on the main thread before the instance goes to the
+    /// engine, so it only writes the preallocated event buffer: no lock, no allocation, no
+    /// socket. A second value for the same parameter before that block replaces the first,
+    /// so a fast knob move cannot fill the buffer.
     pub fn set_param(&mut self, id: u32, value: f64) {
-        if let Ok(mut m) = self.link.main.lock()
-            && let Some(c) = m.control.as_mut()
-        {
-            let _ = c.send(&format!("set\t{id}\t{value}"));
+        let queued = self
+            .events
+            .iter_mut()
+            .take(self.count)
+            .find(|e| e.kind == EVENT_PARAM && e.a == id && e.time == 0);
+        match queued {
+            Some(e) => e.value = value,
+            None => self.set_param_at(0, id, value),
         }
     }
 
@@ -403,6 +418,11 @@ impl BridgeInstance {
 }
 
 impl BridgeHandle {
+    /// Events dropped so far because a block had more than its buffer holds.
+    pub fn dropped_events(&self) -> u64 {
+        self.link.dropped.load(Ordering::Relaxed)
+    }
+
     /// The helper crashed, hung or no longer answers: the insert is silent.
     pub fn crashed(&self) -> bool {
         self.check();

@@ -5,6 +5,8 @@
 //! - `test:crash` aborts in its third block
 //! - `test:hang` stops answering in its third block
 //! - `test:fail` cannot be loaded
+//! - `test:slow` is a gain whose state takes two seconds to save (the control connection stays
+//!   busy meanwhile)
 //! - `test:window` has a fake window: once open it reports a knob move and unsaved changes,
 //!   echoes host values as moves of parameter 1 and closes itself after 40 idle passes (as if
 //!   the user closed it); the title `refuse` makes opening fail
@@ -59,6 +61,7 @@ impl BridgedAudio for Fake {
 
 struct FakeMain {
     gain: Arc<AtomicU64>,
+    slow: bool,
     window: bool,
     win: Mutex<FakeWindow>,
 }
@@ -73,6 +76,9 @@ struct FakeWindow {
 
 impl BridgedMain for FakeMain {
     fn save_state(&self) -> Option<Vec<u8>> {
+        if self.slow {
+            std::thread::sleep(Duration::from_secs(2));
+        }
         Some(self.gain.load(Ordering::Relaxed).to_le_bytes().to_vec())
     }
     fn load_state(&self, data: &[u8]) -> bool {
@@ -159,6 +165,7 @@ fn load(a: &BridgeArgs) -> Result<Hosted, String> {
         }),
         Box::new(FakeMain {
             gain,
+            slow: a.info.id == "test:slow",
             window: a.info.id == "test:window",
             win: Mutex::default(),
         }),
@@ -248,6 +255,43 @@ fn poll_until(h: &studiocraft_plugin_host::BridgeHandle, done: impl Fn(bool) -> 
         std::thread::sleep(Duration::from_millis(16));
     }
     false
+}
+
+/// Parameter changes reach the helper through the block's event buffer, never the control
+/// connection: they do not wait while the main thread talks to the helper, a fast knob move
+/// keeps only its last value, and a full buffer is counted instead of blocking.
+fn set_param_never_waits() {
+    let mut b = BridgeInstance::spawn(&info("test:slow"), 48_000, 512, &exe()).expect("spawn");
+    let h = b.handle();
+    block(&mut b, 1.0, 64);
+    // The main thread holds the control connection for two seconds.
+    let saver = {
+        let h = h.clone();
+        std::thread::spawn(move || h.save_state())
+    };
+    std::thread::sleep(Duration::from_millis(200));
+    let t = Instant::now();
+    for k in 0..10_000 {
+        b.set_param(0, f64::from(k % 3));
+    }
+    b.set_param(0, 2.0);
+    let took = t.elapsed();
+    assert!(
+        took < Duration::from_millis(100),
+        "set_param waited for the control connection: {took:?}"
+    );
+    assert_eq!(h.dropped_events(), 0, "one queued value per parameter");
+    block(&mut b, 0.5, 64);
+    let (l, _) = block(&mut b, 0.0, 64);
+    assert!(l.iter().all(|&s| s == 1.0), "0.5 × 2: {:?}", &l[..4]);
+    // More distinct events than a block holds: the rest is dropped and counted.
+    for k in 0..5_000u32 {
+        b.set_param_at(k % 64, 0, 1.0);
+    }
+    assert!(h.dropped_events() > 0, "overflow is counted");
+    assert!(saver.join().expect("saver").is_some());
+    assert!(!h.crashed());
+    println!("set_param: no wait while the main thread talks to the helper, overflow counted");
 }
 
 fn window_through_the_bridge() {
@@ -343,6 +387,7 @@ fn main() {
     }
     gain_round_trip();
     offline_waits_for_every_block();
+    set_param_never_waits();
     window_through_the_bridge();
     crash_silences_only_the_insert();
     hang_counts_as_crash();
