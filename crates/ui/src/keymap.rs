@@ -1050,7 +1050,8 @@ impl Keymap {
         (map, problems)
     }
 
-    /// Liest ein Preset: JSON oder das alte Textformat.
+    /// Liest ein Preset: JSON oder das alte Textformat (im Browser gibt es noch keinen Import).
+    #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
     pub fn from_preset(text: &str) -> (Self, Vec<String>) {
         if text.trim_start().starts_with('{') {
             Self::from_json(text).unwrap_or_else(|e| (Self::default(), vec![e]))
