@@ -275,6 +275,86 @@ mod tests {
         json!({"id": id, "type": "function", "function": {"name": name, "arguments": args}})
     }
 
+    /// Model replies are foreign input: random text, tool calls with unknown names, broken or
+    /// odd arguments and too many of them never crash the window, and what the conversation
+    /// keeps for the next request stays bounded.
+    #[test]
+    fn fuzzed_model_replies() {
+        use crate::fuzzkit::{Case, Rng, cases};
+        let tools: Vec<String> = assistant_tools()
+            .iter()
+            .filter_map(|t| t["name"].as_str().map(str::to_owned))
+            .collect();
+        let dir = std::env::temp_dir().join(format!("sc-assist-fuzz-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut w = window();
+        let mut c = Conversation::new();
+        // As in the panel: after the model is done, the person writes again.
+        let mut done = true;
+        for seed in cases(0xa55, 400) {
+            let _case = Case("model-reply", seed);
+            let mut rng = Rng(seed | 1);
+            if done || rng.below(10) == 0 {
+                c.user(&"Bitte ".repeat(rng.below(5000)));
+            }
+            let args = |rng: &mut Rng| -> Value {
+                match rng.below(9) {
+                    0 => json!(""),
+                    1 => json!("{"),
+                    2 => json!("[1, 2]"),
+                    3 => json!(r#"{"kind": "midi", "name": "Spur"}"#),
+                    4 => json!({"track": 0, "start": 0, "length": 3840}),
+                    5 => json!(null),
+                    6 => json!(42),
+                    7 => json!(r#"{"path": "../../etc/passwd"}"#),
+                    _ => json!(format!(
+                        "{{\"name\": \"{}\"}}",
+                        "x".repeat(rng.below(50_000))
+                    )),
+                }
+            };
+            let n = [0, 1, 3, 40, 500][rng.below(5)];
+            let calls: Vec<Value> = (0..n)
+                .map(|i| {
+                    let name = if rng.below(4) == 0 {
+                        "kein_werkzeug".to_owned()
+                    } else {
+                        tools[rng.below(tools.len())].clone()
+                    };
+                    let a = args(&mut rng);
+                    match rng.below(6) {
+                        0 => json!({"id": i}),
+                        1 => json!("kein Objekt"),
+                        _ => json!({"id": format!("c{i}"), "type": "function",
+                            "function": {"name": name, "arguments": a}}),
+                    }
+                })
+                .collect();
+            let content = match rng.below(4) {
+                0 => json!(null),
+                1 => json!(""),
+                2 => json!("x".repeat(rng.below(100_000))),
+                _ => json!(42),
+            };
+            let message = match rng.below(8) {
+                0 => json!("kein Objekt"),
+                1 => json!({"content": content}),
+                2 => json!({"content": content, "tool_calls": "keine Liste"}),
+                _ => json!({"role": "assistant", "content": content, "tool_calls": calls}),
+            };
+            let folder = (rng.below(2) == 0).then_some(dir.as_path());
+            done = c.reply(&message, &mut w, folder) == Next::Done;
+            // At most the kept history plus one exchange of MAX_STEPS rounds.
+            let exchange = MAX_STEPS * (MAX_CALLS + 1) + 1;
+            assert!(c.messages().len() <= MAX_MESSAGES + exchange);
+            for m in c.messages() {
+                let text = m["content"].as_str().unwrap_or("");
+                assert!(text.chars().count() <= MAX_TEXT.max(MAX_RESULT) + 1);
+            }
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     #[test]
     fn tools_run_and_their_results_go_back_to_the_model() {
         let mut w = window();
