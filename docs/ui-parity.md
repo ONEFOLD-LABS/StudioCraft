@@ -22,7 +22,7 @@ Status: ✅ umgesetzt · 🟡 teilweise · ⬜ offen
 | # | Element | Inhalt | Status |
 |---|---|---|---|
 | 1 | Titelleiste | App-Symbol, Menü (Datei, Bearbeiten, Projekt, Ansicht), Projekt-Titel, Fensterknöpfe; `craft-window` entscheidet pro Desktop, ob die App sie zeichnet | ✅ |
-| 2 | Werkzeugzeile | Zonen-Schalter links, Transport-Kurzform, Werkzeuge, Snap/Raster, Zonen-Schalter rechts | ✅ |
+| 2 | Werkzeugzeile | Zonen-Schalter links, Werkzeuge, Snap/Raster, Zonen-Schalter rechts | ✅ |
 | 3 | Info-Zeile | Werte des gewählten Events, direkt editierbar; ein-/ausblendbar; Mehrfachauswahl relativ | ✅ |
 | 4 | Mitte | linke Zone · Spurliste · Lineal/Event-Anzeige · rechte Zone | ✅ |
 | 5 | Untere Zone | Reiter (Mixer, Editor, …) am unteren Rand der Zone | ✅ |
@@ -37,8 +37,7 @@ Eine Zeile, Gruppen durch schmale Trenner getrennt, Knöpfe quadratisch mit Symb
 1. **Links: globale Zustände** M, S, R, W. Sie leuchten in der Statusfarbe, sobald irgendeine Spur
    gemutet, solo, auf Lesen oder auf Schreiben steht. Klick hebt Mute, Solo bzw. Schreiben für
    alle Spuren auf; R schaltet Lesen für alle Kanäle ein bzw. aus. Jeder Klick ist ein
-   Undo-Schritt. Daneben die **Transport-Kurzform:** Zum Anfang, Stopp, Start, Aufnahme, Cycle
-   (gleiches Verhalten wie die Transportleiste).
+   Undo-Schritt. Transport-Knöpfe gibt es hier nicht; sie stehen nur in der Transportleiste.
 2. **Mitte, auf die Fensterbreite zentriert** (in schmalen Fenstern direkt im Anschluss):
    **Werkzeuge 1–0** als Symbolknöpfe, aktiver Knopf in Akzentfarbe hinterlegt:
    Pfeil (Auswahl), Pfeil mit Rahmen (Bereich), Comping (ohne Taste, Lanes mit hervorgehobenem
