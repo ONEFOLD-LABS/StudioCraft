@@ -100,15 +100,24 @@ impl ProjectWindow {
                     std::fs::copy(&src, &target).map_err(|e| format!("{}: {e}", src.display()))?;
                     PathBuf::from(AUDIO_DIR).join(target.file_name().unwrap_or_default())
                 }
-                // Keine Datei (z. B. synthetisch erzeugt): Samples als WAV ablegen.
-                _ => {
-                    let loaded = self.clips.get(&(id as u32)).ok_or_else(|| {
-                        crate::i18n::trf("{name}: keine Audiodaten", &[("name", &clip.name)])
-                    })?;
-                    let target = unique_name(&audio, &format!("{}.wav", sanitize(&clip.name)));
-                    export::write_wav_f32(&loaded.samples, clip.sample_rate, &target)?;
-                    PathBuf::from(AUDIO_DIR).join(target.file_name().unwrap_or_default())
-                }
+                (_, source) => match (self.clips.get(&(id as u32)), source) {
+                    // Keine Datei (z. B. synthetisch erzeugt): Samples als WAV ablegen.
+                    (Some(loaded), _) => {
+                        let target = unique_name(&audio, &format!("{}.wav", sanitize(&clip.name)));
+                        export::write_wav_f32(&loaded.samples, clip.sample_rate, &target)?;
+                        PathBuf::from(AUDIO_DIR).join(target.file_name().unwrap_or_default())
+                    }
+                    // Datei fehlt und nichts geladen (beim Öffnen gemeldet): den Verweis
+                    // behalten, damit das Projekt sich trotzdem speichern lässt und die Datei
+                    // wieder klingt, sobald sie da ist.
+                    (None, Some(src)) => src,
+                    (None, None) => {
+                        return Err(crate::i18n::trf(
+                            "{name}: keine Audiodaten",
+                            &[("name", &clip.name)],
+                        ));
+                    }
+                },
             };
             clip.path = Some(rel.to_string_lossy().replace('\\', "/"));
         }
