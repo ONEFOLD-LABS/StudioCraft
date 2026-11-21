@@ -179,6 +179,7 @@ mod tests {
             bypass: false,
             params: Vec::new(),
             state: None,
+            isolated: false,
         });
         w.sync_inserts();
         w.rebuild_song();

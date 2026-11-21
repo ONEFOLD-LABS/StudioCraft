@@ -28,6 +28,7 @@ mod confine;
 pub mod control;
 mod exec;
 mod roots;
+mod ui_agent;
 
 use std::path::PathBuf;
 
@@ -144,24 +145,7 @@ impl Backend {
 
 impl Tools for Studio {
     fn instructions(&self) -> String {
-        let place = if self.connected() {
-            "These tools drive the open StudioCraft window: a person may be watching and \
-             working in it too. Use ui_screenshot to see the window and transport to play. Do \
-             not discard the person's unsaved changes without being asked."
-        } else {
-            "These tools edit one project in memory (no window, no audio device)."
-        };
-        format!(
-            "StudioCraft is a digital audio workstation. {place} Call inspect_project first and \
-             after changes to verify. Time: {TICKS_PER_QUARTER} ticks per quarter note. \
-             Positions are ticks or text `bar.beat.sixteenth.tick` counted from 1 (`1.1.1.0` is \
-             the start, `5.1.1.0` bar 5); lengths are ticks or `bars.beats.sixteenths.ticks` \
-             counted from 0 (`1.0.0.0` is one bar). Note positions inside a part are relative to \
-             the part start. Tracks are named by index (0-based) or exact name, events by id. \
-             Every edit is one undo step (undo, redo). Nothing reaches disk until save_project. \
-             File access is confined to the folders the operator granted; a refused path is \
-             reported as an error."
-        )
+        instructions(self.connected())
     }
 
     fn list(&mut self) -> Vec<Value> {
@@ -198,6 +182,68 @@ impl Tools for Studio {
                 .map(|v| Contents::json(&v))
         })
     }
+}
+
+/// What a model is told about the tools. `connected`: they drive the open app window.
+pub fn instructions(connected: bool) -> String {
+    let place = if connected {
+        "These tools drive the open StudioCraft window: a person may be watching and \
+         working in it too. Use ui_screenshot to see the window, ui_inspect to list its \
+         widgets, ui_click to click them and transport to play. Do not discard the \
+         person's unsaved changes without being asked."
+    } else {
+        "These tools edit one project in memory (no window, no audio device)."
+    };
+    format!(
+        "StudioCraft is a digital audio workstation. {place} Call inspect_project first and \
+         after changes to verify. Time: {TICKS_PER_QUARTER} ticks per quarter note. \
+         Positions are ticks or text `bar.beat.sixteenth.tick` counted from 1 (`1.1.1.0` is \
+         the start, `5.1.1.0` bar 5); lengths are ticks or `bars.beats.sixteenths.ticks` \
+         counted from 0 (`1.0.0.0` is one bar). Note positions inside a part are relative to \
+         the part start. Tracks are named by index (0-based) or exact name, events by id. \
+         Every edit is one undo step (undo, redo). Nothing reaches disk until save_project. \
+         File access is confined to the folders the operator granted; a refused path is \
+         reported as an error."
+    )
+}
+
+/// The tools for a model inside the app (the assistant), in MCP form (`name`, `description`,
+/// `inputSchema`): those of `--connect` without the window tools (`ui_*`), and without
+/// `new_project` and `open_project`, which would replace the person's project.
+pub fn assistant_tools() -> Vec<Value> {
+    tool_list(true)
+        .into_iter()
+        .filter(|t| {
+            let name = t["name"].as_str().unwrap_or("");
+            !name.starts_with("ui_") && name != "new_project" && name != "open_project"
+        })
+        .collect()
+}
+
+/// Run tool `name` on `window` with its paths checked against `roots` first, as the MCP
+/// server does.
+pub fn run_confined(
+    window: &mut ProjectWindow,
+    roots: &Roots,
+    name: &str,
+    args: &Value,
+) -> Result<Value, String> {
+    let current = window.project_path().map(std::path::Path::to_path_buf);
+    let args = confine::confine(roots, name, args, &mut || Ok(current.clone()))?;
+    exec::execute(window, name, &args)
+}
+
+/// Tools that read or write files (they need [`Roots`]).
+pub fn uses_files(name: &str) -> bool {
+    matches!(
+        name,
+        "open_project"
+            | "save_project"
+            | "import_audio"
+            | "import_midi"
+            | "export_mixdown"
+            | "export_midi"
+    )
 }
 
 /// The names of the tools, as the app's control channel lists them.
@@ -462,6 +508,40 @@ fn tool_list(connected: bool) -> Vec<Value> {
             "A PNG of the app window as it looks now: check what the person sees after a change.",
             object(json!({}), &[]),
             Effect::ReadOnly,
+        ));
+        let text = |d: &str| string(d);
+        tools.push(tool(
+            "ui_inspect",
+            "Inspect window",
+            "The widgets of the app window as screen readers see them, in reading order: id, role (Button, CheckBox, MenuItem, TextInput …), label, value, rect [x, y, width, height] in points from the top left, and clickable, disabled, checked, expanded, focused where they apply. Only widgets with a label, a value or a click action are listed. Labels follow the app's language. Use it before ui_click.",
+            object(
+                json!({
+                    "label": text("Only widgets whose label or value contains this text (case-insensitive)"),
+                    "role": text("Only widgets of this role, e.g. Button"),
+                }),
+                &[],
+            ),
+            Effect::ReadOnly,
+        ));
+        tools.push(tool(
+            "ui_click",
+            "Click",
+            "Click in the app window with the mouse, as the person would: the widget `id` from ui_inspect, the widget with exactly this `label` as ui_inspect lists it, shortcut text included (with `role` or `index` when several share it), or the point `x`, `y` in points. Returns what was clicked; the result shows in the next ui_inspect or ui_screenshot. Prefer the project tools for edits they cover.",
+            object(
+                json!({
+                    "id": {"type": "integer", "minimum": 0, "description": "Widget id from ui_inspect"},
+                    "label": text("Exact label of the widget"),
+                    "role": text("Role, when several widgets share the label"),
+                    "index": {"type": "integer", "minimum": 0, "description": "Which of several widgets with the label (0-based, reading order)"},
+                    "x": {"type": "number", "minimum": 0, "description": "Point from the left, in points"},
+                    "y": {"type": "number", "minimum": 0, "description": "Point from the top, in points"},
+                    "button": {"type": "string", "enum": ["left", "right", "middle"], "description": "Mouse button (default left)"},
+                    "double": flag("Double-click"),
+                    "modifiers": {"type": "array", "items": {"type": "string", "enum": ["shift", "ctrl", "alt", "command"]}, "description": "Keys held (command: Ctrl, or ⌘ on macOS)"},
+                }),
+                &[],
+            ),
+            Effect::Edits,
         ));
     }
     tools

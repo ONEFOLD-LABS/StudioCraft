@@ -2,6 +2,12 @@
 //! Fenster, das klappt auf allen Systemen), sonst eingebettet in ein eigenes
 //! Host-Fenster: X11 (Linux, BSD; unter Wayland über XWayland), Win32 (Windows)
 //! oder Cocoa (macOS).
+//!
+//! Unter Wayland (Issue #175) kommt zuerst ein schwebendes Wayland-Fenster des Plugins, dann
+//! das eingebettete Fenster über XWayland (es bleibt über dem Hauptfenster und merkt sich
+//! seine Position), zuletzt ein schwebendes X11-Fenster des Plugins. Unter X11 bleibt es bei
+//! schwebend vor eingebettet; beide hängen dort am Hauptfenster (`WM_TRANSIENT_FOR`,
+//! `clap.gui.set_transient`).
 
 use std::{
     ffi::{CStr, CString},
@@ -15,6 +21,95 @@ use clap_sys::ext::{
 };
 
 use crate::{clap::ClapHandle, host::on_main_thread};
+
+/// Das Hauptfenster der App, wie es das Fenstersystem kennt (siehe [`set_main_window`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MainWindow {
+    /// Ein X11-Fenster mit dieser Id (X11-Sitzung oder App unter XWayland).
+    X11(u32),
+    /// Ein natives Wayland-Fenster.
+    Wayland,
+    /// Windows, macOS oder unbekannt.
+    Other,
+}
+
+static MAIN_WINDOW: std::sync::Mutex<Option<MainWindow>> = std::sync::Mutex::new(None);
+
+/// Meldet das Hauptfenster der App: Plugin-Fenster hängen unter X11 daran und wählen unter
+/// Wayland ihren Weg danach. Einmal beim Start aufrufen.
+pub fn set_main_window(window: MainWindow) {
+    if let Ok(mut m) = MAIN_WINDOW.lock() {
+        *m = Some(window);
+    }
+}
+
+fn main_window() -> Option<MainWindow> {
+    MAIN_WINDOW.lock().ok().and_then(|m| *m)
+}
+
+/// Das Hauptfenster als Text für einen Hilfsprozess (Plugin-Bridge); leer, wenn unbekannt.
+pub(crate) fn main_window_code() -> String {
+    match main_window() {
+        Some(MainWindow::X11(id)) => format!("x11:{id}"),
+        Some(MainWindow::Wayland) => "wayland".into(),
+        Some(MainWindow::Other) => "other".into(),
+        None => String::new(),
+    }
+}
+
+/// Gegenstück zu [`main_window_code`] im Hilfsprozess; Unbekanntes bleibt ungesetzt.
+pub(crate) fn set_main_window_code(code: &str) {
+    let window = match code {
+        "wayland" => MainWindow::Wayland,
+        "other" => MainWindow::Other,
+        c => match c.strip_prefix("x11:").and_then(|v| v.parse().ok()) {
+            Some(id) => MainWindow::X11(id),
+            None => return,
+        },
+    };
+    set_main_window(window);
+}
+
+/// Läuft die App als Wayland-Client? Ohne Meldung der App entscheidet die Umgebung.
+fn wayland_session() -> bool {
+    match main_window() {
+        Some(MainWindow::Wayland) => true,
+        Some(_) => false,
+        None => {
+            cfg!(all(unix, not(target_os = "macos")))
+                && std::env::var_os("WAYLAND_DISPLAY").is_some_and(|v| !v.is_empty())
+        }
+    }
+}
+
+/// Wie ein Plugin-Fenster aufgeht.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Mode {
+    /// Das Plugin öffnet ein eigenes Fenster dieser Art.
+    Floating(&'static CStr),
+    /// Das Plugin zeichnet in unser Host-Fenster dieser Art.
+    Embedded(&'static CStr),
+}
+
+/// Die Reihenfolge der Versuche; `supports(api, floating)` fragt das Plugin.
+fn plan(wayland: bool, supports: impl Fn(&CStr, bool) -> bool) -> Option<Mode> {
+    let api = window_api()?;
+    let order: Vec<Mode> = if wayland {
+        // Das eingebettete Fenster (XWayland) vor dem schwebenden X11-Fenster des Plugins: nur
+        // unser Fenster bleibt über dem Hauptfenster und merkt sich seine Position.
+        vec![
+            Mode::Floating(clap_sys::ext::gui::CLAP_WINDOW_API_WAYLAND),
+            Mode::Embedded(api),
+            Mode::Floating(api),
+        ]
+    } else {
+        vec![Mode::Floating(api), Mode::Embedded(api)]
+    };
+    order.into_iter().find(|m| match m {
+        Mode::Floating(a) => supports(a, true),
+        Mode::Embedded(a) => supports(a, false),
+    })
+}
 
 fn window_api() -> Option<&'static CStr> {
     if cfg!(target_os = "macos") {
@@ -73,20 +168,21 @@ impl ClapHandle {
             }
             return Ok(());
         }
-        let api =
-            window_api().ok_or("Plugin-Fenster werden auf diesem System nicht unterstützt")?;
         let (Some(supported), Some(create)) = (vt.is_api_supported, vt.create) else {
             return Err("unvollständige clap.gui-Erweiterung".into());
         };
-        // SAFETY: Plugin lebt; `api` ist statisch und nullterminiert; Hauptthread.
-        let floating = unsafe { supported(p, api.as_ptr(), true) };
-        if !floating {
-            // SAFETY: wie oben.
-            if unsafe { supported(p, api.as_ptr(), false) } {
-                return self.open_embedded(vt, api, title);
-            }
-            return Err("Plugin bietet kein passendes Fenster an".into());
+        if window_api().is_none() {
+            return Err("Plugin-Fenster werden auf diesem System nicht unterstützt".into());
         }
+        // SAFETY: Plugin lebt; `api` ist statisch und nullterminiert; Hauptthread.
+        let mode = plan(wayland_session(), |api, floating| unsafe {
+            supported(p, api.as_ptr(), floating)
+        });
+        let api = match mode {
+            Some(Mode::Embedded(api)) => return self.open_embedded(vt, api, title),
+            Some(Mode::Floating(api)) => api,
+            None => return Err("Plugin bietet kein passendes Fenster an".into()),
+        };
         self.shared.gui_closed.store(false, Ordering::Relaxed);
         // SAFETY: wie oben; noch keine GUI.
         if !unsafe { create(p, api.as_ptr(), true) } {
@@ -97,6 +193,7 @@ impl ClapHandle {
             // SAFETY: GUI existiert; `t` lebt während des Aufrufs.
             unsafe { f(p, t.as_ptr()) };
         }
+        self.set_transient(vt, api);
         // SAFETY: GUI existiert.
         if !vt.show.is_some_and(|f| unsafe { f(p) }) {
             self.close_gui();
@@ -104,6 +201,27 @@ impl ClapHandle {
         }
         Ok(())
     }
+
+    /// Ein schwebendes X11-Fenster des Plugins hängt am X11-Hauptfenster (bleibt darüber).
+    /// Unter Wayland nicht möglich: das Plugin hat eine eigene Verbindung zum Compositor.
+    #[cfg(all(unix, not(target_os = "macos")))]
+    fn set_transient(&self, vt: clap_plugin_gui, api: &CStr) {
+        let (Some(f), Some(MainWindow::X11(id))) = (vt.set_transient, main_window()) else {
+            return;
+        };
+        if api != clap_sys::ext::gui::CLAP_WINDOW_API_X11 {
+            return;
+        }
+        let parent = clap_window {
+            api: api.as_ptr(),
+            specific: clap_window_handle { x11: u64::from(id) },
+        };
+        // SAFETY: GUI existiert (schwebend); `parent` benennt das lebende Hauptfenster.
+        unsafe { f(self.plugin, &parent) };
+    }
+
+    #[cfg(not(all(unix, not(target_os = "macos"))))]
+    fn set_transient(&self, _vt: clap_plugin_gui, _api: &CStr) {}
 
     fn open_embedded(
         &mut self,
@@ -277,9 +395,17 @@ pub(crate) use x11win::HostWindow;
 
 #[cfg(all(unix, not(target_os = "macos")))]
 pub(crate) mod x11win {
-    //! Ein schlichtes X11-Fenster als Elternfenster für eingebettete Plugin-Editoren.
+    //! Ein schlichtes X11-Fenster als Elternfenster für eingebettete Plugin-Editoren. Es merkt
+    //! sich seine Position je Titel (solange die App läuft) und bleibt über dem Hauptfenster:
+    //! unter X11 als dessen Unterfenster (`WM_TRANSIENT_FOR`), unter Wayland, wo ein
+    //! XWayland-Fenster kein Wayland-Fenster als Eltern haben kann, als „immer oben“.
 
-    use std::sync::OnceLock;
+    use std::{
+        collections::HashMap,
+        sync::{Mutex, OnceLock},
+    };
+
+    use super::{MainWindow, main_window, wayland_session};
 
     use x11rb::{
         connection::Connection,
@@ -302,6 +428,26 @@ pub(crate) mod x11win {
         wm_delete: u32,
         net_wm_name: u32,
         utf8: u32,
+        net_wm_state: u32,
+        net_wm_state_above: u32,
+        net_frame_extents: u32,
+    }
+
+    /// Wo die Fenster zuletzt standen (linke obere Ecke des Rahmens), je Titel.
+    static POSITIONS: Mutex<Option<HashMap<String, (i32, i32)>>> = Mutex::new(None);
+
+    fn remembered(title: &str) -> Option<(i32, i32)> {
+        POSITIONS.lock().ok()?.as_ref()?.get(title).copied()
+    }
+
+    fn remember(title: &str, pos: (i32, i32)) {
+        if let Ok(mut p) = POSITIONS.lock() {
+            let map = p.get_or_insert_with(HashMap::new);
+            // Begrenzt: ein Eintrag je geöffnetem Plugin-Fenster, nicht beliebig viele.
+            if map.len() < 1000 || map.contains_key(title) {
+                map.insert(title.to_owned(), pos);
+            }
+        }
     }
 
     fn x() -> Option<&'static X> {
@@ -325,6 +471,9 @@ pub(crate) mod x11win {
             wm_delete: atom(b"WM_DELETE_WINDOW")?,
             net_wm_name: atom(b"_NET_WM_NAME")?,
             utf8: atom(b"UTF8_STRING")?,
+            net_wm_state: atom(b"_NET_WM_STATE")?,
+            net_wm_state_above: atom(b"_NET_WM_STATE_ABOVE")?,
+            net_frame_extents: atom(b"_NET_FRAME_EXTENTS")?,
             root,
             visual,
             conn,
@@ -333,6 +482,7 @@ pub(crate) mod x11win {
 
     pub(crate) struct HostWindow {
         id: Window,
+        title: String,
     }
 
     impl HostWindow {
@@ -341,15 +491,23 @@ pub(crate) mod x11win {
             let err = |e: &dyn std::fmt::Display| format!("Fenster für das Plugin: {e}");
             let id = x.conn.generate_id().map_err(|e| err(&e))?;
             let aux = CreateWindowAux::new().event_mask(EventMask::STRUCTURE_NOTIFY);
+            let (w, h) = (w.clamp(1, 16_384) as u16, h.clamp(1, 16_384) as u16);
+            let pos = remembered(title);
+            let (px, py) = pos.map_or((0, 0), |(x, y)| {
+                (
+                    x.clamp(-16_384, 16_384) as i16,
+                    y.clamp(-16_384, 16_384) as i16,
+                )
+            });
             x.conn
                 .create_window(
                     x11rb::COPY_DEPTH_FROM_PARENT,
                     id,
                     x.root,
-                    0,
-                    0,
-                    w.clamp(1, 16_384) as u16,
-                    h.clamp(1, 16_384) as u16,
+                    px,
+                    py,
+                    w,
+                    h,
                     0,
                     WindowClass::INPUT_OUTPUT,
                     x.visual,
@@ -384,10 +542,116 @@ pub(crate) mod x11win {
                 AtomEnum::ATOM,
                 &[x.wm_delete],
             );
+            if pos.is_some() {
+                // WM_NORMAL_HINTS: vom Benutzer gewählte Position (USPosition), Rahmen oben links
+                // dort (NorthWest), damit der Fenstermanager sie nicht selbst wählt.
+                const US_POSITION: u32 = 1;
+                const P_WIN_GRAVITY: u32 = 1 << 9;
+                const NORTH_WEST: u32 = 1;
+                let mut hints = [0u32; 18];
+                hints[0] = US_POSITION | P_WIN_GRAVITY;
+                hints[1] = px as i32 as u32;
+                hints[2] = py as i32 as u32;
+                hints[3] = u32::from(w);
+                hints[4] = u32::from(h);
+                hints[17] = NORTH_WEST;
+                let _ = x.conn.change_property32(
+                    PropMode::REPLACE,
+                    id,
+                    AtomEnum::WM_NORMAL_HINTS,
+                    AtomEnum::WM_SIZE_HINTS,
+                    &hints,
+                );
+            }
+            match main_window() {
+                Some(MainWindow::X11(main)) => {
+                    let _ = x.conn.change_property32(
+                        PropMode::REPLACE,
+                        id,
+                        AtomEnum::WM_TRANSIENT_FOR,
+                        AtomEnum::WINDOW,
+                        &[main],
+                    );
+                }
+                _ if wayland_session() => {
+                    // Vor dem Anzeigen gesetzt, gilt _NET_WM_STATE als Anfangszustand (EWMH).
+                    let _ = x.conn.change_property32(
+                        PropMode::REPLACE,
+                        id,
+                        x.net_wm_state,
+                        AtomEnum::ATOM,
+                        &[x.net_wm_state_above],
+                    );
+                }
+                _ => {}
+            }
             // Einmal hin und zurück, damit das Fenster existiert, bevor das Plugin
             // (mit eigener Verbindung) es als Elternfenster benutzt.
             x.conn.sync().map_err(|e| err(&e))?;
-            Ok(Self { id })
+            Ok(Self {
+                id,
+                title: title.to_owned(),
+            })
+        }
+
+        /// Linke obere Ecke des Rahmens auf dem Bildschirm (Inhalt minus Rahmenbreiten).
+        pub fn position(&self) -> Option<(i32, i32)> {
+            let x = x()?;
+            let at = x
+                .conn
+                .translate_coordinates(self.id, x.root, 0, 0)
+                .ok()?
+                .reply()
+                .ok()?;
+            let (left, top) = x
+                .conn
+                .get_property(
+                    false,
+                    self.id,
+                    x.net_frame_extents,
+                    AtomEnum::CARDINAL,
+                    0,
+                    4,
+                )
+                .ok()
+                .and_then(|c| c.reply().ok())
+                .and_then(|r| r.value32().map(|v| v.collect::<Vec<u32>>()))
+                .filter(|v| v.len() == 4)
+                .map_or((0, 0), |v| {
+                    (
+                        i32::try_from(v[0]).unwrap_or(0),
+                        i32::try_from(v[2]).unwrap_or(0),
+                    )
+                });
+            Some((
+                i32::from(at.dst_x).saturating_sub(left),
+                i32::from(at.dst_y).saturating_sub(top),
+            ))
+        }
+
+        /// Ob der Fenstermanager das Fenster „immer oben“ hält (für Tests).
+        #[cfg(test)]
+        pub fn keeps_above(&self) -> bool {
+            let Some(x) = x() else { return false };
+            x.conn
+                .get_property(false, self.id, x.net_wm_state, AtomEnum::ATOM, 0, 32)
+                .ok()
+                .and_then(|c| c.reply().ok())
+                .and_then(|r| {
+                    r.value32()
+                        .map(|mut v| v.any(|a| a == x.net_wm_state_above))
+                })
+                .unwrap_or(false)
+        }
+
+        /// Verschiebt das Fenster (Inhalt oben links; für Tests).
+        #[cfg(test)]
+        pub fn move_to(&self, left: i32, top: i32) {
+            if let Some(x) = x() {
+                let aux = ConfigureWindowAux::new().x(left).y(top);
+                let _ = x.conn.configure_window(self.id, &aux);
+                let _ = x.conn.sync();
+            }
         }
 
         pub fn id(&self) -> u32 {
@@ -434,6 +698,9 @@ pub(crate) mod x11win {
         }
 
         pub fn close(self) {
+            if let Some(pos) = self.position() {
+                remember(&self.title, pos);
+            }
             if let Some(x) = x() {
                 let _ = x.conn.destroy_window(self.id);
                 let _ = x.conn.flush();
@@ -677,5 +944,92 @@ pub(crate) mod cocoawin {
         pub fn close(self) {
             self.win.close();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Die Tests ändern das gemeldete Hauptfenster (global): nacheinander.
+    static SESSION: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    /// Unter Wayland: schwebend nativ, dann eingebettet (XWayland), zuletzt schwebend X11;
+    /// unter X11 schwebend vor eingebettet.
+    #[cfg(all(unix, not(target_os = "macos")))]
+    #[test]
+    fn the_window_plan_follows_the_session() {
+        use clap_sys::ext::gui::{CLAP_WINDOW_API_WAYLAND, CLAP_WINDOW_API_X11};
+        let all = |_: &CStr, _: bool| true;
+        assert_eq!(
+            plan(true, all),
+            Some(Mode::Floating(CLAP_WINDOW_API_WAYLAND))
+        );
+        assert_eq!(plan(false, all), Some(Mode::Floating(CLAP_WINDOW_API_X11)));
+        // Ein Plugin nur mit X11: unter Wayland lieber unser Fenster (bleibt oben).
+        let x11_only = |api: &CStr, _: bool| api == CLAP_WINDOW_API_X11;
+        assert_eq!(
+            plan(true, x11_only),
+            Some(Mode::Embedded(CLAP_WINDOW_API_X11))
+        );
+        assert_eq!(
+            plan(false, x11_only),
+            Some(Mode::Floating(CLAP_WINDOW_API_X11))
+        );
+        // Nur schwebend X11: bleibt auch unter Wayland möglich.
+        let floating_x11 = |api: &CStr, floating: bool| floating && api == CLAP_WINDOW_API_X11;
+        assert_eq!(
+            plan(true, floating_x11),
+            Some(Mode::Floating(CLAP_WINDOW_API_X11))
+        );
+        assert_eq!(plan(true, |_: &CStr, _: bool| false), None);
+    }
+
+    #[test]
+    fn the_app_tells_which_session_it_runs_in() {
+        let _one = SESSION.lock().unwrap_or_else(|e| e.into_inner());
+        set_main_window(MainWindow::Wayland);
+        assert!(wayland_session());
+        set_main_window(MainWindow::X11(42));
+        assert!(!wayland_session());
+        assert_eq!(main_window(), Some(MainWindow::X11(42)));
+        set_main_window(MainWindow::Other);
+        assert!(!wayland_session());
+    }
+
+    /// Öffnet echte Fenster (XWayland oder X11):
+    /// `STUDIOCRAFT_GUI_TEST=1 cargo test -p studiocraft-plugin-host host_window`
+    #[cfg(all(unix, not(target_os = "macos")))]
+    #[test]
+    fn host_window_remembers_its_position_and_stays_on_top() {
+        if std::env::var_os("STUDIOCRAFT_GUI_TEST").is_none() {
+            return;
+        }
+        let _one = SESSION.lock().unwrap_or_else(|e| e.into_inner());
+        set_main_window(MainWindow::Wayland);
+        let pump = |w: &HostWindow| {
+            for _ in 0..20 {
+                w.pump_closed();
+                std::thread::sleep(std::time::Duration::from_millis(25));
+            }
+        };
+        let title = "StudioCraft-Test – Position";
+        let w = HostWindow::new(title, 300, 200).expect("X11");
+        w.show();
+        pump(&w);
+        assert!(w.keeps_above(), "immer oben unter Wayland");
+        w.move_to(321, 234);
+        pump(&w);
+        let moved = w.position().expect("Position");
+        w.close();
+        let again = HostWindow::new(title, 300, 200).expect("X11");
+        again.show();
+        pump(&again);
+        let back = again.position().expect("Position");
+        again.close();
+        assert!(
+            (back.0 - moved.0).abs() <= 2 && (back.1 - moved.1).abs() <= 2,
+            "vorher {moved:?}, nachher {back:?}"
+        );
     }
 }

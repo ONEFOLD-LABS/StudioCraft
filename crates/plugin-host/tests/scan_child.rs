@@ -1,6 +1,7 @@
 //! Scan in Kindprozessen (Issue #35). Dieses Testprogramm ist zugleich das Scan-Programm:
 //! Mit dem Scan-Schalter verhält es sich wie der Kindprozess der App. Dateinamen mit
-//! `absturz` oder `haengt` simulieren Plugins, die beim Laden abstürzen oder hängen.
+//! `absturz` oder `haengt` simulieren Plugins, die beim Laden abstürzen oder hängen;
+//! `entladen` eines, das seine Plugins vollständig meldet und erst beim Entladen abstürzt.
 
 use std::{path::PathBuf, time::Duration};
 
@@ -13,6 +14,11 @@ fn main() {
     if args.get(1).map(String::as_str) == Some(SCAN_FLAG) {
         let file = args.get(2).cloned().unwrap_or_default();
         if file.contains("absturz") {
+            std::process::abort();
+        }
+        if file.contains("entladen") {
+            // Wie der echte Kindprozess vor dem Entladen: Plugin-Zeilen, dann die Abschlusszeile.
+            println!("P\tcom.example.entladen\tEntladen\tBeispiel\t1.0\taudio-effect\nL");
             std::process::abort();
         }
         if file.contains("haengt") {
@@ -37,7 +43,12 @@ fn crashing_and_hanging_files_are_blocked_and_cached() {
     let dir = std::env::temp_dir().join(format!("sc-scan-child-{}", std::process::id()));
     let plugins = dir.join("plugins");
     std::fs::create_dir_all(&plugins).expect("Ordner");
-    for name in ["absturz.clap", "haengt.clap", "kaputt.clap"] {
+    for name in [
+        "absturz.clap",
+        "entladen.clap",
+        "haengt.clap",
+        "kaputt.clap",
+    ] {
         std::fs::write(plugins.join(name), b"keine Bibliothek").expect("Datei");
     }
     let cache = dir.join("cache.tsv");
@@ -45,7 +56,10 @@ fn crashing_and_hanging_files_are_blocked_and_cached() {
     let paths = vec![plugins.clone()];
 
     let report = scan_isolated(&paths, &opts);
-    assert!(report.plugins.is_empty());
+    // Nur das Plugin, das vor dem Absturz vollständig gemeldet wurde, bleibt ladbar.
+    let ids: Vec<&str> = report.plugins.iter().map(|p| p.id.as_str()).collect();
+    assert_eq!(ids, ["com.example.entladen"]);
+    assert_eq!(report.own_process, ["com.example.entladen"]);
     assert_eq!(report.errors.len(), 1, "{:?}", report.errors);
     assert!(report.errors[0].contains("kaputt.clap"));
     let blocked: Vec<String> = report
@@ -53,9 +67,10 @@ fn crashing_and_hanging_files_are_blocked_and_cached() {
         .iter()
         .map(|(p, r)| format!("{} {r}", p.display()))
         .collect();
-    assert_eq!(blocked.len(), 2, "{blocked:?}");
+    assert_eq!(blocked.len(), 3, "{blocked:?}");
     assert!(blocked[0].contains("absturz.clap") && blocked[0].contains("abgestürzt"));
-    assert!(blocked[1].contains("haengt.clap") && blocked[1].contains("Zeitüberschreitung"));
+    assert!(blocked[1].contains("entladen.clap") && blocked[1].contains("abgestürzt"));
+    assert!(blocked[2].contains("haengt.clap") && blocked[2].contains("Zeitüberschreitung"));
 
     // Zweiter Lauf aus dem Cache: auch mit einem Programm, das nicht startet, gleiches Ergebnis.
     let mut cached = options(Some(cache.clone()));

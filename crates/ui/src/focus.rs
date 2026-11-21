@@ -64,7 +64,9 @@ impl ProjectWindow {
             && let Some(zone) = rects.at(p)
         {
             self.focus = zone;
-            self.key_editor.focused = zone == Zone::Lower && self.lower == LowerZone::Editor;
+            // Key- und Noten-Editor bearbeiten dieselben Noten (Entf, Pfeiltasten).
+            self.key_editor.focused =
+                zone == Zone::Lower && matches!(self.lower, LowerZone::Editor | LowerZone::Score);
         }
         // Eine ausgeblendete Zone gibt den Fokus an die Event-Anzeige zurück.
         if rects.get(self.focus).is_none() {

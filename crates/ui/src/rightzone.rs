@@ -508,6 +508,8 @@ fn plugins(w: &mut ProjectWindow, ui: &mut Ui) {
     });
     let kind = w.right.plugin_kind;
     let mut action: Option<PluginInfo> = None;
+    // Voreinstellung „Immer in eigenem Prozess“ (Kontextmenü eines Eintrags).
+    let mut own: Option<(String, bool)> = None;
     egui::ScrollArea::vertical().show(ui, |ui| {
         for (title, instruments) in [("Instrumente", true), ("Effekte", false)] {
             let shown = match kind {
@@ -529,11 +531,16 @@ fn plugins(w: &mut ProjectWindow, ui: &mut Ui) {
                         } else {
                             tr("Auf eine Spur ziehen oder erst eine Spur mit Mixer-Kanal wählen")
                         };
-                        let label = if p.vendor.is_empty() {
+                        let mut label = if p.vendor.is_empty() {
                             p.display_name()
                         } else {
                             format!("{}  ·  {}", p.display_name(), p.vendor)
                         };
+                        let forced = w.needs_own_process(&p.id);
+                        let mut on = w.own_process_default(&p.id);
+                        if on {
+                            label = format!("{label}  ·  {}", tr("eigener Prozess"));
+                        }
                         let r = ui
                             .selectable_label(false, label)
                             .on_hover_text(hint)
@@ -544,10 +551,38 @@ fn plugins(w: &mut ProjectWindow, ui: &mut Ui) {
                         if r.double_clicked() {
                             action = Some(p.clone());
                         }
+                        // Im Browser gibt es keine Plugin-Bridge.
+                        if cfg!(not(target_arch = "wasm32")) {
+                            r.context_menu(|ui| {
+                                let hint = if forced {
+                                    tr("Dieses Plugin stürzte beim Scan ab und läuft daher nur im eigenen Prozess")
+                                } else {
+                                    tr("Neue Inserts dieses Plugins laufen im eigenen Prozess: Ein Absturz lässt nur den Insert verstummen")
+                                };
+                                if ui
+                                    .add_enabled(
+                                        !forced,
+                                        egui::Checkbox::new(
+                                            &mut on,
+                                            tr("Immer in eigenem Prozess"),
+                                        ),
+                                    )
+                                    .on_hover_text(hint)
+                                    .on_disabled_hover_text(hint)
+                                    .changed()
+                                {
+                                    own = Some((p.id.clone(), on));
+                                    ui.close();
+                                }
+                            });
+                        }
                     }
                 });
         }
     });
+    if let Some((id, on)) = own {
+        w.set_own_process_default(&id, on);
+    }
     if let Some(p) = action {
         if p.is_instrument() {
             w.add_instrument_track(Some(p));

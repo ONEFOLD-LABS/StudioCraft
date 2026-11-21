@@ -1255,6 +1255,7 @@ mod tests {
             velocity: 90,
             start: 0,
             length: 960,
+            spelling: 0,
         }];
         ev.controllers = vec![CtrlPoint {
             kind: CtrlKind::Cc(1),
@@ -1269,6 +1270,7 @@ mod tests {
             velocity: 90,
             start: 0,
             length: 10,
+            spelling: 0,
         }];
         let song = Song::build(&p, &HashMap::new(), 48_000);
         assert_eq!(song.midi_ports, ["Gerät"]);

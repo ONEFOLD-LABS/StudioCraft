@@ -25,6 +25,8 @@ Jedes Release bringt `SHA256SUMS.txt` mit. Windows- und macOS-Pakete werden code
 | MIDI | `craft-midi` | offen |
 | Plugins | CLAP überall, VST3, AU nur macOS (eigene Host-Crates) | CLAP-Inserts und -Instrumente (`clap-sys` + `libloading` wie SoundCraft), Parameter-Regler, Plugin-Zustand im Projekt, Plugin-Fenster (schwebend überall, eingebettet unter X11; eingebettet unter Windows/macOS, VST3, AU offen) |
 | Fenster | winit mit X11 und Wayland unter Linux | über eframe (Features `wayland`, `x11`) |
+| Plugin-Fenster | CLAP: eigenes Wayland-Fenster, sonst eingebettet über XWayland; LV2/VST3: über XWayland | `crates/plugin-host/src/gui.rs` |
+| Plugin im eigenen Prozess | Gemeinsamer Speicher (Datei mit `mmap`, unter Windows File-Mapping) und zwei Verbindungen: Unix-Socket im Laufzeitordner (Linux, macOS, FreeBSD), unter Windows TCP auf der Loopback-Adresse mit geheimem Token | `crates/plugin-host/src/bridge/` |
 | Übersetzungen | `craft-i18n` | offen |
 | Schriften | `craft-fonts` | offen |
 | Updates | `craft-update` | offen |

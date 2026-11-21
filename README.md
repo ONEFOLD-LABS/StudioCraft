@@ -62,6 +62,7 @@ cargo run --release -p studiocraft -- --control 7850       # app with a control 
 | `crates/graph` | Signal-graph helpers |
 | `crates/ui` | Project window, mixer, editors, menus, theme, settings |
 | `crates/automation` | MCP server for AI agents: headless, or driving the running app (`--connect`) |
+| `crates/assistant` | AI assistant in the app (View → AI assistant): chat with a local or cloud model that edits the project (docs/assistant.md) |
 | `xtask` | `cargo xtask ci`, `cargo xtask version` |
 | `packaging/` | Package scripts per platform |
 

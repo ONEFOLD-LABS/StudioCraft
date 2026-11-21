@@ -14,6 +14,28 @@ pub enum PluginFormat {
     Au,
 }
 
+impl PluginFormat {
+    /// Kurzname für Kommandozeilen (Plugin-Bridge).
+    pub fn code(self) -> &'static str {
+        match self {
+            Self::Clap => "clap",
+            Self::Lv2 => "lv2",
+            Self::Vst3 => "vst3",
+            Self::Au => "au",
+        }
+    }
+
+    pub fn from_code(code: &str) -> Option<Self> {
+        match code {
+            "clap" => Some(Self::Clap),
+            "lv2" => Some(Self::Lv2),
+            "vst3" => Some(Self::Vst3),
+            "au" => Some(Self::Au),
+            _ => None,
+        }
+    }
+}
+
 /// Beschreibung eines gefundenen Plugins.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct PluginInfo {
@@ -111,4 +133,7 @@ pub struct ScanReport {
     pub errors: Vec<String>,
     /// Gesperrte Dateien (Absturz oder Zeitüberschreitung beim Scan) mit Grund.
     pub blocked: Vec<(PathBuf, String)>,
+    /// Ids der Plugins aus gesperrten Dateien, die der Scan vor dem Absturz vollständig
+    /// gemeldet hat: Sie stehen in `plugins`, laufen aber nur im eigenen Prozess.
+    pub own_process: Vec<String>,
 }
