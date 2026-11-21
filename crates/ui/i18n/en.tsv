@@ -894,3 +894,20 @@ Videofenster	Video Window
 Keine Videospur im Projekt	No video track in the project
 Kein Bild an dieser Stelle	No picture at this position
 Bild an der Cursor-Position	Picture at the cursor position
+Täglich nach Updates suchen	Check for updates daily
+Fragt einmal am Tag bei GitHub nach einer neuen Version; sonst wird nichts gesendet.	Asks GitHub once a day for a new version; nothing else is sent.
+Jetzt nach Updates suchen	Check for updates now
+StudioCraft {version} ist aktuell.	StudioCraft {version} is up to date.
+Update-Suche fehlgeschlagen: {e}	Update check failed: {e}
+Update nicht installiert: {e}	Update not installed: {e}
+Das Update ist installiert und gilt nach einem Neustart.	The update is installed and takes effect after a restart.
+Das Installationsprogramm läuft; beende StudioCraft, damit es die Dateien ersetzen kann.	The installer is running; quit StudioCraft so it can replace the files.
+Neu starten	Restart
+StudioCraft {version} ist verfügbar.	StudioCraft {version} is available.
+Lade und prüfe die Signatur …	Downloading and checking the signature …
+Installieren	Install
+Lädt die neue Version, prüft ihre Signatur und ersetzt erst dann diese.	Downloads the new version, checks its signature and only then replaces this one.
+Aktualisiere über die Paketverwaltung oder lade es von der Release-Seite.	Update through your package manager or download it from the release page.
+Release-Seite	Release page
+Später	Later
+Neustart nicht möglich: {e}	Cannot restart: {e}

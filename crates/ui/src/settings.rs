@@ -30,6 +30,11 @@ pub struct Settings {
     pub language: crate::i18n::Language,
     /// Plugin-Ids, deren neue Inserts im eigenen Prozess laufen (Plugin-Liste).
     pub own_process: Vec<String>,
+    /// Einmal am Tag nach einer neuen Version suchen (Hilfe → „Nach Updates suchen“; aus,
+    /// bis man es einschaltet).
+    pub update_check: bool,
+    /// Zeitpunkt der letzten Suche (Sekunden seit 1970).
+    pub last_update_check: u64,
 }
 
 /// Vorgaben der automatischen Sicherung.
@@ -92,6 +97,8 @@ impl Default for Settings {
             autosave_keep: AUTOSAVE_KEEP,
             language: crate::i18n::Language::System,
             own_process: Vec::new(),
+            update_check: false,
+            last_update_check: 0,
         }
     }
 }
@@ -111,6 +118,8 @@ struct File {
     language: String,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     own_process: Vec<String>,
+    update_check: bool,
+    last_update_check: u64,
 }
 
 #[derive(Default, serde::Serialize, serde::Deserialize)]
@@ -203,6 +212,8 @@ impl Settings {
             autosave_keep: self.autosave_keep,
             language: self.language.code().into(),
             own_process: self.own_process.clone(),
+            update_check: self.update_check,
+            last_update_check: self.last_update_check,
         }
     }
 
@@ -245,6 +256,8 @@ impl Settings {
                 ids.dedup();
                 ids
             },
+            update_check: f.update_check,
+            last_update_check: f.last_update_check,
         }
     }
 
@@ -297,6 +310,8 @@ mod tests {
             autosave_keep: 20,
             language: crate::i18n::Language::English,
             own_process: vec!["com.example.a".into(), "com.example.b".into()],
+            update_check: true,
+            last_update_check: 1_700_000_000,
         };
         s.save().unwrap();
         assert_eq!(Settings::load(), s);
@@ -309,6 +324,10 @@ mod tests {
             (AUTOSAVE_MINUTES, AUTOSAVE_KEEP)
         );
         assert!(!old.return_on_stop && old.midi_inputs);
+        assert!(
+            !old.update_check,
+            "the update check stays off until switched on"
+        );
         assert_eq!(old.audio, DeviceChoice::default());
         // Hostile values fall back.
         std::fs::write(

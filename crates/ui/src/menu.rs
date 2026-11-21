@@ -329,6 +329,11 @@ impl ProjectWindow {
                     ui.close();
                 }
                 crate::sponsor::menu_item(ui);
+                #[cfg(not(target_arch = "wasm32"))]
+                {
+                    ui.separator();
+                    self.update_menu(ui);
+                }
             });
         });
     }
@@ -385,6 +390,8 @@ impl ProjectWindow {
             Action::ExportMixdown => self.export_dialog(),
             Action::ExportMidi => self.export_midi_dialog(),
             Action::Quit => {
+                #[cfg(not(target_arch = "wasm32"))]
+                self.start_restart();
                 self.allow_close = true;
                 ui.ctx().send_viewport_cmd(ViewportCommand::Close);
                 Ok(())
