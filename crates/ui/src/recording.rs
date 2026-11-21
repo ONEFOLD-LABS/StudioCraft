@@ -314,7 +314,15 @@ impl ProjectWindow {
             let path = unique_name(&dir, "Aufnahme.wav");
             if let Some(r) = &self.recorder {
                 self.overruns_at_start = r.overruns.load(std::sync::atomic::Ordering::Relaxed);
-                r.start(&path);
+                // Lässt sich die Datei nicht anlegen: Fehler vor dem Start, keine stille
+                // Aufnahme ins Leere.
+                if let Err(e) = r.start(&path) {
+                    self.message = Some(crate::i18n::trf(
+                        "Aufnahme nicht möglich: {e}",
+                        &[("e", &e)],
+                    ));
+                    return;
+                }
                 self.audio_recording = true;
             }
         }
@@ -409,7 +417,10 @@ impl ProjectWindow {
             rec.overruns.load(std::sync::atomic::Ordering::Relaxed) - self.overruns_at_start;
         let result = rec.stop();
         let rate = self.sample_rate;
+        // Unterbrochene Aufnahme (z. B. Platte voll): der Teil bis dahin wird trotzdem ein Take.
+        let mut problem: Option<(String, u64)> = None;
         match result.and_then(|r| {
+            problem = r.problem.clone().map(|p| (p, r.frames));
             // Latenzausgleich: dorthin legen, wo das Gespielte zum Gehörten passt.
             let (start, skip) = match (played_at, r.first_captured_at) {
                 (Some(play), Some(cap)) => {
@@ -421,6 +432,14 @@ impl ProjectWindow {
             let (start, skip) = drop_count_in(start, skip, self.count_in_frames);
             self.place_recording(&r, start, skip)
         }) {
+            Ok(_) if problem.is_some() => {
+                let (e, frames) = problem.unwrap_or_default();
+                let seconds = format!("{:.1}", frames as f64 / f64::from(rate.max(1)));
+                self.message = Some(crate::i18n::trf(
+                    "Aufnahme unterbrochen ({e}): die ersten {s} s sind als Take übernommen",
+                    &[("e", &e), ("s", &seconds)],
+                ));
+            }
             Ok(n) if overruns > 0 => {
                 self.message = Some(crate::i18n::trf(
                     "{n} Take(s) aufgenommen, aber {overruns} Samples verloren (Puffer voll)",

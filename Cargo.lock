@@ -4012,6 +4012,7 @@ dependencies = [
  "js-sys",
  "minisign-verify",
  "rfd",
+ "rtrb",
  "rustls",
  "rustls-native-certs",
  "serde",

@@ -325,6 +325,11 @@ impl ProjectWindow {
 
     /// Führt einen Befehl aus; fragt vorher nach, wenn ungesicherte Änderungen verloren gingen.
     pub(crate) fn request(&mut self, ui: &Ui, action: Action) {
+        // Eine laufende Aufnahme zuerst beenden: der Take kommt ins Projekt, und die Rückfrage
+        // bietet an, ihn zu speichern, statt ihn mit dem Projekt zu verwerfen.
+        if action.discards_project() && self.recording {
+            self.stop_transport();
+        }
         if action.discards_project() && self.is_modified() {
             self.pending = Some(action);
         } else {
@@ -448,6 +453,10 @@ impl ProjectWindow {
     /// Rückfrage „Änderungen speichern?“ und Schließen des Fensters abfangen.
     pub(crate) fn confirm_dialog(&mut self, ui: &mut Ui) {
         let close = ui.ctx().input(|i| i.viewport().close_requested());
+        // Fenster schließen während der Aufnahme: Take übernehmen, dann wie sonst nachfragen.
+        if close && self.recording {
+            self.stop_transport();
+        }
         if close && self.is_modified() && !self.allow_close {
             ui.ctx().send_viewport_cmd(ViewportCommand::CancelClose);
             self.pending = Some(Action::Quit);

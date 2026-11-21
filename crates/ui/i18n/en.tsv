@@ -340,6 +340,7 @@ Audio	Audio
 Aufnahme im Vorzähler abgebrochen	Recording stopped during the count-in
 Aufnahme nicht möglich: {e}	Cannot record: {e}
 Aufnahme: {e}	Recording: {e}
+Aufnahme unterbrochen ({e}): die ersten {s} s sind als Take übernommen	Recording interrupted ({e}): the first {s} s were kept as a take
 Aus	Off
 Aus: festes Tempo aus der Transportleiste	Off: fixed tempo from the transport bar
 Auswahl	Select
