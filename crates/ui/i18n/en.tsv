@@ -689,10 +689,16 @@ Werkzeug Zeitkorrektur	Time Warp Tool
 Werkzeug Zoom	Zoom Tool
 Werkzeuge	Tools
 Zeile {line}: kein „=“	Line {line}: no “=”
-Zeile {line}: Makro im Makro ({step})	Line {line}: macro inside a macro ({step})
-Zeile {line}: mehr als {max} Befehle	Line {line}: more than {max} commands
+Zeile {line}	Line {line}
+{wo}: Makro im Makro ({step})	{wo}: macro inside a macro ({step})
+{wo}: mehr als {max} Befehle	{wo}: more than {max} commands
+{wo}: unbekannter Befehl {step}	{wo}: unknown command {step}
+unbekanntes Makro {slot}	unknown macro {slot}
+{cmd}: unbekannte Taste {key}	{cmd}: unknown key {key}
+{key}: nicht belegbar	{key}: cannot be assigned
+Tasten	Keys
+Ein Eintrag der Tastaturbefehle ist nicht verwendbar	An entry of the keyboard shortcuts cannot be used
 Zeile {line}: unbekannte Taste {key}	Line {line}: unknown key {key}
-Zeile {line}: unbekannter Befehl {step}	Line {line}: unknown command {step}
 Zeile {line}: unbekanntes Feld {field}	Line {line}: unknown field {field}
 Zeile {line}: unbekanntes Makro {slot}	Line {line}: unknown macro {slot}
 Zu Marker 1	Go to Marker 1

@@ -1,13 +1,14 @@
 //! Zentrale Befehlsliste mit frei belegbaren Tasten (Spec „Tastaturkonzept“, Issue #1).
 //!
 //! Jeder Befehl hat eine feste Kennung, einen Namen, eine Kategorie und seine Standardtasten.
-//! Eigene Belegungen liegen als Textdatei `keys.txt` im Einstellungsordner, eine Zeile je
-//! geändertem Befehl (`kennung = Strg+Umschalt+S, Strg+Y`; leer = keine Taste). Dasselbe Format
-//! dient als Preset zum Exportieren und Importieren, zusammen mit den Makros
-//! (`macro.1.name = …`, `macro.1.steps = edit.duplicate, nav.nudge_right`).
+//! Belegungen, Konflikte und eigene Änderungen führt das gemeinsame craft-keymap (Issue #63);
+//! StudioCraft behält die Befehlsliste, das Ausführen, die Makros und den Dialog. Eigene
+//! Belegungen liegen als `keys.json` im Einstellungsordner: geänderte Befehle im Format von
+//! craft-keymap (`{"command": "file.save", "keys": ["Cmd+Alt+S"]}`) und die Makros. Dasselbe
+//! Format dient als Preset; alte `keys.txt`-Dateien und Presets werden weiter gelesen.
 
 use crate::i18n::tr;
-use std::collections::HashMap;
+use craft_keymap as ck;
 
 use egui::{Key, KeyboardShortcut, Modifiers};
 
@@ -719,48 +720,147 @@ pub(crate) fn info(cmd: Cmd) -> Option<&'static CommandInfo> {
     COMMANDS.iter().find(|c| c.cmd == cmd)
 }
 
-/// Die aktuelle Belegung: Standard plus eigene Änderungen.
-#[derive(Debug, Clone, PartialEq, Default)]
+/// Größte Datei mit Tastaturbefehlen, die gelesen wird.
+const MAX_FILE: u64 = 1 << 20;
+
+/// Kennung eines Befehls für craft-keymap.
+fn command_ref(cmd: Cmd) -> Option<ck::CommandRef> {
+    info(cmd).map(|i| ck::CommandRef::from(i.id))
+}
+
+/// egui-Taste als Akkord von craft-keymap. Strg und Cmd sind wie im alten Dateiformat dieselbe
+/// Befehlstaste. `None` für Tasten ohne Gegenstück (Kopieren, Einfügen, …).
+fn chord(k: KeyboardShortcut) -> Option<ck::Chord> {
+    let m = k.modifiers;
+    let mods = ck::Mods {
+        cmd: m.command || m.ctrl || m.mac_cmd,
+        ctrl: false,
+        alt: m.alt,
+        shift: m.shift,
+    };
+    Some(ck::Chord {
+        mods,
+        key: ck::Key::from_egui(k.logical_key)?,
+    })
+}
+
+/// Akkord als egui-Taste; die Mac-Control-Taste zählt wie die Befehlstaste.
+fn shortcut(c: &ck::Chord) -> KeyboardShortcut {
+    let m = Modifiers {
+        alt: c.mods.alt,
+        shift: c.mods.shift,
+        command: c.mods.cmd || c.mods.ctrl,
+        ..Modifiers::NONE
+    };
+    KeyboardShortcut::new(m, c.key.to_egui())
+}
+
+fn binding(k: KeyboardShortcut) -> Option<ck::Binding> {
+    chord(k).map(ck::Binding::new)
+}
+
+/// Die Befehlsliste als Katalog für craft-keymap.
+fn catalog() -> Vec<ck::Bindable> {
+    COMMANDS
+        .iter()
+        .map(|c| {
+            let mut b = ck::Bindable::new(c.id, c.name, ck::Scope::app())
+                .with_path(vec![c.category.to_owned(), c.name.to_owned()]);
+            for d in c.defaults.iter().filter_map(|d| binding(*d)) {
+                b = b.with_default(d);
+            }
+            b
+        })
+        .collect()
+}
+
+/// Die aktuelle Belegung: Standard plus eigene Änderungen (craft-keymap) und die Makros.
+#[derive(Debug, Clone)]
 pub(crate) struct Keymap {
-    /// Nur Befehle, deren Tasten vom Standard abweichen.
-    overrides: HashMap<Cmd, Vec<KeyboardShortcut>>,
+    inner: ck::Keymap,
     /// Makroplätze 1–[`MACROS`] (Index 0 = Makro 1).
     pub macros: [Macro; MACROS],
 }
 
+impl Default for Keymap {
+    fn default() -> Self {
+        Self::with_overrides(ck::Overrides::default())
+    }
+}
+
+impl PartialEq for Keymap {
+    fn eq(&self, other: &Self) -> bool {
+        self.inner.overrides() == other.inner.overrides() && self.macros == other.macros
+    }
+}
+
+/// `keys.json`: geänderte Befehle im gemeinsamen Format von craft-keymap und die Makros.
+#[derive(serde::Serialize, serde::Deserialize, Default)]
+#[serde(default)]
+struct KeysFile {
+    format: u32,
+    #[serde(with = "craft_keymap::keymap::overrides_list")]
+    shortcuts: ck::Overrides,
+    macros: Vec<MacroEntry>,
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Default)]
+#[serde(default)]
+struct MacroEntry {
+    slot: u8,
+    name: String,
+    steps: Vec<String>,
+}
+
 impl Keymap {
-    /// Tasten eines Befehls.
-    pub fn bindings(&self, cmd: Cmd) -> Vec<KeyboardShortcut> {
-        match self.overrides.get(&cmd) {
-            Some(b) => b.clone(),
-            None => info(cmd).map(|i| i.defaults.to_vec()).unwrap_or_default(),
+    fn with_overrides(overrides: ck::Overrides) -> Self {
+        let inner = ck::Keymap::new(catalog(), ck::Scopes::new(), ck::Platform::current())
+            .with_overrides(overrides);
+        Self {
+            inner,
+            macros: Default::default(),
         }
     }
 
+    /// Tasten eines Befehls.
+    pub fn bindings(&self, cmd: Cmd) -> Vec<KeyboardShortcut> {
+        let Some(r) = command_ref(cmd) else {
+            return Vec::new();
+        };
+        self.inner
+            .bindings(&r)
+            .iter()
+            .filter(|b| !b.trigger.double)
+            .map(|b| shortcut(&b.trigger.chord))
+            .collect()
+    }
+
+    /// Setzt die Tasten eines Befehls; andere Befehle behalten ihre.
     pub fn set(&mut self, cmd: Cmd, bindings: Vec<KeyboardShortcut>) {
-        let default = info(cmd).map(|i| i.defaults.to_vec()).unwrap_or_default();
-        if bindings == default {
-            self.overrides.remove(&cmd);
+        let Some(r) = command_ref(cmd) else {
+            return;
+        };
+        if info(cmd).is_some_and(|i| i.defaults == bindings.as_slice()) {
+            self.inner.reset(&r);
+        } else if bindings.is_empty() {
+            self.inner.clear(&r);
         } else {
-            self.overrides.insert(cmd, bindings);
+            let list = bindings.into_iter().filter_map(binding).collect();
+            // Keep: ein Befehl verliert hier keine Taste an einen anderen.
+            let _ = self.inner.set_bindings(&r, list, ck::Policy::Keep);
         }
     }
 
     /// Weist `key` dem Befehl `cmd` zu und nimmt sie jedem anderen Befehl weg.
-    pub fn assign(&mut self, cmd: Cmd, key: KeyboardShortcut) {
-        for c in COMMANDS.iter().map(|c| c.cmd) {
-            if c != cmd {
-                let b = self.bindings(c);
-                if b.contains(&key) {
-                    self.set(c, b.into_iter().filter(|k| *k != key).collect());
-                }
-            }
-        }
-        let mut b = self.bindings(cmd);
-        if !b.contains(&key) {
-            b.push(key);
-        }
-        self.set(cmd, b);
+    pub fn assign(&mut self, cmd: Cmd, key: KeyboardShortcut) -> Result<(), String> {
+        let unknown = || crate::i18n::trf("{key}: nicht belegbar", &[("key", &display_key(key))]);
+        let (Some(r), Some(b)) = (command_ref(cmd), binding(key)) else {
+            return Err(unknown());
+        };
+        self.inner
+            .assign(&r, b, ck::Policy::Steal)
+            .map(|_| ())
+            .map_err(|_| unknown())
     }
 
     /// Der Befehl, der `key` schon hat (außer `except`).
@@ -780,7 +880,7 @@ impl Keymap {
     }
 
     pub fn is_default(&self) -> bool {
-        self.overrides.is_empty() && self.macros.iter().all(Macro::is_empty)
+        self.inner.overrides().is_empty() && self.macros.iter().all(Macro::is_empty)
     }
 
     /// Makro im Platz `slot` (1–[`MACROS`]).
@@ -802,32 +902,68 @@ impl Keymap {
         }
     }
 
-    /// Als Text (nur Abweichungen vom Standard, eine Zeile je Befehl).
-    pub fn to_text(&self) -> String {
-        let mut out = String::from("# StudioCraft Tastaturbefehle\n");
-        for c in COMMANDS {
-            if let Some(b) = self.overrides.get(&c.cmd) {
-                let keys: Vec<String> = b.iter().map(|k| format_key(*k)).collect();
-                out.push_str(&format!("{} = {}\n", c.id, keys.join(", ")));
-            }
-        }
-        for (i, m) in self.macros.iter().enumerate() {
-            let n = i + 1;
-            if !m.name.is_empty() {
-                // Zeilenumbrüche würden das Format brechen.
-                let name = m.name.replace(['\n', '\r'], " ");
-                out.push_str(&format!("macro.{n}.name = {}\n", name.trim()));
-            }
-            if !m.steps.is_empty() {
-                let steps: Vec<&str> = m
+    /// Was in den gespeicherten Belegungen nicht verwendbar war (die Einträge bleiben erhalten).
+    fn shortcut_problems(&self) -> Vec<String> {
+        self.inner
+            .problems()
+            .iter()
+            .map(|p| match p {
+                ck::Problem::UnknownCommand { key } => crate::i18n::trf(
+                    "{wo}: unbekannter Befehl {step}",
+                    &[("wo", &tr("Tasten")), ("step", key)],
+                ),
+                ck::Problem::BadBinding { key, text, .. } => crate::i18n::trf(
+                    "{cmd}: unbekannte Taste {key}",
+                    &[("cmd", key), ("key", text)],
+                ),
+                _ => tr("Ein Eintrag der Tastaturbefehle ist nicht verwendbar").to_owned(),
+            })
+            .collect()
+    }
+
+    /// Als JSON (`keys.json`, Presets): nur Abweichungen vom Standard und belegte Makros.
+    pub fn to_json(&self) -> Result<String, String> {
+        let macros = self
+            .macros
+            .iter()
+            .zip(1u8..)
+            .filter(|(m, _)| !m.is_empty())
+            .map(|(m, slot)| MacroEntry {
+                slot,
+                name: m.name.clone(),
+                steps: m
                     .steps
                     .iter()
-                    .filter_map(|c| info(*c).map(|i| i.id))
-                    .collect();
-                out.push_str(&format!("macro.{n}.steps = {}\n", steps.join(", ")));
-            }
+                    .filter_map(|c| info(*c).map(|i| i.id.to_owned()))
+                    .collect(),
+            })
+            .collect();
+        let file = KeysFile {
+            format: 1,
+            shortcuts: self.inner.overrides().clone(),
+            macros,
+        };
+        serde_json::to_string_pretty(&file).map_err(|e| e.to_string())
+    }
+
+    /// Liest `keys.json`; Unbrauchbares wird gemeldet, der Rest gilt.
+    pub fn from_json(text: &str) -> Result<(Self, Vec<String>), String> {
+        let file: KeysFile = serde_json::from_str(text).map_err(|e| e.to_string())?;
+        let mut map = Self::with_overrides(file.shortcuts);
+        let mut problems = map.shortcut_problems();
+        for e in file.macros.iter().take(MACROS * 4) {
+            let wo = crate::i18n::trf("Makro {slot}", &[("slot", &e.slot)]);
+            let Some(m) = map.macro_slot_mut(e.slot) else {
+                problems.push(crate::i18n::trf(
+                    "unbekanntes Makro {slot}",
+                    &[("slot", &e.slot)],
+                ));
+                continue;
+            };
+            m.name = e.name.chars().take(MAX_NAME).collect();
+            fill_steps(m, e.steps.iter().map(String::as_str), &wo, &mut problems);
         }
-        out
+        Ok((map, problems))
     }
 
     /// Liest eine Makrozeile (`macro.N.name` oder `macro.N.steps`); `None`, wenn es keine ist.
@@ -850,29 +986,9 @@ impl Keymap {
         match field {
             "name" => m.name = value.chars().take(MAX_NAME).collect(),
             "steps" => {
-                m.steps.clear();
-                for step in value.split(',').map(str::trim).filter(|s| !s.is_empty()) {
-                    match COMMANDS.iter().find(|c| c.id == step) {
-                        Some(c) if matches!(c.cmd, Cmd::Macro(_)) => {
-                            problems.push(crate::i18n::trf(
-                                "Zeile {line}: Makro im Makro ({step})",
-                                &[("line", &line), ("step", &step)],
-                            ));
-                        }
-                        Some(_) if m.steps.len() >= MAX_STEPS => {
-                            problems.push(crate::i18n::trf(
-                                "Zeile {line}: mehr als {max} Befehle",
-                                &[("line", &line), ("max", &MAX_STEPS)],
-                            ));
-                            break;
-                        }
-                        Some(c) => m.steps.push(c.cmd),
-                        None => problems.push(crate::i18n::trf(
-                            "Zeile {line}: unbekannter Befehl {step}",
-                            &[("line", &line), ("step", &step)],
-                        )),
-                    }
-                }
+                let wo = crate::i18n::trf("Zeile {line}", &[("line", &line)]);
+                let steps = value.split(',').map(str::trim).filter(|s| !s.is_empty());
+                fill_steps(m, steps, &wo, problems);
             }
             _ => problems.push(crate::i18n::trf(
                 "Zeile {line}: unbekanntes Feld {field}",
@@ -882,8 +998,10 @@ impl Keymap {
         Some(())
     }
 
-    /// Liest eine Belegung; unbekannte Zeilen und Tasten werden übersprungen und gemeldet.
-    pub fn from_text(text: &str) -> (Self, Vec<String>) {
+    /// Liest das alte Textformat (`keys.txt` bis 0.9, alte Presets): eine Zeile je geändertem
+    /// Befehl (`kennung = Strg+Umschalt+S, Strg+Y`) und `macro.N.*`-Zeilen. Unbekannte Zeilen und
+    /// Tasten werden übersprungen und gemeldet.
+    pub fn from_legacy_text(text: &str) -> (Self, Vec<String>) {
         let mut map = Self::default();
         let mut problems = Vec::new();
         for (n, line) in text.lines().enumerate() {
@@ -906,8 +1024,14 @@ impl Keymap {
             }
             let Some(c) = COMMANDS.iter().find(|c| c.id == id.trim()) else {
                 problems.push(crate::i18n::trf(
-                    "Zeile {line}: unbekannter Befehl {step}",
-                    &[("line", &(n + 1)), ("step", &id.trim())],
+                    "{wo}: unbekannter Befehl {step}",
+                    &[
+                        (
+                            "wo",
+                            &crate::i18n::trf("Zeile {line}", &[("line", &(n + 1))]),
+                        ),
+                        ("step", &id.trim()),
+                    ],
                 ));
                 continue;
             };
@@ -921,13 +1045,54 @@ impl Keymap {
                     )),
                 }
             }
-            map.overrides.insert(c.cmd, b);
+            map.set(c.cmd, b);
         }
         (map, problems)
     }
+
+    /// Liest ein Preset: JSON oder das alte Textformat.
+    pub fn from_preset(text: &str) -> (Self, Vec<String>) {
+        if text.trim_start().starts_with('{') {
+            Self::from_json(text).unwrap_or_else(|e| (Self::default(), vec![e]))
+        } else {
+            Self::from_legacy_text(text)
+        }
+    }
 }
 
-/// Taste als Text, unabhängig vom System: `Strg+Umschalt+S`.
+/// Füllt die Schritte eines Makros; Makros darin, unbekannte Befehle und zu viele Schritte
+/// werden gemeldet (`wo`: Zeile oder Makro).
+fn fill_steps<'a>(
+    m: &mut Macro,
+    steps: impl Iterator<Item = &'a str>,
+    wo: &str,
+    problems: &mut Vec<String>,
+) {
+    m.steps.clear();
+    for step in steps {
+        match COMMANDS.iter().find(|c| c.id == step) {
+            Some(c) if matches!(c.cmd, Cmd::Macro(_)) => problems.push(crate::i18n::trf(
+                "{wo}: Makro im Makro ({step})",
+                &[("wo", &wo), ("step", &step)],
+            )),
+            Some(_) if m.steps.len() >= MAX_STEPS => {
+                problems.push(crate::i18n::trf(
+                    "{wo}: mehr als {max} Befehle",
+                    &[("wo", &wo), ("max", &MAX_STEPS)],
+                ));
+                break;
+            }
+            Some(c) => m.steps.push(c.cmd),
+            None => problems.push(crate::i18n::trf(
+                "{wo}: unbekannter Befehl {step}",
+                &[("wo", &wo), ("step", &step)],
+            )),
+        }
+    }
+}
+
+/// Taste als Text des alten Dateiformats: `Strg+Umschalt+S` (nur noch für Tests).
+#[cfg(test)]
 pub(crate) fn format_key(k: KeyboardShortcut) -> String {
     let m = k.modifiers;
     let mut parts = Vec::new();
@@ -949,7 +1114,7 @@ pub(crate) fn format_key(k: KeyboardShortcut) -> String {
 }
 
 /// Taste zum Anzeigen, in der eingestellten Sprache (deutsch: Strg, Umschalt, Entf, Rücktaste,
-/// Leertaste, Pos1, Pfeiltasten). Dateien nutzen [`format_key`].
+/// Leertaste, Pos1, Pfeiltasten). Dateien nutzen die Schreibweise von craft-keymap.
 pub(crate) fn display_key(k: KeyboardShortcut) -> String {
     let m = k.modifiers;
     let mut parts: Vec<&str> = Vec::new();
@@ -981,6 +1146,7 @@ pub(crate) fn display_key(k: KeyboardShortcut) -> String {
     parts.join("+")
 }
 
+/// Liest eine Taste des alten Dateiformats.
 pub(crate) fn parse_key(text: &str) -> Option<KeyboardShortcut> {
     let mut m = Modifiers::NONE;
     let parts: Vec<&str> = text.split('+').map(str::trim).collect();
@@ -996,26 +1162,54 @@ pub(crate) fn parse_key(text: &str) -> Option<KeyboardShortcut> {
     Some(KeyboardShortcut::new(m, Key::from_name(key)?))
 }
 
-/// Datei der eigenen Belegung im Einstellungsordner.
-fn file() -> Option<std::path::PathBuf> {
-    crate::settings::config_dir().map(|d| d.join("keys.txt"))
+/// Liest höchstens [`MAX_FILE`] Bytes.
+fn read_capped(path: &std::path::Path) -> std::io::Result<String> {
+    use std::io::Read;
+    let mut text = String::new();
+    std::fs::File::open(path)?
+        .take(MAX_FILE)
+        .read_to_string(&mut text)?;
+    Ok(text)
 }
 
 impl Keymap {
-    /// Eigene Belegung laden; ohne Datei der Standard.
-    pub fn load() -> Self {
-        file()
-            .and_then(|f| std::fs::read_to_string(f).ok())
-            .map(|t| Self::from_text(&t).0)
-            .unwrap_or_default()
+    /// Eigene Belegung laden: `keys.json`; gibt es nur die alte `keys.txt`, wird sie einmal
+    /// gelesen und als `keys.json` gespeichert (die alte Datei bleibt liegen). Ohne Datei der
+    /// Standard. Zurück kommen auch die Probleme beim Lesen.
+    pub fn load() -> (Self, Vec<String>) {
+        let Some(dir) = crate::settings::config_dir() else {
+            return (Self::default(), Vec::new());
+        };
+        Self::load_from(&dir)
+    }
+
+    fn load_from(dir: &std::path::Path) -> (Self, Vec<String>) {
+        match read_capped(&dir.join("keys.json")) {
+            Ok(t) => return Self::from_json(&t).unwrap_or_else(|e| (Self::default(), vec![e])),
+            Err(e) if e.kind() != std::io::ErrorKind::NotFound => {
+                return (Self::default(), vec![e.to_string()]);
+            }
+            Err(_) => {}
+        }
+        let Ok(old) = read_capped(&dir.join("keys.txt")) else {
+            return (Self::default(), Vec::new());
+        };
+        let (map, mut problems) = Self::from_legacy_text(&old);
+        if let Err(e) = map.save_to(dir) {
+            problems.push(e);
+        }
+        (map, problems)
     }
 
     pub fn save(&self) -> Result<(), String> {
-        let f = file().ok_or(tr("kein Ort für Einstellungen"))?;
-        if let Some(d) = f.parent() {
-            std::fs::create_dir_all(d).map_err(|e| format!("{}: {e}", d.display()))?;
-        }
-        std::fs::write(&f, self.to_text()).map_err(|e| format!("{}: {e}", f.display()))
+        let dir = crate::settings::config_dir().ok_or(tr("kein Ort für Einstellungen"))?;
+        self.save_to(&dir)
+    }
+
+    fn save_to(&self, dir: &std::path::Path) -> Result<(), String> {
+        std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+        let f = dir.join("keys.json");
+        std::fs::write(&f, self.to_json()?).map_err(|e| format!("{}: {e}", f.display()))
     }
 }
 
@@ -1042,14 +1236,16 @@ pub(crate) struct KeyDialog {
     /// Gedrückte Taste gehört schon einem anderen Befehl: (für, Taste, bisheriger Besitzer).
     pub conflict: Option<(Cmd, KeyboardShortcut, Cmd)>,
     pub message: Option<String>,
-    /// Änderungen in `keys.txt` und `settings.json` speichern (nur in der App, nicht in Tests).
+    /// Änderungen in `keys.json` und `settings.json` speichern (nur in der App, nicht in Tests).
     pub persist: bool,
 }
 
 impl crate::ProjectWindow {
     /// Eigene Belegung aus dem Einstellungsordner laden; Änderungen werden ab jetzt gespeichert.
     pub fn load_keymap(&mut self) {
-        self.keymap = Keymap::load();
+        let (map, problems) = Keymap::load();
+        self.keymap = map;
+        self.key_dialog.message = (!problems.is_empty()).then(|| problems.join("; "));
         self.key_dialog.persist = true;
     }
 
@@ -1202,8 +1398,10 @@ impl crate::ProjectWindow {
                 } else if let Some(owner) = self.keymap.owner(k, cmd) {
                     self.key_dialog.conflict = Some((cmd, k, owner));
                 } else {
-                    self.keymap.assign(cmd, k);
-                    self.keymap_changed();
+                    match self.keymap.assign(cmd, k) {
+                        Ok(()) => self.keymap_changed(),
+                        Err(e) => self.key_dialog.message = Some(e),
+                    }
                 }
             }
         }
@@ -1225,22 +1423,26 @@ impl crate::ProjectWindow {
             {
                 if ui.button(tr("Exportieren …")).clicked()
                     && let Some(p) = rfd::FileDialog::new()
-                        .add_filter(tr("Tastaturbefehle"), &["txt"])
-                        .set_file_name("studiocraft-tasten.txt")
+                        .add_filter(tr("Tastaturbefehle"), &["json"])
+                        .set_file_name("studiocraft-tasten.json")
                         .save_file()
                 {
-                    self.key_dialog.message = std::fs::write(&p, self.keymap.to_text())
-                        .err()
-                        .map(|e| format!("{}: {e}", p.display()));
+                    self.key_dialog.message = self
+                        .keymap
+                        .to_json()
+                        .and_then(|t| {
+                            std::fs::write(&p, t).map_err(|e| format!("{}: {e}", p.display()))
+                        })
+                        .err();
                 }
                 if ui.button(tr("Importieren …")).clicked()
                     && let Some(p) = rfd::FileDialog::new()
-                        .add_filter(tr("Tastaturbefehle"), &["txt"])
+                        .add_filter(tr("Tastaturbefehle"), &["json", "txt"])
                         .pick_file()
                 {
-                    match std::fs::read_to_string(&p) {
+                    match read_capped(&p) {
                         Ok(t) => {
-                            let (map, problems) = Keymap::from_text(&t);
+                            let (map, problems) = Keymap::from_preset(&t);
                             self.keymap = map;
                             self.key_dialog.message =
                                 (!problems.is_empty()).then(|| problems.join("; "));
@@ -1272,9 +1474,11 @@ impl crate::ProjectWindow {
                     ),
                 );
                 if ui.button(tr("Ersetzen")).clicked() {
-                    self.keymap.assign(cmd, k);
                     self.key_dialog.conflict = None;
-                    self.keymap_changed();
+                    match self.keymap.assign(cmd, k) {
+                        Ok(()) => self.keymap_changed(),
+                        Err(e) => self.key_dialog.message = Some(e),
+                    }
                 }
                 if ui.button(tr("Abbrechen")).clicked() {
                     self.key_dialog.conflict = None;
@@ -1392,75 +1596,136 @@ mod tests {
     }
 
     #[test]
-    fn macros_round_trip_and_hostile_lines_are_reported() {
+    fn macros_round_trip_and_hostile_entries_are_reported() {
         let mut map = Keymap::default();
-        map.assign(Cmd::Macro(2), k(CA, Key::M));
+        map.assign(Cmd::Macro(2), k(CA, Key::M)).unwrap();
         let m = map.macro_slot_mut(2).unwrap();
         m.name = "Kopieren und schieben".into();
         m.steps = vec![Cmd::Edit(EditCommand::Duplicate), Cmd::ZoomIn];
         assert!(!map.is_default());
-        let text = map.to_text();
-        assert!(text.contains("macro.2 = Strg+Alt+M"), "{text}");
-        assert!(text.contains("macro.2.name = Kopieren und schieben"));
-        assert!(
-            text.contains("macro.2.steps = edit.duplicate, nav.zoom_in"),
+        let text = map.to_json().unwrap();
+        let v: serde_json::Value = serde_json::from_str(&text).unwrap();
+        assert_eq!(
+            v["shortcuts"],
+            serde_json::json!([{"command": "macro.2", "keys": ["Cmd+Alt+M"]}]),
             "{text}"
         );
-        let (back, problems) = Keymap::from_text(&text);
+        assert_eq!(v["macros"][0]["slot"], 2);
+        assert_eq!(v["macros"][0]["name"], "Kopieren und schieben");
+        assert_eq!(
+            v["macros"][0]["steps"],
+            serde_json::json!(["edit.duplicate", "nav.zoom_in"])
+        );
+        let (back, problems) = Keymap::from_json(&text).unwrap();
         assert!(problems.is_empty(), "{problems:?}");
         assert_eq!(back, map);
         assert_eq!(back.macro_label(2), "Makro 2: Kopieren und schieben");
         assert_eq!(back.macro_label(3), "Makro 3");
 
-        let many = vec!["nav.zoom_in"; MAX_STEPS + 5].join(", ");
-        let hostile = format!(
-            "macro.0.name = x\nmacro.200.steps = nav.zoom_in\nmacro.1.steps = macro.2, nope, {many}\nmacro.1.color = rot\nmacro.3.name = {}\n",
-            "a".repeat(500)
-        );
-        let (map, problems) = Keymap::from_text(&hostile);
+        let mut steps = vec!["macro.2", "nope"];
+        steps.extend(vec!["nav.zoom_in"; MAX_STEPS + 5]);
+        let hostile = serde_json::json!({
+            "shortcuts": [
+                {"command": "x.y", "keys": ["J"]},
+                {"command": "edit.snap", "keys": ["Hyper+J"]},
+            ],
+            "macros": [
+                {"slot": 0, "name": "x"},
+                {"slot": 200, "steps": ["nav.zoom_in"]},
+                {"slot": 1, "steps": steps},
+                {"slot": 3, "name": "a".repeat(500)},
+            ],
+        })
+        .to_string();
+        let (map, problems) = Keymap::from_json(&hostile).unwrap();
         assert_eq!(map.macro_slot(1).unwrap().steps.len(), MAX_STEPS);
         assert_eq!(map.macro_slot(3).unwrap().name.chars().count(), MAX_NAME);
         assert!(map.macro_slot(0).is_none() && map.macro_slot(9).is_none());
-        // Slot 0, slot 200, nested macro, unknown command, too many steps, unknown field.
-        assert_eq!(problems.len(), 6, "{problems:?}");
+        // Unknown command, bad key, slot 0, slot 200, nested macro, unknown step, too many.
+        assert_eq!(problems.len(), 7, "{problems:?}");
+        assert!(Keymap::from_json("{kaputt").is_err());
+        assert!(Keymap::from_json(r#"{"macros": 5}"#).is_err());
+    }
+
+    #[test]
+    fn old_text_files_still_load() {
+        let (map, problems) = Keymap::from_preset(
+            "# StudioCraft Tastaturbefehle\nedit.snap = \ntransport.metronome = C, J\n\
+             macro.2 = Strg+Alt+M\nmacro.2.name = Aufräumen\nmacro.2.steps = edit.duplicate\n",
+        );
+        assert!(problems.is_empty(), "{problems:?}");
+        assert_eq!(map.bindings(Cmd::Snap), []);
+        assert_eq!(map.bindings(Cmd::Metronome), [k(N, Key::C), k(N, Key::J)]);
+        assert_eq!(map.bindings(Cmd::Macro(2)), [k(CA, Key::M)]);
+        assert_eq!(map.macro_label(2), "Makro 2: Aufräumen");
+        let (_, problems) =
+            Keymap::from_legacy_text("x.y = J\nedit.snap = Hyper+J\nkaputt\nmacro.1.color = rot\n");
+        assert_eq!(problems.len(), 4, "{problems:?}");
+    }
+
+    #[test]
+    fn keys_txt_moves_to_keys_json_once() {
+        let dir = std::env::temp_dir().join(format!("sc-keys-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        assert_eq!(Keymap::load_from(&dir), (Keymap::default(), Vec::new()));
+        std::fs::write(dir.join("keys.txt"), "transport.metronome = J\n").unwrap();
+        let (map, problems) = Keymap::load_from(&dir);
+        assert!(problems.is_empty(), "{problems:?}");
+        assert_eq!(map.bindings(Cmd::Metronome), [k(N, Key::J)]);
+        assert!(dir.join("keys.json").exists(), "migrated");
+        assert!(dir.join("keys.txt").exists(), "the old file stays");
+        // From now on keys.json wins.
+        std::fs::write(dir.join("keys.txt"), "transport.metronome = K\n").unwrap();
+        assert_eq!(Keymap::load_from(&dir).0, map);
+        std::fs::write(dir.join("keys.json"), "nicht json").unwrap();
+        let (map, problems) = Keymap::load_from(&dir);
+        assert!(map.is_default() && problems.len() == 1);
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]
     fn keys_print_and_parse_back() {
+        let map = Keymap::default();
         for c in COMMANDS {
+            assert_eq!(map.bindings(c.cmd), c.defaults, "{}", c.id);
             for k in c.defaults {
                 assert_eq!(parse_key(&format_key(*k)), Some(*k), "{}", format_key(*k));
+                assert_eq!(chord(*k).map(|c| shortcut(&c)), Some(*k), "{}", c.id);
             }
         }
         assert_eq!(format_key(k(CS, Key::S)), "Strg+Umschalt+S");
         assert!(parse_key("Hyper+Q").is_none());
         assert_eq!(display_key(k(N, Key::Delete)), "Entf");
         assert_eq!(display_key(k(C, Key::ArrowLeft)), "Strg+Pfeil links");
+        // Mac Control counts as the command key, as in the old format.
+        assert_eq!(chord(k(Modifiers::CTRL, Key::S)), chord(k(C, Key::S)));
     }
 
     #[test]
     fn assigning_moves_a_key_and_files_keep_only_changes() {
         let mut map = Keymap::default();
         assert_eq!(map.owner(k(N, Key::J), Cmd::Metronome), Some(Cmd::Snap));
-        map.assign(Cmd::Metronome, k(N, Key::J));
+        map.assign(Cmd::Metronome, k(N, Key::J)).unwrap();
         assert_eq!(map.bindings(Cmd::Snap), []);
         assert_eq!(map.bindings(Cmd::Metronome), [k(N, Key::C), k(N, Key::J)]);
-        let text = map.to_text();
-        assert!(text.contains("edit.snap = \n") || text.contains("edit.snap ="));
-        assert!(text.contains("transport.metronome = C, J"));
+        let text = map.to_json().unwrap();
+        assert!(text.contains("\"transport.metronome\""), "{text}");
+        assert!(text.contains("\"edit.snap\""), "{text}");
         assert!(
             !text.contains("file.save"),
             "unchanged commands are not written"
         );
-        let (back, problems) = Keymap::from_text(&text);
+        let (back, problems) = Keymap::from_json(&text).unwrap();
         assert!(problems.is_empty(), "{problems:?}");
         assert_eq!(back, map);
         // Setting the default again drops the override.
         map.set(Cmd::Snap, vec![k(N, Key::J)]);
         map.set(Cmd::Metronome, vec![k(N, Key::C)]);
         assert!(map.is_default());
-        let (_, problems) = Keymap::from_text("x.y = J\nedit.snap = Hyper+J\nkaputt\n");
-        assert_eq!(problems.len(), 3);
+        // set keeps other commands' keys.
+        map.set(Cmd::Metronome, vec![k(N, Key::J)]);
+        assert_eq!(map.bindings(Cmd::Snap), [k(N, Key::J)]);
     }
     #[test]
     fn every_command_name_and_group_has_an_english_entry() {
