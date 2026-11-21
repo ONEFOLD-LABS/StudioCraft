@@ -806,3 +806,6 @@ In eigenem Prozess	In its own process
 Stürzt das Plugin ab oder hängt es, verstummt nur dieser Insert (ein Block mehr Latenz)	If the plugin crashes or hangs, only this insert falls silent (one block more latency)
 Den abgestürzten Prozess neu starten	Restart the crashed process
 Insert-Menü	Insert menu
+{n} Plugin(s) daraus laufen nur im eigenen Prozess	{n} plugin(s) from them run only in their own process
+Dieses Plugin stürzte beim Scan ab und läuft daher nur im eigenen Prozess	This plugin crashed during the scan, so it runs only in its own process
+eigener Prozess	own process

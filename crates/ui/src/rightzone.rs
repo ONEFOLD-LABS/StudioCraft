@@ -529,11 +529,14 @@ fn plugins(w: &mut ProjectWindow, ui: &mut Ui) {
                         } else {
                             tr("Auf eine Spur ziehen oder erst eine Spur mit Mixer-Kanal wählen")
                         };
-                        let label = if p.vendor.is_empty() {
+                        let mut label = if p.vendor.is_empty() {
                             p.display_name()
                         } else {
                             format!("{}  ·  {}", p.display_name(), p.vendor)
                         };
+                        if w.needs_own_process(&p.id) {
+                            label = format!("{label}  ·  {}", tr("eigener Prozess"));
+                        }
                         let r = ui
                             .selectable_label(false, label)
                             .on_hover_text(hint)

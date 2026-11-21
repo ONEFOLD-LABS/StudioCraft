@@ -7546,6 +7546,51 @@ mod tests {
         assert!(!w.plugins.crashed.contains(&(t, 0)));
     }
 
+    /// Ein Plugin, dessen Datei beim Scan abstürzte, läuft nur im eigenen Prozess: Der Schalter
+    /// steht fest an, das Laden geht über die Bridge, auch wenn der Slot es nicht verlangt.
+    #[cfg(unix)]
+    #[test]
+    fn a_plugin_blocked_by_the_scan_runs_only_in_its_own_process() {
+        let mut p = Project::default();
+        let t = p.add_track(TrackKind::Audio, "A");
+        p.tracks[t].inserts.push(studiocraft_project::InsertSlot {
+            plugin_id: "test.blocked".into(),
+            name: "Gesperrt".into(),
+            bypass: false,
+            params: Vec::new(),
+            state: None,
+            isolated: false,
+        });
+        let mut w = ProjectWindow::new(p, None, String::new());
+        w.selected_track = Some(t);
+        w.show_inspector = true;
+        w.plugins.list = Some(vec![studiocraft_plugin_host::PluginInfo {
+            id: "test.blocked".into(),
+            name: "Gesperrt".into(),
+            ..Default::default()
+        }]);
+        w.plugins.own_process.insert("test.blocked".into());
+        let slot = w.project.tracks[t].inserts[0].clone();
+        let e = w.instantiate(&slot).err().unwrap_or_default();
+        assert!(
+            e.contains("Eigener Prozess"),
+            "loads through the bridge: {e}"
+        );
+
+        // Auch mit gesetztem Schalter lässt er sich nicht ausschalten.
+        w.project.tracks[t].inserts[0].isolated = true;
+        let mut h = window_harness(w);
+        h.get_by_label("Insert-Menü").click();
+        h.run_steps(2);
+        let before = h.state().project.clone();
+        h.get_by_label("In eigenem Prozess").click();
+        h.run_steps(2);
+        assert!(
+            h.state().project == before,
+            "the switch is fixed: no change, no undo step"
+        );
+    }
+
     #[test]
     fn renders_inserts_in_inspector() {
         shot("inserts", |w| {
