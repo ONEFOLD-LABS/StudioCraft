@@ -117,10 +117,12 @@ impl Conn {
             if left.is_zero() {
                 return Err("the helper did not answer in time".into());
             }
-            self.reader
+            // macOS refuses a timeout once the helper has closed its end (EINVAL); the read
+            // then returns what is left and the end, so it cannot block.
+            let _ = self
+                .reader
                 .get_ref()
-                .set_read_timeout(Some(left.min(Duration::from_millis(200))))
-                .map_err(|e| e.to_string())?;
+                .set_read_timeout(Some(left.min(Duration::from_millis(200))));
             let mut line = String::new();
             match (&mut self.reader)
                 .take(MAX_LINE as u64)

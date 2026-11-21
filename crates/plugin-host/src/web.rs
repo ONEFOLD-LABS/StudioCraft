@@ -131,6 +131,11 @@ pub fn run_scan_child(_: &[String]) -> Option<i32> {
     None
 }
 
+/// Im Browser gibt es keine Hilfsprozesse (Plugin-Bridge).
+pub fn run_bridge_child(_: &[String]) -> Option<i32> {
+    None
+}
+
 pub fn lv2_available() -> bool {
     false
 }

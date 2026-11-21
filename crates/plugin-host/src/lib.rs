@@ -69,5 +69,5 @@ pub use scan::{default_paths, find_all, scan, scan_bundle};
 #[cfg(target_arch = "wasm32")]
 pub use web::{
     PluginHandle, PluginInstance, clear_scan_cache, default_paths, find_all, lv2_available,
-    run_scan_child, scan, scan_bundle, scan_isolated,
+    run_bridge_child, run_scan_child, scan, scan_bundle, scan_isolated,
 };
