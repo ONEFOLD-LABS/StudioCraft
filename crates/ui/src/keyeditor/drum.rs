@@ -209,6 +209,15 @@ pub(super) fn show(w: &mut ProjectWindow, ui: &mut Ui, part: EventId, track: usi
         }
     });
     let (resp, painter) = ui.allocate_painter(ui.available_size(), Sense::click_and_drag());
+    // Für Screenreader: was die gezeichnete Fläche zeigt.
+    let notes = w.project.event(part).map_or(0, |e| e.notes.len());
+    ui.ctx().accesskit_node_builder(resp.id, |n| {
+        n.set_role(egui::accesskit::Role::Canvas);
+        n.set_label(crate::i18n::trf(
+            "Drum-Raster: {map}, {n} Noten",
+            &[("map", &map.name), ("n", &notes)],
+        ));
+    });
     let r = resp.rect;
     let head = Rect::from_min_max(
         pos2(r.left(), r.top() + RULER_H),

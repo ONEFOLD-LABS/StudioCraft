@@ -362,6 +362,14 @@ pub(crate) fn show(w: &mut ProjectWindow, ui: &mut Ui) {
         }
     });
     let (resp, painter) = ui.allocate_painter(ui.available_size(), Sense::click_and_drag());
+    // Für Screenreader: was die gezeichnete Fläche zeigt.
+    ui.ctx().accesskit_node_builder(resp.id, |n| {
+        n.set_role(egui::accesskit::Role::Canvas);
+        n.set_label(crate::i18n::trf(
+            "Notenraster: {name}, {n} Noten",
+            &[("name", &ev.name), ("n", &ev.notes.len())],
+        ));
+    });
     let r = resp.rect;
     // Unten: Velocity-Spur, darunter die Controller-Spuren.
     let lanes_h = w.key_editor.lanes.len() as f32 * lanes::CTRL_H;

@@ -5937,6 +5937,50 @@ mod tests {
     }
 
     #[test]
+    fn drawn_areas_have_speaking_labels() {
+        // Arrangement and mixer: the event display describes itself, every channel strip is a
+        // button that selects its channel.
+        let mut w = ProjectWindow::new(Project::demo(4), None, String::new());
+        w.selected_track = None;
+        let mut h = window_harness(w);
+        assert!(
+            h.query_by_label_contains("Event-Anzeige: 4 Spuren")
+                .is_some(),
+            "event display without label"
+        );
+        h.get_by_label("Kanal Audio 2 wählen").click_accesskit();
+        h.run_steps(2);
+        assert_eq!(h.state().selected_track, Some(1));
+
+        // Key editor and drum editor: the note grid names its part and counts the notes.
+        let note = studiocraft_project::Note {
+            pitch: 60,
+            velocity: 96,
+            start: 0,
+            length: 960,
+            spelling: 0,
+        };
+        for drums in [false, true] {
+            let mut w = ProjectWindow::new(Project::default(), None, String::new());
+            let row = w.project.add_track(TrackKind::Instrument, "Synth");
+            if drums {
+                w.project.tracks[row].drum_map = Some(studiocraft_project::DrumMap::general_midi());
+            }
+            let part = w.project.create_event(row, 0, 4 * 3840).unwrap();
+            w.project.event_mut(part).unwrap().notes = vec![note];
+            w.open_key_editor(part);
+            let label = if drums {
+                "Drum-Raster: GM, 1 Noten".to_owned()
+            } else {
+                let name = w.project.event(part).map(|e| e.name.clone()).unwrap();
+                format!("Notenraster: {name}, 1 Noten")
+            };
+            let h = window_harness(w);
+            assert!(h.query_by_label(&label).is_some(), "{label} missing");
+        }
+    }
+
+    #[test]
     fn renders_key_editor_with_several_parts() {
         shot("key-editor-parts", |w| {
             let row = w
