@@ -15,7 +15,7 @@ studiocraft-automation.workspace = true
 studiocraft-assistant.workspace = true
 # The main window's handle for plugin windows (X11 id or Wayland), the version eframe uses.
 raw-window-handle = "0.6"
-eframe = { version = "0.37", default-features = false, features = ["default_fonts", "wgpu", "accesskit", "wayland", "x11"] }
+eframe = { version = "0.37", default-features = false, features = ["default_fonts", "wgpu", "accesskit", "wayland", "x11", "links"] }
 # Same winit as eframe: the app runs eframe on its own event loop to see where a key lies
 # (numeric keypad, Issue #3).
 winit = { version = "0.30", default-features = false }
