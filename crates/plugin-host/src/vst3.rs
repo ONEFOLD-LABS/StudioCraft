@@ -785,11 +785,9 @@ unsafe extern "system" fn handler_perform(this: Obj, id: u32, value: f64) -> Tre
     }
     // SAFETY: `this` ist unser ComponentHandler (lebt mit der Instanz).
     let h = unsafe { &*(this as *const ComponentHandler) };
-    if let Ok(mut e) = h.shared.edits.lock() {
-        // Nur den letzten Wert je Parameter behalten (Ziehen erzeugt viele Schritte).
-        e.retain(|&(i, _)| i != id);
-        e.push((id, value.clamp(0.0, 1.0)));
-    }
+    // Manche Plugins melden auch aus `process` (Audio-Thread): ohne Lock und ohne Allokation,
+    // nur der letzte Wert je Parameter (Ziehen erzeugt viele Schritte).
+    h.shared.edits.record(id, value.clamp(0.0, 1.0));
     RESULT_OK
 }
 
@@ -1446,8 +1444,8 @@ struct Shared {
     latency: AtomicU32,
     /// 1, wenn das Plugin eine geänderte Latenz gemeldet hat (noch abzuholen).
     latency_dirty: AtomicU32,
-    /// Bearbeitungen im Plugin-Fenster (Id, normierter Wert), noch abzuholen.
-    edits: Mutex<Vec<(u32, f64)>>,
+    /// Bearbeitungen im Plugin (Id, normierter Wert), noch abzuholen; aus jedem Thread.
+    edits: crate::edits::Edits,
 }
 
 /// Puffer eines Audio-Busses: Kanäle und die Zeigertabelle, auf die das Plugin schaut.
@@ -1991,19 +1989,21 @@ impl Vst3Handle {
     /// Bearbeitungen im Plugin-Fenster seit dem letzten Aufruf: (Id, Wert in Anzeige-Einheiten,
     /// also Stufen bei gestuften Parametern).
     pub fn take_param_changes(&self) -> Vec<(u32, f64)> {
-        let edits = self
-            .shared
+        self.shared
             .edits
-            .lock()
-            .map(|mut e| std::mem::take(&mut *e))
-            .unwrap_or_default();
-        edits
+            .take()
             .into_iter()
             .map(|(id, v)| match self.steps.get(&id) {
                 Some(&s) if s > 0 => (id, (v * f64::from(s)).round()),
                 _ => (id, v),
             })
             .collect()
+    }
+
+    /// Bearbeitungen, die verworfen wurden, weil mehr Parameter gemeldet wurden, als die
+    /// Tabelle fasst.
+    pub fn dropped_param_changes(&self) -> u64 {
+        self.shared.edits.dropped()
     }
 
     /// Parameterwert (Anzeige-Einheiten) an den Controller geben, damit ein offenes Fenster ihn
