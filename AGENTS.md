@@ -140,4 +140,10 @@ fallback; check `docs/plattformen.md`. No Tauri, Electron, webviews or handwritt
 - Commit messages in **English**, imperative subject (≤ 72 chars), body explaining what and why.
 - One logical change per commit; the tree passes `cargo xtask ci` at every commit.
 - Branch names: `feat/…`, `fix/…`, `docs/…`, `ci/…`.
+- **One feature at a time, linear history.** Start each feature on a new branch from the current
+  `origin/main`, open its pull request, and merge it with **Rebase and merge** as soon as CI is
+  green; then delete the branch and start the next feature from the new `main`. Do not stack pull
+  requests on top of each other and do not leave branches, worktrees or pull requests lying
+  around. If `main` moved, `git rebase origin/main` (never merge `main` into the branch);
+  `main` has no merge commits.
 - Fill in the pull request template: what changed, why, how it was tested, what could not be tested.
