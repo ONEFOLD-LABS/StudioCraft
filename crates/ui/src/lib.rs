@@ -3841,6 +3841,7 @@ mod tests {
                 bypass: false,
                 params: Vec::new(),
                 state: None,
+                isolated: false,
             });
         let range = w.render_range(0).unwrap();
         w.render_in_place(render::RenderSpec::track(0, range, false));
@@ -3880,6 +3881,7 @@ mod tests {
             bypass: false,
             params: Vec::new(),
             state: None,
+            isolated: false,
         };
         w.add_plugin_process(id, slot, (0, 24_000))
             .unwrap_or_else(|e| panic!("{}: {e}", fx.name));
@@ -3973,6 +3975,7 @@ mod tests {
                 bypass: false,
                 params: Vec::new(),
                 state: None,
+                isolated: false,
             });
         w.selected_track = Some(0);
         w
@@ -6772,6 +6775,7 @@ mod tests {
                 bypass: false,
                 params: Vec::new(),
                 state: None,
+                isolated: false,
             });
         let first = w.project.tracks[0].name.clone();
         w.show_lower = true;
@@ -6870,6 +6874,7 @@ mod tests {
                     bypass: true,
                     params: Vec::new(),
                     state: None,
+                    isolated: false,
                 });
         });
     }
@@ -7351,6 +7356,7 @@ mod tests {
                 bypass: false,
                 params: Vec::new(),
                 state: None,
+                isolated: false,
             });
         w.checkpoint(before);
         w.sync_inserts();
@@ -7399,6 +7405,7 @@ mod tests {
                 bypass: false,
                 params: Vec::new(),
                 state: None,
+                isolated: false,
             });
         w.sync_inserts();
         let h = w.plugins.sent[0].handles[0].as_ref().unwrap();
@@ -7418,6 +7425,7 @@ mod tests {
                 bypass: false,
                 params: Vec::new(),
                 state: None,
+                isolated: false,
             });
         w.sync_inserts();
         assert!(
@@ -7493,6 +7501,51 @@ mod tests {
         h.get_by_label("Kein Kanal");
     }
 
+    /// Insert-Menü „…“: „In eigenem Prozess“ ist ein Undo-Schritt; ohne Helferprogramm (Tests)
+    /// meldet das Laden das, statt abzustürzen; „Neu laden“ nach einem Absturz.
+    #[cfg(unix)]
+    #[test]
+    fn an_insert_can_be_switched_to_its_own_process() {
+        let mut p = Project::default();
+        let t = p.add_track(TrackKind::Audio, "A");
+        p.tracks[t].inserts.push(studiocraft_project::InsertSlot {
+            plugin_id: "test.missing".into(),
+            name: "Fehlt".into(),
+            bypass: false,
+            params: Vec::new(),
+            state: None,
+            isolated: false,
+        });
+        let mut w = ProjectWindow::new(p, None, String::new());
+        w.selected_track = Some(t);
+        w.show_inspector = true;
+        let mut h = window_harness(w);
+        h.get_by_label("Insert-Menü").click();
+        h.run_steps(2);
+        h.get_by_label("In eigenem Prozess").click();
+        h.run_steps(2);
+        assert!(h.state().project.tracks[t].inserts[0].isolated);
+        h.state_mut().undo();
+        assert!(!h.state().project.tracks[t].inserts[0].isolated);
+
+        // Isoliert, aber ohne Helferprogramm: eine Meldung, kein Absturz.
+        let w = h.state_mut();
+        w.project.tracks[t].inserts[0].isolated = true;
+        w.plugins.list = Some(vec![studiocraft_plugin_host::PluginInfo {
+            id: "test.missing".into(),
+            name: "Fehlt".into(),
+            ..Default::default()
+        }]);
+        let slot = w.project.tracks[t].inserts[0].clone();
+        let e = w.instantiate(&slot).err().unwrap_or_default();
+        assert!(e.contains("Eigener Prozess"), "{e}");
+
+        // Nach einem gemeldeten Absturz baut „Neu laden“ die Kette neu.
+        w.plugins.crashed.insert((t, 0));
+        w.reload_insert(t, 0);
+        assert!(!w.plugins.crashed.contains(&(t, 0)));
+    }
+
     #[test]
     fn renders_inserts_in_inspector() {
         shot("inserts", |w| {
@@ -7508,6 +7561,7 @@ mod tests {
                         bypass: false,
                         params: Vec::new(),
                         state: None,
+                        isolated: false,
                     });
                 w.sync_inserts();
             }
@@ -8009,6 +8063,7 @@ mod tests {
                 bypass: false,
                 params: Vec::new(),
                 state: None,
+                isolated: false,
             });
         w.sync_inserts();
         core.process(&mut [0.0; 512]);
@@ -8062,6 +8117,7 @@ mod tests {
             bypass: false,
             params: Vec::new(),
             state: None,
+            isolated: false,
         };
         w.add_audio_track();
         w.project.tracks[0].inserts.push(slot(&fx));
@@ -8183,6 +8239,7 @@ mod tests {
                         bypass: false,
                         params: Vec::new(),
                         state: None,
+                        isolated: false,
                     });
             }
             w.selected_track = Some(0);

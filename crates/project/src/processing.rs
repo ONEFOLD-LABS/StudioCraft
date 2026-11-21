@@ -254,6 +254,7 @@ mod tests {
             bypass: false,
             params: vec![(3, 0.25)],
             state: Some("AAEC".into()),
+            isolated: false,
         };
         let step = ClipProcess {
             plugin: Some(slot.clone()),

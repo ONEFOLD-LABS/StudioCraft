@@ -150,6 +150,20 @@ pub enum PluginHandle {
 }
 
 impl PluginHandle {
+    /// Läuft das Plugin in einem eigenen Prozess (Plugin-Bridge)?
+    pub fn is_isolated(&self) -> bool {
+        matches!(self, Self::Bridged(_))
+    }
+
+    /// Ist der Prozess eines isolierten Plugins abgestürzt oder hängt er? Der Insert schweigt
+    /// dann. Plugins im Programm selbst: immer `false`.
+    pub fn crashed(&self) -> bool {
+        match self {
+            Self::Bridged(h) => h.crashed(),
+            _ => false,
+        }
+    }
+
     pub fn save_state(&self) -> Option<Vec<u8>> {
         match self {
             Self::Clap(h) => h.save_state(),

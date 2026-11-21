@@ -790,6 +790,7 @@ mod tests {
             bypass: false,
             params: Vec::new(),
             state: None,
+            isolated: false,
         });
         let song = Song::build(&p, &HashMap::new(), 48_000);
         let track = song.tracks.iter().find(|tr| tr.slot == t).unwrap();
@@ -1177,6 +1178,7 @@ mod tests {
             bypass: false,
             params: Vec::new(),
             state: None,
+            isolated: false,
         });
         let id = p.create_event(t, 0, 3840).unwrap();
         p.event_mut(id).unwrap().notes = vec![studiocraft_project::Note {
@@ -1203,6 +1205,7 @@ mod tests {
             bypass: false,
             params: Vec::new(),
             state: None,
+            isolated: false,
         });
         let id = p.create_event(t, 0, 4 * TICKS_PER_QUARTER).unwrap();
         p.event_mut(id).unwrap().notes = [36u8, 38, 42]
@@ -1292,6 +1295,7 @@ mod tests {
             bypass: false,
             params: Vec::new(),
             state: None,
+            isolated: false,
         });
         let q = TICKS_PER_QUARTER;
         let id = p.create_event(t, 0, 2 * q).unwrap();
@@ -1386,6 +1390,7 @@ mod tests {
             bypass: false,
             params: Vec::new(),
             state: None,
+            isolated: false,
         });
         p.tracks[t].input_gain_db = 6.0;
         p.tracks[t].pre_hpf = Some(100.0);
