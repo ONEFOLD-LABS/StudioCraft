@@ -737,6 +737,11 @@ pub const COMP_FADE: u64 = TICKS_PER_QUARTER / 16;
 /// Kennung einer Spur.
 pub type TrackId = u32;
 
+/// Track ids stay below this, so the counter never overflows.
+const MAX_TRACK_ID: TrackId = 1 << 24;
+/// Event ids stay below this.
+const MAX_EVENT_ID: EventId = 1 << 48;
+
 /// Ein Send: ein Teil des Signals an einen FX-Kanal oder eine Gruppe.
 #[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct SendSlot {
@@ -1042,6 +1047,14 @@ impl Default for Project {
 impl Project {
     fn new_track_id(&mut self) -> TrackId {
         self.next_track_id = self.next_track_id.max(1);
+        if self.next_track_id >= MAX_TRACK_ID {
+            // The counter stands at its limit (a foreign file): the smallest unused id.
+            let used: std::collections::HashSet<TrackId> =
+                self.tracks.iter().map(|t| t.id).collect();
+            return (1..MAX_TRACK_ID)
+                .find(|id| !used.contains(id))
+                .unwrap_or(MAX_TRACK_ID - 1);
+        }
         let id = self.next_track_id;
         self.next_track_id += 1;
         id
@@ -1055,9 +1068,6 @@ impl Project {
     /// Eindeutige Ids unterhalb der Grenzen und Zähler dahinter, auch für fremde Dateien
     /// (doppelte Ids, Ids nahe dem Maximum). Gibt zurück, wie viele Ids neu vergeben wurden.
     pub(crate) fn fix_ids(&mut self) -> usize {
-        /// Grenzen, unter denen die Zähler nie überlaufen.
-        const MAX_TRACK_ID: TrackId = 1 << 24;
-        const MAX_EVENT_ID: EventId = 1 << 48;
         let mut fixed = 0;
         let mut seen = std::collections::HashSet::new();
         let ok = |id: TrackId| id != 0 && id < MAX_TRACK_ID;
@@ -1138,6 +1148,19 @@ impl Project {
     }
 
     pub fn next_event_id(&mut self) -> EventId {
+        self.next_id = self.next_id.max(1);
+        if self.next_id >= MAX_EVENT_ID {
+            // The counter stands at its limit (a foreign file): the smallest unused id.
+            let used: std::collections::HashSet<EventId> = self
+                .tracks
+                .iter()
+                .flat_map(|t| &t.events)
+                .map(|e| e.id)
+                .collect();
+            return (1..MAX_EVENT_ID)
+                .find(|id| !used.contains(id))
+                .unwrap_or(MAX_EVENT_ID - 1);
+        }
         let id = self.next_id;
         self.next_id += 1;
         id
@@ -3128,6 +3151,48 @@ mod tests {
         p.set_tempo_map(off);
         assert!(close(span(&p, a), audio));
         assert_eq!(p.tempo.events.len(), 3, "points are kept");
+    }
+
+    /// A file whose id counters sit at their limit: repaired ids stay valid and unique, and a
+    /// second sanitize changes nothing (found by tests/fuzz.rs).
+    #[test]
+    fn ids_at_the_counter_limit_are_repaired_once() {
+        let mut p = Project::default();
+        for name in ["a", "b", "c"] {
+            let t = p.add_track(TrackKind::Instrument, name);
+            let _ = p.create_event(t, 0, 960);
+            let _ = p.create_event(t, 960, 960);
+        }
+        p.tracks[0].id = 0;
+        p.tracks[1].id = 0;
+        p.tracks[0].events[0].id = 0;
+        p.tracks[1].events[0].id = 0;
+        p.next_track_id = TrackId::MAX;
+        p.next_id = EventId::MAX;
+        assert!(p.sanitize() > 0);
+        assert_eq!(p.sanitize(), 0, "stable");
+        let tracks: std::collections::HashSet<TrackId> = p.tracks.iter().map(|t| t.id).collect();
+        assert_eq!(tracks.len(), 3);
+        assert!(
+            tracks.iter().all(|&id| id != 0 && id < 1 << 24),
+            "{tracks:?}"
+        );
+        let events: std::collections::HashSet<EventId> = p
+            .tracks
+            .iter()
+            .flat_map(|t| &t.events)
+            .map(|e| e.id)
+            .collect();
+        assert_eq!(events.len(), 6);
+        assert!(
+            events.iter().all(|&id| id != 0 && id < 1 << 48),
+            "{events:?}"
+        );
+        // New tracks and events after loading get valid, unused ids too.
+        let t = p.add_track(TrackKind::Audio, "neu");
+        assert!(!tracks.contains(&p.tracks[t].id) && p.tracks[t].id < 1 << 24);
+        let e = p.create_event(0, 4000, 960).unwrap();
+        assert!(!events.contains(&e) && e < 1 << 48);
     }
 
     #[test]
