@@ -516,12 +516,14 @@ impl Active {
             .map_err(|e| format!("{}: {e}", next.display()))?;
         let old = std::mem::replace(&mut self.writer, writer);
         let old_path = std::mem::replace(&mut self.path, next);
-        old.finalize()
-            .map_err(|e| format!("{}: {e}", old_path.display()))?;
-        self.done.push(old_path);
         self.in_file = 0;
         self.last_flush = std::time::Instant::now();
-        Ok(())
+        // Auch wenn das Abschließen scheitert (Platte voll, typisch genau am Wechsel): Der Teil
+        // gehört zum Take und ist bis zum letzten Nachführen lesbar. Die Aufnahme endet dann
+        // mit der Warnung für Teil-Takes.
+        let finished = old.finalize();
+        self.done.push(old_path.clone());
+        finished.map_err(|e| format!("{}: {e}", old_path.display()))
     }
 }
 
@@ -998,6 +1000,40 @@ mod tests {
             .map(Result::unwrap)
             .collect();
         assert_eq!(got, want, "every sample once, in order");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// When the file before the switch cannot be finished (a full disk, typical right at the
+    /// 4 GiB switch), it still belongs to the take: it holds everything up to its last flush.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_part_that_cannot_be_finished_stays_in_the_take() {
+        let dir = std::env::temp_dir().join(format!("sc-rec-part-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let spec = hound::WavSpec {
+            channels: 2,
+            sample_rate: 48_000,
+            bits_per_sample: 32,
+            sample_format: hound::SampleFormat::Float,
+        };
+        // The current part: /dev/full takes the writes but fails every flush (no space).
+        let full = PathBuf::from("/dev/full");
+        let mut writer = hound::WavWriter::create(&full, spec).unwrap();
+        for i in 0..8 {
+            writer.write_sample(i as f32).unwrap();
+        }
+        let first = dir.join("Aufnahme.wav");
+        let mut a = Active {
+            done: vec![first.clone()],
+            ..Active::new(writer, full.clone())
+        };
+        let err = a.next_file(spec).unwrap_err();
+        assert!(err.contains("/dev/full"), "{err}");
+        assert_eq!(
+            a.done,
+            [first, full],
+            "the unfinished part stays in the take"
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
