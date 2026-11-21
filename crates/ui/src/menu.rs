@@ -365,6 +365,8 @@ impl ProjectWindow {
                 Ok(())
             }
             Action::ImportInterchange => {
+                // Im Browser wählt `browser.rs` die Datei.
+                #[cfg(not(target_arch = "wasm32"))]
                 self.import_interchange_dialog();
                 Ok(())
             }
