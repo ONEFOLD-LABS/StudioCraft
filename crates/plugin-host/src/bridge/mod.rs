@@ -12,8 +12,9 @@
 //!   of the reported latency.
 //! - **Offline** (export, rendering): [`BridgeInstance::set_offline`] makes every block a round
 //!   trip that waits for the helper, so no block is dropped and no latency is added.
-//! - **Main-thread calls** (state, parameters, latency) go as text lines over a second socket,
-//!   with a timeout.
+//! - **Main-thread calls** (state, parameters, latency, the editor window) go as text lines over
+//!   a second socket, with a timeout. The helper shows the plugin's window itself; the app
+//!   polls once per frame for its state, unsaved changes and knob moves.
 //! - **Crash detection**: the helper exits, a main-thread call times out, or the helper misses
 //!   its blocks for a second: the insert falls silent for good and [`BridgeHandle::crashed`]
 //!   says so; the app and the other tracks keep running.
@@ -54,9 +55,24 @@ struct Link {
     dead: AtomicBool,
     /// Frames of the last block (the extra latency of the bridge).
     last_frames: AtomicU32,
+    /// The plugin has a window of its own.
+    has_gui: bool,
+    /// Its window is open (as of the last poll).
+    gui_open: AtomicBool,
+    /// Unsaved changes and knob moves from the last poll, until taken.
+    polled: Mutex<Polled>,
     /// Main thread only: the control connection and the process.
     main: Mutex<MainSide>,
 }
+
+#[derive(Default)]
+struct Polled {
+    dirty: bool,
+    changes: Vec<(u32, f64)>,
+}
+
+/// Most knob moves kept between two takes.
+const MAX_CHANGES: usize = 4096;
 
 struct MainSide {
     control: Option<wire::Conn>,
@@ -191,7 +207,9 @@ impl BridgeInstance {
         };
         let mut control = wire::Conn::new(control)?;
         let hello = control.read_reply(&mut child, deadline);
-        let params = match hello.and_then(|lines| wire::parse_hello(&lines)) {
+        let hello =
+            hello.and_then(|lines| Ok((wire::parse_hello(&lines)?, wire::parse_gui(&lines))));
+        let (params, has_gui) = match hello {
             Ok(p) => p,
             Err(e) => {
                 let _ = child.kill();
@@ -204,6 +222,9 @@ impl BridgeInstance {
             shm,
             dead: AtomicBool::new(false),
             last_frames: AtomicU32::new(0),
+            has_gui,
+            gui_open: AtomicBool::new(false),
+            polled: Mutex::new(Polled::default()),
             main: Mutex::new(MainSide {
                 control: Some(control),
                 child,
@@ -463,15 +484,83 @@ impl BridgeHandle {
             .unwrap_or_default()
     }
 
+    /// Knob moves in the plugin's window since the last take (gathered by [`Self::idle`]).
     pub fn take_param_changes(&self) -> Vec<(u32, f64)> {
-        self.call("changes")
-            .map(|l| wire::parse_values(&l))
+        self.link
+            .polled
+            .lock()
+            .map(|mut p| std::mem::take(&mut p.changes))
             .unwrap_or_default()
     }
 
+    /// Unsaved changes reported since the last take (gathered by [`Self::idle`]).
     pub fn take_dirty(&self) -> bool {
-        self.call("dirty")
-            .is_some_and(|l| l.first().map(String::as_str) == Some("1"))
+        self.link
+            .polled
+            .lock()
+            .map(|mut p| std::mem::take(&mut p.dirty))
+            .unwrap_or(false)
+    }
+
+    pub fn has_gui(&self) -> bool {
+        self.link.has_gui
+    }
+
+    pub fn gui_open(&self) -> bool {
+        self.link.gui_open.load(Ordering::Relaxed)
+    }
+
+    /// Open the plugin's window; the helper shows it (above the app's main window where the
+    /// system allows).
+    pub fn open_gui(&self, title: &str) -> Result<(), String> {
+        let window = crate::gui::main_window_code();
+        let lines = self
+            .call(&format!("gui_open\t{window}\t{}", wire::escape(title)))
+            .ok_or("the plugin's process does not answer")?;
+        match lines.first().map(String::as_str) {
+            Some("OK") => {
+                self.link.gui_open.store(true, Ordering::Relaxed);
+                Ok(())
+            }
+            Some(l) => Err(wire::unescape(l.strip_prefix("FAIL\t").unwrap_or(l))),
+            None => Err("no answer from the plugin's process".into()),
+        }
+    }
+
+    pub fn close_gui(&self) {
+        let _ = self.call("gui_close");
+        self.link.gui_open.store(false, Ordering::Relaxed);
+    }
+
+    /// Once per frame: window state, unsaved changes and knob moves from the helper. `true`
+    /// while the window is open.
+    pub fn idle(&self) -> bool {
+        let Some(lines) = self.call("poll") else {
+            self.link.gui_open.store(false, Ordering::Relaxed);
+            return false;
+        };
+        let flag = |name: &str| lines.iter().any(|l| *l == format!("{name}\t1"));
+        let open = flag("OPEN");
+        self.link.gui_open.store(open, Ordering::Relaxed);
+        if let Ok(mut p) = self.link.polled.lock() {
+            p.dirty |= flag("DIRTY");
+            let room = MAX_CHANGES.saturating_sub(p.changes.len());
+            p.changes
+                .extend(wire::parse_values(&lines).into_iter().take(room));
+        }
+        open
+    }
+
+    /// A value the host changed, for the open window (no answer awaited).
+    pub fn set_ui_value(&self, id: u32, value: f64) {
+        if !value.is_finite() || self.crashed() {
+            return;
+        }
+        if let Ok(mut m) = self.link.main.lock()
+            && let Some(c) = m.control.as_mut()
+        {
+            let _ = c.send(&format!("ui\t{id}\t{value}"));
+        }
     }
 }
 
@@ -494,8 +583,23 @@ pub trait BridgedMain {
     fn param_values(&self) -> Vec<(u32, f64)>;
     fn take_param_changes(&self) -> Vec<(u32, f64)>;
     fn take_dirty(&self) -> bool;
-    /// Main-thread work of the plugin between requests (callbacks, timers).
-    fn idle(&mut self) {}
+    /// Main-thread work of the plugin between requests (callbacks, timers, its window);
+    /// `true` while its window is open.
+    fn idle(&mut self) -> bool {
+        false
+    }
+    fn has_gui(&self) -> bool {
+        false
+    }
+    fn gui_open(&self) -> bool {
+        false
+    }
+    fn open_gui(&mut self, _title: &str) -> Result<(), String> {
+        Err("this plugin has no window".into())
+    }
+    fn close_gui(&mut self) {}
+    /// A value the host changed, for the open window.
+    fn set_ui_value(&self, _id: u32, _value: f64) {}
 }
 
 /// A loaded plugin for a helper: its parameters and both halves.
