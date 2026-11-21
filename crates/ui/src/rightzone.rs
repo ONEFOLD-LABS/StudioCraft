@@ -431,8 +431,8 @@ fn media(w: &mut ProjectWindow, ui: &mut Ui) {
         return;
     }
     ui.weak(match target {
-        Some(_) => "Doppelklick: an den Cursor der gewählten Audio-Spur",
-        None => "Doppelklick: auf eine neue Audio-Spur",
+        Some(_) => tr("Doppelklick: an den Cursor der gewählten Audio-Spur"),
+        None => tr("Doppelklick: auf eine neue Audio-Spur"),
     });
     let mut insert: Option<ClipId> = None;
     egui::ScrollArea::vertical().show(ui, |ui| {

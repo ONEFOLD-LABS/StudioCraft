@@ -1517,8 +1517,8 @@ impl ProjectWindow {
         let any_read = tracks.iter().any(|t| channel(t.kind) && t.read);
         let any_write = tracks.iter().any(|t| channel(t.kind) && t.write);
         let switches = [
-            (tr("M"), any_mute, t.mute, "Mute aufheben (alle Spuren)"),
-            (tr("S"), any_solo, t.solo, "Solo aufheben (alle Spuren)"),
+            (tr("M"), any_mute, t.mute, tr("Mute aufheben (alle Spuren)")),
+            (tr("S"), any_solo, t.solo, tr("Solo aufheben (alle Spuren)")),
             (
                 tr("R"),
                 any_read,
@@ -4436,6 +4436,26 @@ mod tests {
             w.selected_track = Some(0);
         });
         i18n::set_language(i18n::Language::German);
+    }
+
+    #[test]
+    fn english_toolbar_and_pool_hints_are_translated() {
+        i18n::set_language(i18n::Language::English);
+        let mut w = ProjectWindow::new(Project::default(), None, String::new());
+        w.import_clip("Bass", None, tone_clip(2.0, 55.0), None)
+            .unwrap();
+        w.selected_track = Some(0);
+        w.show_right = true;
+        w.right.tab = rightzone::Tab::Media;
+        let h = window_harness(w);
+        let found = [
+            h.query_by_label("Clear mute (all tracks)").is_some(),
+            h.query_by_label("Clear solo (all tracks)").is_some(),
+            h.query_by_label("Double-click: to the cursor on the selected audio track")
+                .is_some(),
+        ];
+        i18n::set_language(i18n::Language::German);
+        assert_eq!(found, [true; 3]);
     }
 
     #[test]

@@ -920,3 +920,7 @@ Nicht einfügen	Don't Insert
 Die Dateien bleiben im Aufnahmeordner.	The files stay in the recordings folder.
 {name} (+{n} Folgedateien)	{name} (+{n} continuation files)
 {name} (+1 Folgedatei)	{name} (+1 continuation file)
+Mute aufheben (alle Spuren)	Clear mute (all tracks)
+Solo aufheben (alle Spuren)	Clear solo (all tracks)
+Doppelklick: an den Cursor der gewählten Audio-Spur	Double-click: to the cursor on the selected audio track
+Doppelklick: auf eine neue Audio-Spur	Double-click: onto a new audio track
