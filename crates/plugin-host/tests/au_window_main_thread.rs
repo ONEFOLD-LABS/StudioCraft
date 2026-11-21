@@ -2,6 +2,10 @@
 //! Fenster brauchen den Hauptthread, deshalb ein eigenes Testprogramm ohne Test-Harness.
 //! Auf anderen Systemen gibt es nichts zu prüfen.
 
+// A test program with its own main (harness = false): it may unwrap and panic like any test
+// (Cargo.toml lints, clippy.toml).
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+
 #[cfg(not(target_os = "macos"))]
 fn main() {
     println!("Audio-Unit-Fenster gibt es nur unter macOS – übersprungen");
