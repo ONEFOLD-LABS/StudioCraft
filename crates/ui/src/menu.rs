@@ -19,6 +19,7 @@ pub(crate) enum Action {
     SaveVersion,
     ImportAudio,
     ImportMidi,
+    ImportInterchange,
     ExportMixdown,
     ExportMidi,
     Quit,
@@ -43,6 +44,7 @@ impl ProjectWindow {
                     (tr("Neue Version speichern"), Action::SaveVersion),
                     (tr("Audiodatei importieren …"), Action::ImportAudio),
                     (tr("MIDI-Datei importieren …"), Action::ImportMidi),
+                    (tr("AAF/OMF importieren …"), Action::ImportInterchange),
                     (tr("Audio-Mixdown exportieren …"), Action::ExportMixdown),
                     (tr("MIDI-Datei exportieren …"), Action::ExportMidi),
                     (tr("Beenden"), Action::Quit),
@@ -360,6 +362,10 @@ impl ProjectWindow {
             }
             Action::ImportMidi => {
                 self.import_midi_dialog();
+                Ok(())
+            }
+            Action::ImportInterchange => {
+                self.import_interchange_dialog();
                 Ok(())
             }
             Action::ExportMixdown => self.export_dialog(),

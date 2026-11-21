@@ -68,16 +68,85 @@ impl AudioClip {
     /// Wie [`Self::load`], aber aus Bytes (etwa eine im Browser gewählte Datei); `ext` ist die
     /// Dateiendung als Hinweis auf das Format.
     pub fn from_bytes(bytes: &[u8], ext: Option<&str>) -> Result<Self, ClipError> {
+        Self::from_bytes_channel(bytes, ext, None)
+    }
+
+    /// Wie [`Self::from_bytes`]; mit `channel` nur dieser Kanal der Datei (0-basiert), auf
+    /// beide Seiten gelegt (etwa ein Kanal einer Mehrkanaldatei aus einem AAF-Projekt).
+    pub fn from_bytes_channel(
+        bytes: &[u8],
+        ext: Option<&str>,
+        channel: Option<usize>,
+    ) -> Result<Self, ClipError> {
         let ext = ext.map(str::to_ascii_lowercase);
         let (_, buf) = craft_audio::decode(bytes, ext.as_deref())
             .map_err(|e| ClipError::Decode(e.to_string()))?;
         let sample_rate = check_rate(buf.sample_rate)?;
-        let l = buf
-            .channels
-            .first()
-            .ok_or(ClipError::UnsupportedChannels(0))?;
-        let r = buf.channels.get(1).unwrap_or(l);
+        let n = buf.channels.len();
+        let (l, r) = match channel {
+            Some(c) => {
+                let one = buf
+                    .channels
+                    .get(c)
+                    .ok_or(ClipError::UnsupportedChannels(n as u16))?;
+                (one, one)
+            }
+            None => {
+                let l = buf
+                    .channels
+                    .first()
+                    .ok_or(ClipError::UnsupportedChannels(0))?;
+                (l, buf.channels.get(1).unwrap_or(l))
+            }
+        };
         let samples: Vec<f32> = l.iter().zip(r).flat_map(|(&a, &b)| [a, b]).collect();
+        Ok(Self {
+            sample_rate,
+            samples: samples.into(),
+        })
+    }
+
+    /// Rohes PCM (little-endian, verschachtelt; 8 Bit ohne Vorzeichen, 16/24/32 Bit mit), wie
+    /// es AAF und OMF einbetten. Mit `channel` nur dieser Kanal, sonst die ersten beiden.
+    pub fn from_pcm(
+        data: &[u8],
+        channels: u16,
+        bits: u16,
+        sample_rate: u32,
+        channel: Option<usize>,
+    ) -> Result<Self, ClipError> {
+        let sample_rate = check_rate(sample_rate)?;
+        if channels == 0 {
+            return Err(ClipError::UnsupportedChannels(0));
+        }
+        let width = match bits {
+            8 | 16 | 24 | 32 => usize::from(bits / 8),
+            b => return Err(ClipError::UnsupportedBits(b)),
+        };
+        let n = usize::from(channels);
+        let pick = |c: usize| c.min(n - 1);
+        let (l, r) = match channel {
+            Some(c) if c >= n => return Err(ClipError::UnsupportedChannels(channels)),
+            Some(c) => (c, c),
+            None => (0, pick(1)),
+        };
+        let sample = |s: &[u8]| -> f32 {
+            match s {
+                [a] => (f32::from(*a) - 128.0) / 128.0,
+                [a, b] => f32::from(i16::from_le_bytes([*a, *b])) / 32_768.0,
+                [a, b, c] => (i32::from_le_bytes([0, *a, *b, *c]) >> 8) as f32 / 8_388_608.0,
+                [a, b, c, d] => i32::from_le_bytes([*a, *b, *c, *d]) as f32 / 2_147_483_648.0,
+                _ => 0.0,
+            }
+        };
+        let frame = width * n;
+        let samples: Vec<f32> = data
+            .chunks_exact(frame)
+            .flat_map(|f| {
+                let at = |c: usize| sample(f.get(c * width..(c + 1) * width).unwrap_or(&[]));
+                [at(l), at(r)]
+            })
+            .collect();
         Ok(Self {
             sample_rate,
             samples: samples.into(),

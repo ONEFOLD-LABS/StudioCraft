@@ -165,6 +165,13 @@ pub(crate) const COMMANDS: &[CommandInfo] = &[
         []
     ),
     cmd!(
+        Cmd::File(Action::ImportInterchange),
+        "file.import_aaf",
+        "AAF/OMF importieren",
+        "Datei",
+        []
+    ),
+    cmd!(
         Cmd::File(Action::ExportMixdown),
         "file.export_mixdown",
         "Audio-Mixdown exportieren",
