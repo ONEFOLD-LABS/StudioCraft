@@ -1,0 +1,272 @@
+//! The plugin bridge (Issue #146) with fake plugins in real helper processes: this test
+//! program starts itself as the helper, as the app does.
+//!
+//! - `test:gain` multiplies by parameter 0 (state: the gain as 8 bytes; latency 7 frames)
+//! - `test:crash` aborts in its third block
+//! - `test:hang` stops answering in its third block
+//! - `test:fail` cannot be loaded
+
+use std::{
+    path::PathBuf,
+    sync::{
+        Arc,
+        atomic::{AtomicU64, Ordering},
+    },
+    time::{Duration, Instant},
+};
+
+use studiocraft_plugin_host::{
+    BRIDGE_FLAG, BridgeArgs, BridgeInstance, BridgedAudio, BridgedMain, Hosted, ParamInfo,
+    PluginFormat, PluginInfo, default_paths, run_bridge_child, run_bridge_child_with, scan,
+};
+
+struct Fake {
+    kind: String,
+    gain: Arc<AtomicU64>,
+    blocks: u32,
+}
+
+impl BridgedAudio for Fake {
+    fn process(&mut self, left: &mut [f32], right: &mut [f32]) {
+        self.blocks += 1;
+        if self.blocks == 3 {
+            match self.kind.as_str() {
+                "test:crash" => std::process::abort(),
+                "test:hang" => loop {
+                    std::thread::sleep(Duration::from_secs(60));
+                },
+                _ => {}
+            }
+        }
+        let g = f64::from_bits(self.gain.load(Ordering::Relaxed)) as f32;
+        for s in left.iter_mut().chain(right.iter_mut()) {
+            *s *= g;
+        }
+    }
+    fn set_param(&mut self, _id: u32, value: f64) {
+        self.gain.store(value.to_bits(), Ordering::Relaxed);
+    }
+    fn set_param_at(&mut self, _time: u32, _id: u32, value: f64) {
+        self.gain.store(value.to_bits(), Ordering::Relaxed);
+    }
+    fn midi(&mut self, _: u32, _: [u8; 3]) {}
+    fn note(&mut self, _: u32, _: u8, _: f32, _: bool) {}
+    fn stop_processing(&mut self) {}
+}
+
+struct FakeMain {
+    gain: Arc<AtomicU64>,
+}
+
+impl BridgedMain for FakeMain {
+    fn save_state(&self) -> Option<Vec<u8>> {
+        Some(self.gain.load(Ordering::Relaxed).to_le_bytes().to_vec())
+    }
+    fn load_state(&self, data: &[u8]) -> bool {
+        let Ok(b) = <[u8; 8]>::try_from(data) else {
+            return false;
+        };
+        self.gain.store(u64::from_le_bytes(b), Ordering::Relaxed);
+        true
+    }
+    fn latency(&self) -> u32 {
+        7
+    }
+    fn take_latency_changed(&self) -> bool {
+        false
+    }
+    fn param_values(&self) -> Vec<(u32, f64)> {
+        vec![(0, f64::from_bits(self.gain.load(Ordering::Relaxed)))]
+    }
+    fn take_param_changes(&self) -> Vec<(u32, f64)> {
+        Vec::new()
+    }
+    fn take_dirty(&self) -> bool {
+        false
+    }
+}
+
+fn load(a: &BridgeArgs) -> Result<Hosted, String> {
+    if a.info.id == "test:fail" {
+        return Err("this plugin does not load".into());
+    }
+    let gain = Arc::new(AtomicU64::new(1.0f64.to_bits()));
+    let param = ParamInfo {
+        id: 0,
+        name: "Gain".into(),
+        module: String::new(),
+        min: 0.0,
+        max: 4.0,
+        default: 1.0,
+        value: 1.0,
+        stepped: false,
+    };
+    Ok((
+        vec![param],
+        Box::new(Fake {
+            kind: a.info.id.clone(),
+            gain: Arc::clone(&gain),
+            blocks: 0,
+        }),
+        Box::new(FakeMain { gain }),
+    ))
+}
+
+fn info(id: &str) -> PluginInfo {
+    PluginInfo {
+        format: PluginFormat::Clap,
+        id: id.into(),
+        name: id.into(),
+        path: PathBuf::from("/nonexistent/fake.clap"),
+        ..PluginInfo::default()
+    }
+}
+
+fn exe() -> PathBuf {
+    std::env::current_exe().expect("own path")
+}
+
+/// One block of `value`, then time for the helper to finish it.
+fn block(b: &mut BridgeInstance, value: f32, frames: usize) -> (Vec<f32>, Vec<f32>) {
+    let (mut l, mut r) = (vec![value; frames], vec![value; frames]);
+    b.process(&mut l, &mut r);
+    std::thread::sleep(Duration::from_millis(40));
+    (l, r)
+}
+
+fn gain_round_trip() {
+    let mut b = BridgeInstance::spawn(&info("test:gain"), 48_000, 512, &exe()).expect("spawn");
+    let h = b.handle();
+    assert_eq!(b.params.len(), 1);
+    assert_eq!(b.params[0].name, "Gain");
+
+    // One block behind: the first block comes back silent, then each block's result follows.
+    let (l, _) = block(&mut b, 1.0, 64);
+    assert!(l.iter().all(|&s| s == 0.0), "first block silent");
+    b.set_param_at(0, 0, 2.0);
+    let (l, r) = block(&mut b, 0.5, 64);
+    assert!(
+        l.iter().all(|&s| s == 1.0) && r.iter().all(|&s| s == 1.0),
+        "{:?}",
+        &l[..4]
+    );
+    let (l, _) = block(&mut b, 0.0, 64);
+    assert!(l.iter().all(|&s| s == 1.0), "0.5 × 2: {:?}", &l[..4]);
+    assert_eq!(h.latency(), 7 + 64, "plugin latency plus one block");
+
+    // State through the bridge.
+    let state = h.save_state().expect("state");
+    assert_eq!(state, 2.0f64.to_le_bytes());
+    assert!(h.load_state(&0.25f64.to_le_bytes()));
+    assert_eq!(h.param_values(), [(0, 0.25)]);
+    assert!(!h.load_state(b"short"));
+    assert!(!h.crashed());
+    println!("gain: one block behind, parameters, state and latency through the bridge");
+}
+
+fn crash_silences_only_the_insert() {
+    let mut b = BridgeInstance::spawn(&info("test:crash"), 48_000, 512, &exe()).expect("spawn");
+    let h = b.handle();
+    for _ in 0..2 {
+        block(&mut b, 1.0, 64);
+    }
+    // Third block: the helper aborts.
+    block(&mut b, 1.0, 64);
+    let t = Instant::now();
+    while !h.crashed() && t.elapsed() < Duration::from_secs(5) {
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert!(h.crashed(), "the crash is noticed");
+    let (l, r) = block(&mut b, 1.0, 64);
+    assert!(
+        l.iter().chain(&r).all(|&s| s == 0.0),
+        "silence after the crash"
+    );
+    assert!(h.save_state().is_none());
+    println!("crash: noticed, the insert is silent, the host keeps running");
+}
+
+fn hang_counts_as_crash() {
+    // 1 kHz: one second is 1000 frames, so 16 late blocks of 64 frames.
+    let mut b = BridgeInstance::spawn(&info("test:hang"), 1_000, 64, &exe()).expect("spawn");
+    let h = b.handle();
+    let mut silent_and_quick = true;
+    for _ in 0..40 {
+        let t = Instant::now();
+        let (mut l, mut r) = (vec![1.0; 64], vec![1.0; 64]);
+        b.process(&mut l, &mut r);
+        // The callback never waits for the helper.
+        silent_and_quick &= t.elapsed() < Duration::from_millis(20);
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    assert!(silent_and_quick, "process never blocks");
+    assert!(h.crashed(), "a helper late for a second counts as crashed");
+    println!("hang: the callback did not wait; the insert went silent after one second");
+}
+
+fn load_error_is_reported() {
+    let e = BridgeInstance::spawn(&info("test:fail"), 48_000, 512, &exe())
+        .err()
+        .expect("error");
+    assert!(e.contains("does not load"), "{e}");
+    println!("fail: the helper's error reaches the app");
+}
+
+fn main() {
+    let args: Vec<String> = std::env::args().collect();
+    if args.get(1).map(String::as_str) == Some(BRIDGE_FLAG) {
+        // Fake plugins by id; anything else is a real plugin, loaded as the app does.
+        let fake = args.get(6).is_some_and(|id| id.starts_with("test:"));
+        let code = if fake {
+            run_bridge_child_with(&args, load)
+        } else {
+            run_bridge_child(&args)
+        };
+        std::process::exit(code.unwrap_or(1));
+    }
+    if !cfg!(unix) {
+        println!("plugin bridge: not available on this system yet");
+        return;
+    }
+    gain_round_trip();
+    crash_silences_only_the_insert();
+    hang_counts_as_crash();
+    load_error_is_reported();
+    if let Ok(name) = std::env::var("STUDIOCRAFT_BRIDGE_PLUGIN") {
+        real_plugin(&name);
+    }
+}
+
+/// An installed plugin through the bridge (`STUDIOCRAFT_BRIDGE_PLUGIN=<name as listed>`):
+/// signal goes through, state comes back, the helper is stopped with the instance.
+fn real_plugin(name: &str) {
+    let plugins = scan(&default_paths()).0;
+    let Some(info) = plugins.iter().find(|p| p.display_name() == name) else {
+        println!("{name}: not installed");
+        return;
+    };
+    let mut b = BridgeInstance::spawn(info, 48_000, 512, &exe()).expect("spawn");
+    let h = b.handle();
+    let mut energy = 0.0f32;
+    for i in 0..50 {
+        let mut l: Vec<f32> = (0..256)
+            .map(|n| ((i * 256 + n) as f32 * 0.05).sin() * 0.3)
+            .collect();
+        let mut r = l.clone();
+        b.process(&mut l, &mut r);
+        energy += l.iter().map(|s| s * s).sum::<f32>();
+        std::thread::sleep(Duration::from_millis(6));
+    }
+    assert!(energy > 0.0, "{name}: signal through the bridge");
+    let state = h.save_state();
+    println!(
+        "{name}: {} parameters, latency {}, state {} bytes, energy {energy:.1}",
+        b.params.len(),
+        h.latency(),
+        state.as_ref().map_or(0, Vec::len)
+    );
+    if let Some(s) = state {
+        assert!(h.load_state(&s), "{name}: state loads back");
+    }
+    assert!(!h.crashed());
+}

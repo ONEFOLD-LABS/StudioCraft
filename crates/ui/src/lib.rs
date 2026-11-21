@@ -94,6 +94,7 @@ pub struct LoadedClip {
 }
 
 pub use inserts::enable_isolated_plugin_scan;
+pub use studiocraft_plugin_host::run_bridge_child as run_plugin_bridge_child;
 pub use studiocraft_plugin_host::run_scan_child as run_plugin_scan_child;
 pub use tools::{Grid, Tool};
 
