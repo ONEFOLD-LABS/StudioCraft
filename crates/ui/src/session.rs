@@ -154,7 +154,9 @@ impl ProjectWindow {
         let Some(path) = self.project_path.clone() else {
             return Ok(false);
         };
-        self.save_as(&next_version(&path)).map(|()| true)
+        let next = next_version(&path)
+            .ok_or_else(|| crate::i18n::tr("Alle Versionsnummern bis 99 sind belegt").to_owned())?;
+        self.save_as(&next).map(|()| true)
     }
 
     /// Öffnet ein Projekt und lädt seine Audiodateien. Fehlende Dateien
@@ -282,8 +284,9 @@ pub(crate) fn unique_name(dir: &Path, name: &str) -> PathBuf {
         .unwrap_or(candidate)
 }
 
-/// `Song.studiocraft` → `Song-01.studiocraft`, `Song-01` → `Song-02` (erste freie Nummer).
-fn next_version(path: &Path) -> PathBuf {
+/// `Song.studiocraft` → `Song-01.studiocraft`, `Song-01` → `Song-02` (erste freie Nummer);
+/// `None`, wenn alle Nummern bis 99 belegt sind (nie eine vorhandene Version überschreiben).
+fn next_version(path: &Path) -> Option<PathBuf> {
     let dir = path.parent().unwrap_or(Path::new("."));
     let stem = path
         .file_stem()
@@ -297,7 +300,6 @@ fn next_version(path: &Path) -> PathBuf {
     (1..100)
         .map(|n| dir.join(format!("{base}-{n:02}.{EXTENSION}")))
         .find(|c| !c.exists())
-        .unwrap_or_else(|| dir.join(format!("{base}-99.{EXTENSION}")))
 }
 
 #[cfg(test)]
@@ -309,12 +311,12 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("sc-version-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let song = dir.join("Song.studiocraft");
-        assert_eq!(next_version(&song), dir.join("Song-01.studiocraft"));
+        assert_eq!(next_version(&song), Some(dir.join("Song-01.studiocraft")));
         std::fs::write(dir.join("Song-01.studiocraft"), "").unwrap();
-        assert_eq!(next_version(&song), dir.join("Song-02.studiocraft"));
+        assert_eq!(next_version(&song), Some(dir.join("Song-02.studiocraft")));
         assert_eq!(
             next_version(&dir.join("Song-01.studiocraft")),
-            dir.join("Song-02.studiocraft")
+            Some(dir.join("Song-02.studiocraft"))
         );
         assert_eq!(
             with_extension(Path::new("/x/Lied")),

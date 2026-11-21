@@ -8282,6 +8282,33 @@ mod tests {
         assert_eq!(w3.clips.len(), 2);
     }
 
+    /// „Neue Version speichern“ überschreibt nie eine vorhandene Version: Sind alle Nummern
+    /// bis 99 belegt, gibt es einen Fehler, und Version 99 bleibt, wie sie war.
+    #[test]
+    fn a_new_version_never_overwrites_an_old_one() {
+        let tmp = temp_dir("versions");
+        let mut w = ProjectWindow::new(Project::default(), None, String::new());
+        w.import_clip("Ton", None, tone_clip(0.5, 220.0), None)
+            .unwrap();
+        let file = tmp.join("Song.studiocraft");
+        w.save_as(&file).unwrap();
+        for n in 1..=99 {
+            std::fs::write(tmp.join(format!("Song-{n:02}.studiocraft")), "alt").unwrap();
+        }
+        assert!(w.save_new_version().is_err());
+        assert_eq!(
+            std::fs::read_to_string(tmp.join("Song-99.studiocraft")).unwrap(),
+            "alt"
+        );
+        // Mit einer freien Nummer geht es wie gewohnt.
+        std::fs::remove_file(tmp.join("Song-42.studiocraft")).unwrap();
+        assert_eq!(w.save_new_version(), Ok(true));
+        assert_ne!(
+            std::fs::read_to_string(tmp.join("Song-42.studiocraft")).unwrap(),
+            "alt"
+        );
+    }
+
     #[test]
     fn export_mixdown_covers_locator_range() {
         let tmp = temp_dir("export");
