@@ -1313,123 +1313,159 @@ impl ProjectWindow {
     /// Werkzeuge und Snap, rechts die Zonen-Schalter. Der Transport steht nur in der
     /// Transportleiste.
     fn toolbar(&mut self, ui: &mut Ui) {
+        // Breiten der drei Gruppen aus dem letzten Frame: links die globalen Zustände, in der
+        // Mitte Werkzeuge und Snap, rechts die Zonen-Schalter.
+        let ids = [
+            egui::Id::unique("werkzeugzeile-links"),
+            egui::Id::unique("werkzeugzeile-mitte"),
+            egui::Id::unique("werkzeugzeile-rechts"),
+        ];
+        let [left, middle, right] =
+            ids.map(|id| ui.ctx().data(|d| d.get_temp::<f32>(id)).unwrap_or(0.0));
+        let row = ui.available_rect_before_wrap();
+        let mut measured = [left, middle, right];
+        if toolbar_fits_one_row(row.width(), left, middle, right) {
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 2.0;
+                measured[0] = measure(ui, |ui| self.global_states(ui));
+                // Mitte: auf die Fensterbreite zentriert; ist kein Platz, folgt sie direkt links.
+                let x = (row.center().x - middle / 2.0).max(ui.cursor().left() + 12.0);
+                ui.add_space((x - ui.cursor().left()).max(0.0));
+                measured[1] = measure(ui, |ui| self.toolbar_tools(ui));
+                measured[2] = self.toolbar_zones(ui);
+            });
+        } else {
+            // Zu schmal für eine Zeile: Zustände und Zonen-Schalter oben, Werkzeuge darunter.
+            // So bleibt jeder Knopf im Fenster erreichbar.
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 2.0;
+                measured[0] = measure(ui, |ui| self.global_states(ui));
+                measured[2] = self.toolbar_zones(ui);
+            });
+            ui.horizontal_wrapped(|ui| {
+                ui.spacing_mut().item_spacing.x = 2.0;
+                measured[1] = measure(ui, |ui| self.toolbar_tools(ui));
+            });
+        }
+        for (id, (new, old)) in ids
+            .iter()
+            .zip(measured.into_iter().zip([left, middle, right]))
+        {
+            if (new - old).abs() > 0.5 {
+                ui.ctx().data_mut(|d| d.insert_temp(*id, new));
+                ui.ctx().request_repaint();
+            }
+        }
+    }
+
+    /// Werkzeuge, Snap und Quantisierung: die Mitte der Werkzeugzeile.
+    fn toolbar_tools(&mut self, ui: &mut Ui) {
         use icons::{Icon, icon_button};
         let t = theme::tokens(ui.ctx());
-        let row = ui.available_rect_before_wrap();
-        ui.horizontal(|ui| {
-            ui.spacing_mut().item_spacing.x = 2.0;
-            self.global_states(ui);
-
-            // Mitte: Werkzeuge und Snap, auf die Fensterbreite zentriert. Die Breite der
-            // Gruppe stammt aus dem letzten Frame; ist kein Platz, folgt sie direkt links.
-            let id = egui::Id::unique("werkzeugzeile-mitte");
-            let width = ui.ctx().data(|d| d.get_temp::<f32>(id)).unwrap_or(0.0);
-            let x = (row.center().x - width / 2.0).max(ui.cursor().left() + 12.0);
-            ui.add_space((x - ui.cursor().left()).max(0.0));
-            let start = ui.cursor().left();
-            for tool in Tool::TOOLBAR {
-                let mut hint = match tool.key_label() {
-                    "" => tool.label().to_owned(),
-                    key => format!("{} ({key})", tool.label()),
-                };
-                if !tool.implemented() {
-                    hint.push_str(" – im Prototyp noch ohne Funktion");
-                }
-                if tool == Tool::Draw && self.draw_shape != studiocraft_project::DrawShape::Free {
-                    hint.push_str(" – ");
-                    hint.push_str(tr(self.draw_shape.label()));
-                }
-                let r = icon_button(ui, tool.icon(), self.tool == tool, None, &hint);
-                if r.clicked() {
-                    self.tool = tool;
-                }
-                // Zeichnen: Form für Automations- und Controller-Lanes (Spec).
-                if tool == Tool::Draw {
-                    r.context_menu(|ui| {
-                        ui.label(tr("Form"));
-                        for shape in studiocraft_project::DrawShape::ALL {
-                            if ui
-                                .radio(self.draw_shape == shape, tr(shape.label()))
-                                .clicked()
-                            {
-                                self.draw_shape = shape;
-                                self.tool = Tool::Draw;
-                                ui.close();
-                            }
-                        }
-                    });
-                }
-                // Untermenü am Werkzeugknopf: Modus für das Ziehen am Rand (Spec).
-                if tool == Tool::Select {
-                    r.context_menu(|ui| {
-                        ui.label(tr("Ziehen am Rand"));
-                        for mode in tools::ResizeMode::ALL {
-                            if ui.radio(self.resize_mode == mode, mode.label()).clicked() {
-                                self.resize_mode = mode;
-                                self.tool = Tool::Select;
-                                ui.close();
-                            }
-                        }
-                    });
-                }
+        for tool in Tool::TOOLBAR {
+            let mut hint = match tool.key_label() {
+                "" => tool.label().to_owned(),
+                key => format!("{} ({key})", tool.label()),
+            };
+            if !tool.implemented() {
+                hint.push_str(" – im Prototyp noch ohne Funktion");
             }
-            icons::group_gap(ui);
+            if tool == Tool::Draw && self.draw_shape != studiocraft_project::DrawShape::Free {
+                hint.push_str(" – ");
+                hint.push_str(tr(self.draw_shape.label()));
+            }
+            let r = icon_button(ui, tool.icon(), self.tool == tool, None, &hint);
+            if r.clicked() {
+                self.tool = tool;
+            }
+            // Zeichnen: Form für Automations- und Controller-Lanes (Spec).
+            if tool == Tool::Draw {
+                r.context_menu(|ui| {
+                    ui.label(tr("Form"));
+                    for shape in studiocraft_project::DrawShape::ALL {
+                        if ui
+                            .radio(self.draw_shape == shape, tr(shape.label()))
+                            .clicked()
+                        {
+                            self.draw_shape = shape;
+                            self.tool = Tool::Draw;
+                            ui.close();
+                        }
+                    }
+                });
+            }
+            // Untermenü am Werkzeugknopf: Modus für das Ziehen am Rand (Spec).
+            if tool == Tool::Select {
+                r.context_menu(|ui| {
+                    ui.label(tr("Ziehen am Rand"));
+                    for mode in tools::ResizeMode::ALL {
+                        if ui.radio(self.resize_mode == mode, mode.label()).clicked() {
+                            self.resize_mode = mode;
+                            self.tool = Tool::Select;
+                            ui.close();
+                        }
+                    }
+                });
+            }
+        }
+        icons::group_gap(ui);
+        if icon_button(
+            ui,
+            Icon::Snap,
+            self.snap,
+            Some(t.accent),
+            tr("Snap an/aus (J)"),
+        )
+        .clicked()
+        {
+            self.snap = !self.snap;
+        }
+        snap::toolbar(self, ui);
+        quantize::toolbar(self, ui);
+    }
+
+    /// Zonen-Schalter, von rechts nach links an den Rand gelegt. Gibt ihre Breite zurück.
+    fn toolbar_zones(&mut self, ui: &mut Ui) -> f32 {
+        use icons::{Icon, icon_button};
+        let t = theme::tokens(ui.ctx());
+        let right_edge = ui.max_rect().right();
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             if icon_button(
                 ui,
-                Icon::Snap,
-                self.snap,
+                Icon::ZoneRight,
+                self.show_right,
                 Some(t.accent),
-                tr("Snap an/aus (J)"),
+                tr("Rechte Zone (Alt+R)"),
             )
             .clicked()
             {
-                self.snap = !self.snap;
+                self.show_right = !self.show_right;
             }
-            snap::toolbar(self, ui);
-            quantize::toolbar(self, ui);
-            let used = ui.cursor().left() - start;
-            if (used - width).abs() > 0.5 {
-                ui.ctx().data_mut(|d| d.insert_temp(id, used));
-                ui.ctx().request_repaint();
+            if icon_button(
+                ui,
+                Icon::ZoneLower,
+                self.show_lower,
+                Some(t.accent),
+                tr("Untere Zone"),
+            )
+            .clicked()
+            {
+                self.show_lower = !self.show_lower;
             }
-
-            // Rechts: Zonen-Schalter, von rechts nach links gelegt.
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if icon_button(
-                    ui,
-                    Icon::ZoneRight,
-                    self.show_right,
-                    Some(t.accent),
-                    tr("Rechte Zone (Alt+R)"),
-                )
-                .clicked()
-                {
-                    self.show_right = !self.show_right;
-                }
-                if icon_button(
-                    ui,
-                    Icon::ZoneLower,
-                    self.show_lower,
-                    Some(t.accent),
-                    tr("Untere Zone"),
-                )
-                .clicked()
-                {
-                    self.show_lower = !self.show_lower;
-                }
-                if icon_button(
-                    ui,
-                    Icon::ZoneLeft,
-                    self.show_inspector,
-                    Some(t.accent),
-                    tr("Linke Zone (Alt+L)"),
-                )
-                .clicked()
-                {
-                    self.show_inspector = !self.show_inspector;
-                }
-            });
-        });
+            if icon_button(
+                ui,
+                Icon::ZoneLeft,
+                self.show_inspector,
+                Some(t.accent),
+                tr("Linke Zone (Alt+L)"),
+            )
+            .clicked()
+            {
+                self.show_inspector = !self.show_inspector;
+            }
+            right_edge - ui.min_rect().left()
+        })
+        .inner
     }
 
     /// Globale Zustände links in der Werkzeugzeile: leuchten, sobald eine Spur gemutet, solo,
@@ -2018,6 +2054,20 @@ fn inspector_section(ui: &mut Ui, title: &str, open: bool, add: impl FnOnce(&mut
         .accesskit_node_builder(resp.id, |node| node.set_expanded(is_open));
     state.show_body_indented(&resp, ui, add);
     ui.add_space(2.0);
+}
+
+/// Passt die Werkzeugzeile mit diesen Gruppenbreiten in eine Zeile? Unbekannte Breiten (0, erster
+/// Frame) gelten als passend.
+fn toolbar_fits_one_row(width: f32, left: f32, middle: f32, right: f32) -> bool {
+    // Zwischen den Gruppen mindestens 12 px, dazu die Ränder des Panels.
+    left + 12.0 + middle + 12.0 + right + 16.0 <= width
+}
+
+/// Breite, die `add` in einer waagerechten Zeile belegt.
+fn measure(ui: &mut Ui, add: impl FnOnce(&mut Ui)) -> f32 {
+    let start = ui.cursor().left();
+    add(ui);
+    ui.cursor().left() - start
 }
 
 #[cfg(test)]
@@ -6515,6 +6565,44 @@ mod tests {
         let centre = (first.left() + last.right()) / 2.0;
         let middle = h.ctx.content_rect().center().x;
         assert!((centre - middle).abs() < 40.0, "{first:?} … {last:?}");
+    }
+
+    #[test]
+    fn toolbar_keeps_every_button_inside_narrow_windows() {
+        let labels = [
+            "Trennen (3)",
+            "Snap an/aus (J)",
+            "Quantisierungs-Panel",
+            "Linke Zone (Alt+L)",
+            "Untere Zone",
+            "Rechte Zone (Alt+R)",
+        ];
+        for width in [800.0, 1024.0, 1400.0] {
+            let (w, _) = one_event_window();
+            let mut h = Harness::builder()
+                .with_size(egui::vec2(width, 500.0))
+                .with_step_dt(1.0 / 60.0)
+                .build_ui_state(|ui, w: &mut ProjectWindow| w.ui(ui), w);
+            // Die Gruppenbreiten stammen aus dem letzten Frame.
+            h.run_steps(4);
+            let rects: Vec<egui::Rect> = labels.iter().map(|l| h.get_by_label(l).rect()).collect();
+            for (label, r) in labels.iter().zip(&rects) {
+                assert!(
+                    r.left() >= 0.0 && r.right() <= width,
+                    "{label} at {r:?} leaves a {width} px window"
+                );
+            }
+            for (i, a) in rects.iter().enumerate() {
+                for (j, b) in rects.iter().enumerate().skip(i + 1) {
+                    assert!(
+                        !a.shrink(1.0).intersects(b.shrink(1.0)),
+                        "{} and {} overlap in a {width} px window",
+                        labels[i],
+                        labels[j]
+                    );
+                }
+            }
+        }
     }
 
     /// Bildschirmposition für `ticks` und `rows` Zeilenhöhen unter dem Lineal.
