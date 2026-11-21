@@ -10,8 +10,13 @@
 //! Absturzerkennung: Beim Start legt die App `running.lock` im Einstellungsordner an und
 //! entfernt sie beim Beenden. Liegt sie beim Start noch da, bietet ein Dialog die neueste
 //! Sicherung an (ihr Pfad steht in `autosave/last.txt`).
+//!
+//! Aufnahmen nach der letzten Sicherung: Nach dem Öffnen der Sicherung bietet ein Dialog die
+//! WAV-Dateien im Aufnahmeordner des Projekts an, die jünger als die Sicherung sind und in
+//! keinem Clip vorkommen (Takes, die beim Absturz noch nicht gesichert waren). „Als Takes
+//! einfügen“ legt sie auf neue Spuren; gelöscht wird nichts.
 
-use crate::i18n::tr;
+use crate::i18n::{tr, trf};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -40,6 +45,9 @@ pub(crate) struct Autosave {
     pub dir: Option<PathBuf>,
     /// Nach einem Absturz: angebotene Sicherung und die ursprüngliche Projektdatei.
     pub recovery: Option<(PathBuf, Option<PathBuf>)>,
+    /// Nach dem Wiederherstellen: Aufnahmen, die nach der Sicherung entstanden und in keinem
+    /// Clip vorkommen; je Aufnahme die erste Datei und ihre Folgedateien in Reihenfolge.
+    pub orphans: Vec<Vec<PathBuf>>,
 }
 
 /// Nummer einer Sicherung `stem.backup-NN.studiocraft` von `stem`.
@@ -261,11 +269,163 @@ impl ProjectWindow {
         self.open(backup)?;
         self.project_path = original;
         self.saved = None;
+        let since = std::fs::metadata(backup)
+            .and_then(|m| m.modified())
+            .unwrap_or(std::time::UNIX_EPOCH);
+        self.autosave.orphans = self.orphaned_takes(since);
         self.message = Some(crate::i18n::trf(
             "Sicherung geöffnet: {path}",
             &[("path", &backup.display())],
         ));
         Ok(())
+    }
+
+    /// WAV-Dateien im Aufnahmeordner, jünger als `since` und in keinem Clip des Projekts, je
+    /// Aufnahme zusammengefasst: „Stamm.wav“ mit „Stamm-002.wav“, „Stamm-003.wav“ … (lange
+    /// Aufnahmen gehen in Folgedateien weiter). Eine Folgedatei ohne ihre erste steht allein.
+    pub(crate) fn orphaned_takes(&self, since: std::time::SystemTime) -> Vec<Vec<PathBuf>> {
+        let dir = self.recording_dir();
+        let used: std::collections::HashSet<PathBuf> = self
+            .project
+            .pool
+            .iter()
+            .filter_map(|c| c.path.as_deref())
+            .map(|p| {
+                let p = Path::new(p);
+                if p.is_absolute() {
+                    p.to_path_buf()
+                } else {
+                    dir.parent().unwrap_or(&dir).join(p)
+                }
+            })
+            .collect();
+        let mut out: Vec<PathBuf> = std::fs::read_dir(&dir)
+            .into_iter()
+            .flatten()
+            .flatten()
+            .map(|e| e.path())
+            .filter(|p| p.extension().is_some_and(|e| e.eq_ignore_ascii_case("wav")))
+            .filter(|p| !used.contains(p))
+            .filter(|p| {
+                std::fs::metadata(p)
+                    .and_then(|m| m.modified())
+                    .is_ok_and(|t| t > since)
+            })
+            .collect();
+        out.sort();
+        group_continuations(out)
+    }
+
+    /// Fügt die angebotenen Aufnahmen als Takes auf neuen Spuren ein (ein Undo-Schritt).
+    /// Mehrkanal-Rohdateien werden je Kanal in eine eigene Datei daneben aufgeteilt; die
+    /// Originale bleiben liegen.
+    pub(crate) fn insert_orphans(&mut self) {
+        let groups = std::mem::take(&mut self.autosave.orphans);
+        let before = self.project.clone();
+        let mut errors = Vec::new();
+        for files in groups {
+            if let Err(e) = self.insert_orphan(&files) {
+                errors.push(e);
+            }
+        }
+        self.checkpoint(before);
+        if !errors.is_empty() {
+            self.message = Some(errors.join("; "));
+        }
+    }
+
+    /// Eine Aufnahme (erste Datei und Folgedateien) als Take: je Datei ein Event, die Events
+    /// hintereinander auf einer neuen Spur. Mehrkanal-Rohdateien: eine Spur je Kanal, die
+    /// Kanäle in eigene Dateien daneben geschrieben.
+    fn insert_orphan(&mut self, files: &[PathBuf]) -> Result<(), String> {
+        let rec = studiocraft_engine::input::recording_from_files(files)?;
+        // Je Spur („Bahn“): die Dateien, die sie nacheinander spielt.
+        let lanes: Vec<Vec<PathBuf>> = if rec.channels <= 2 {
+            vec![files.to_vec()]
+        } else {
+            let mut lanes = vec![Vec::new(); usize::from(rec.channels)];
+            for path in files {
+                let stem = path
+                    .file_stem()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .into_owned();
+                let dir = path.parent().unwrap_or(Path::new("."));
+                for (c, lane) in lanes.iter_mut().enumerate() {
+                    let samples = studiocraft_engine::input::extract_file_channels(
+                        path,
+                        rec.channels,
+                        c as u16,
+                        false,
+                    )?;
+                    let file = crate::session::unique_name(
+                        dir,
+                        // Dateiname: bleibt unübersetzt (steht im Projekt).
+                        &format!("{stem} - Kanal {}.wav", c + 1),
+                    );
+                    studiocraft_engine::export::write_wav_f32(&samples, rec.sample_rate, &file)?;
+                    lane.push(file);
+                }
+            }
+            lanes
+        };
+        for lane in lanes {
+            let mut at: Option<(usize, u64)> = None;
+            for file in &lane {
+                let ev = self.import_audio(file, at)?;
+                at = self
+                    .project
+                    .find(ev)
+                    .and_then(|(t, _)| Some((t, self.project.event(ev)?.end())));
+            }
+        }
+        Ok(())
+    }
+
+    /// Nach dem Wiederherstellen: Aufnahmen anbieten, die die Sicherung nicht kennt.
+    pub(crate) fn orphans_dialog(&mut self, ctx: &egui::Context) {
+        if self.autosave.orphans.is_empty() || self.autosave.recovery.is_some() {
+            return;
+        }
+        let mut choice = None;
+        egui::Window::new(tr("Aufnahmen nach der Sicherung"))
+            .collapsible(false)
+            .resizable(false)
+            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+            .show(ctx, |ui| {
+                ui.label(tr(
+                    "Diese Aufnahmen sind jünger als die Sicherung und in keinem Take:",
+                ));
+                for files in &self.autosave.orphans {
+                    let name = files
+                        .first()
+                        .and_then(|p| p.file_name())
+                        .unwrap_or_default()
+                        .to_string_lossy();
+                    match files.len() {
+                        0 | 1 => ui.label(name),
+                        2 => ui.label(trf("{name} (+1 Folgedatei)", &[("name", &name)])),
+                        n => ui.label(trf(
+                            "{name} (+{n} Folgedateien)",
+                            &[("name", &name), ("n", &(n - 1))],
+                        )),
+                    };
+                }
+                ui.horizontal(|ui| {
+                    if ui.button(tr("Als Takes einfügen")).clicked() {
+                        choice = Some(true);
+                    }
+                    if ui.button(tr("Nicht einfügen")).clicked() {
+                        choice = Some(false);
+                    }
+                });
+                ui.weak(tr("Die Dateien bleiben im Aufnahmeordner."));
+            });
+        match choice {
+            Some(true) => self.insert_orphans(),
+            Some(false) => self.autosave.orphans.clear(),
+            None => {}
+        }
     }
 
     /// Untermenü Datei → „Automatisch sichern“: Abstand und Anzahl.
@@ -335,6 +495,35 @@ impl ProjectWindow {
             None => {}
         }
     }
+}
+
+/// Fasst Folgedateien mit ihrer ersten Datei zusammen: „Stamm-NNN.wav“ (drei Ziffern) gehört
+/// zu „Stamm.wav“, wenn die in `files` ist; in Nummernfolge. `files` ist sortiert.
+fn group_continuations(files: Vec<PathBuf>) -> Vec<Vec<PathBuf>> {
+    let part = |p: &Path| -> Option<(PathBuf, u32)> {
+        let stem = p.file_stem()?.to_str()?;
+        let (base, n) = stem.rsplit_once('-')?;
+        (n.len() == 3 && n.bytes().all(|b| b.is_ascii_digit()))
+            .then(|| (p.with_file_name(format!("{base}.wav")), n.parse().ok()))
+            .and_then(|(first, n)| Some((first, n?)))
+            .filter(|&(_, n)| n >= 2)
+    };
+    let set: std::collections::HashSet<&PathBuf> = files.iter().collect();
+    let mut groups: Vec<Vec<PathBuf>> = Vec::new();
+    let mut tails: Vec<(PathBuf, u32, PathBuf)> = Vec::new();
+    for f in &files {
+        match part(f).filter(|(first, _)| set.contains(first)) {
+            Some((first, n)) => tails.push((first, n, f.clone())),
+            None => groups.push(vec![f.clone()]),
+        }
+    }
+    tails.sort_by_key(|t| t.1);
+    for (first, _, f) in tails {
+        if let Some(g) = groups.iter_mut().find(|g| g.first() == Some(&first)) {
+            g.push(f);
+        }
+    }
+    groups
 }
 
 #[cfg(test)]
@@ -426,6 +615,96 @@ mod tests {
         w.tick_autosave(t0 + Duration::from_secs(600));
         w.finish_autosave();
         assert_eq!(backups(&auto, "Unbenannt").len(), 1);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Takes, die nach der letzten Sicherung aufgenommen wurden, werden nach dem
+    /// Wiederherstellen angeboten: nur jüngere, in keinem Clip; nichts wird gelöscht.
+    #[test]
+    fn takes_newer_than_the_backup_are_offered_after_a_crash() {
+        let dir = temp("orphans");
+        let config = dir.join("config");
+        let mut w = window_with_clip();
+        w.save_as(&dir.join("Song.studiocraft")).unwrap();
+        let audio = dir.join(file::AUDIO_DIR);
+        // Älter als die Sicherung: nicht angeboten.
+        let wav = |path: &Path, channels: u16, v: f32| {
+            let samples = vec![v; 4800 * usize::from(channels)];
+            studiocraft_engine::export::write_wav_f32_channels(&samples, channels, 48_000, path)
+                .unwrap();
+        };
+        wav(&audio.join("Alt.wav"), 2, 0.1);
+        std::thread::sleep(Duration::from_millis(30));
+        w.autosave = Autosave::new(5, 3);
+        w.begin_session_in(&config);
+        let before = w.project.clone();
+        w.project.tracks[0].name = "Geändert".into();
+        w.checkpoint(before);
+        w.autosave_now();
+        w.finish_autosave();
+        std::thread::sleep(Duration::from_millis(30));
+        // Nach der Sicherung: ein platzierter Take und eine Mehrkanal-Rohdatei (Absturz
+        // während der Aufnahme).
+        wav(&audio.join("Aufnahme - Mikro.wav"), 2, 0.2);
+        wav(&audio.join("Aufnahme (2).wav"), 3, 0.3);
+        // Lange Aufnahmen gehen in Folgedateien weiter („Stamm-002.wav“ …).
+        wav(&audio.join("Aufnahme (2)-002.wav"), 3, 0.3);
+        wav(&audio.join("Lang.wav"), 2, 0.4);
+        wav(&audio.join("Lang-003.wav"), 2, 0.4);
+        wav(&audio.join("Lang-002.wav"), 2, 0.4);
+        // Eine Folgedatei ohne ihre erste Datei steht allein.
+        wav(&audio.join("Allein-002.wav"), 2, 0.5);
+        std::fs::write(audio.join("Notiz.txt"), "keine Aufnahme").unwrap();
+
+        let mut next = ProjectWindow::new(Project::default(), None, String::new());
+        next.begin_session_in(&config);
+        let (backup, original) = next.autosave.recovery.clone().expect("recovery offered");
+        next.recover(&backup, original).unwrap();
+        let f = |name: &str| audio.join(name);
+        assert_eq!(
+            next.autosave.orphans,
+            [
+                vec![f("Allein-002.wav")],
+                vec![f("Aufnahme (2).wav"), f("Aufnahme (2)-002.wav")],
+                vec![f("Aufnahme - Mikro.wav")],
+                vec![f("Lang.wav"), f("Lang-002.wav"), f("Lang-003.wav")],
+            ],
+            "nur jüngere WAV-Dateien ohne Clip, je Aufnahme mit ihren Folgedateien"
+        );
+        let tracks = next.project.tracks.len();
+        let opened = next.message.clone();
+        next.insert_orphans();
+        assert!(next.autosave.orphans.is_empty());
+        // Drei Mono-Spuren aus der Rohdatei, je eine aus den Stereo-Aufnahmen.
+        assert_eq!(next.project.tracks.len(), tracks + 6, "{:?}", next.message);
+        // Eine lange Aufnahme ist ein Take: ihre Dateien als Events lückenlos hintereinander.
+        let lang = next
+            .project
+            .tracks
+            .iter()
+            .find(|t| t.name == "Lang")
+            .unwrap();
+        assert_eq!(lang.events.len(), 3);
+        for pair in lang.events.windows(2) {
+            assert_eq!(pair[1].start.0, pair[0].end(), "lückenlos");
+        }
+        let kanal = next
+            .project
+            .tracks
+            .iter()
+            .filter(|t| t.name.starts_with("Aufnahme (2) - Kanal"))
+            .map(|t| t.events.len())
+            .collect::<Vec<_>>();
+        assert_eq!(kanal, [2, 2, 2], "je Kanal beide Teile");
+        assert_eq!(next.message, opened, "keine Fehler beim Einfügen");
+        for f in ["Aufnahme (2).wav", "Aufnahme - Mikro.wav", "Alt.wav"] {
+            assert!(audio.join(f).exists(), "{f} bleibt liegen");
+        }
+        assert!(audio.join("Aufnahme (2) - Kanal 3.wav").exists());
+        // Ein Undo-Schritt nimmt alles wieder heraus.
+        next.undo();
+        assert_eq!(next.project.tracks.len(), tracks);
+        next.end_session();
         let _ = std::fs::remove_dir_all(&dir);
     }
 

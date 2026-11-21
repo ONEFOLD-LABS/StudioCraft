@@ -145,7 +145,7 @@ impl ProjectWindow {
 
     /// Ordner für neue Aufnahmen: `Audio/` im Projekt, sonst ein temporärer Ordner
     /// (beim Speichern wandern die Dateien ins Projekt).
-    fn recording_dir(&self) -> PathBuf {
+    pub(crate) fn recording_dir(&self) -> PathBuf {
         match self.project_path().and_then(Path::parent) {
             Some(dir) => dir.join(studiocraft_project::file::AUDIO_DIR),
             None => std::env::temp_dir().join("studiocraft-aufnahmen"),
