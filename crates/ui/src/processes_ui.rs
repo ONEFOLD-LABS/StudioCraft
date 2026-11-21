@@ -356,3 +356,136 @@ impl ProjectWindow {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use studiocraft_engine::AudioClip;
+    use studiocraft_project::{Project, processing::MAX_PROCESSES};
+
+    /// Ein Event mit einem Sinus (Spitze 0,25) über eine Sekunde.
+    fn window() -> (ProjectWindow, EventId, ClipId) {
+        let mut w = ProjectWindow::new(Project::default(), None, String::new());
+        let clip = AudioClip {
+            sample_rate: 48_000,
+            samples: (0..48_000)
+                .flat_map(|i| {
+                    let v = (i as f32 * 0.05).sin() * 0.25;
+                    [v, v]
+                })
+                .collect::<Vec<f32>>()
+                .into(),
+        };
+        let id = w.import_clip("Take", None, clip, None).unwrap();
+        let source = w.project.event(id).unwrap().clip.unwrap();
+        w.clear_history();
+        (w, id, source)
+    }
+
+    fn peak(w: &ProjectWindow, id: EventId) -> f32 {
+        let clip = w.project.event(id).unwrap().clip.unwrap();
+        w.clip(clip)
+            .unwrap()
+            .samples
+            .iter()
+            .fold(0.0, |m, v| m.max(v.abs()))
+    }
+
+    fn db(v: f32) -> f32 {
+        20.0 * v.log10()
+    }
+
+    /// Die Liste rechnet immer vom Original aus, in ihrer Reihenfolge, nur eingeschaltete
+    /// Einträge; das Original bleibt unverändert, jede Änderung ist ein Undo-Schritt.
+    #[test]
+    fn the_list_renders_from_the_original_in_order() {
+        let (mut w, id, source) = window();
+        let original = w.clip(source).unwrap().samples.clone();
+        let full = (0, 48_000);
+        w.add_process(id, ProcessKind::Gain { db: 6.0 }, full)
+            .unwrap();
+        w.add_process(id, ProcessKind::Normalize { target_db: -6.0 }, full)
+            .unwrap();
+        assert!(
+            (db(peak(&w, id)) + 6.0).abs() < 0.05,
+            "Gain, dann normalisiert"
+        );
+
+        // Umsortieren: erst normalisieren, dann +6 dB → Vollaussteuerung.
+        let (src, mut steps) = w.event_processes(id).unwrap();
+        assert_eq!(src, source);
+        steps.swap(0, 1);
+        w.rerender_processes(id, src, steps).unwrap();
+        assert!(db(peak(&w, id)).abs() < 0.05, "{}", db(peak(&w, id)));
+
+        // Ausgeschaltet zählt ein Eintrag nicht.
+        let (src, mut steps) = w.event_processes(id).unwrap();
+        steps[1].on = false;
+        w.rerender_processes(id, src, steps).unwrap();
+        assert!((db(peak(&w, id)) + 6.0).abs() < 0.05);
+        let (_, steps) = w.event_processes(id).unwrap();
+        assert_eq!(steps.len(), 2, "ausgeschaltet bleibt in der Liste");
+
+        // Alles entfernt: das Event spielt wieder den Original-Clip.
+        w.rerender_processes(id, source, Vec::new()).unwrap();
+        assert_eq!(w.project.event(id).unwrap().clip, Some(source));
+        assert_eq!(
+            w.clip(source).unwrap().samples,
+            original,
+            "Original unverändert"
+        );
+
+        // Jeder der fünf Schritte lässt sich zurücknehmen.
+        w.undo();
+        assert!((db(peak(&w, id)) + 6.0).abs() < 0.05);
+        let lengths: Vec<usize> = (0..4)
+            .map(|_| {
+                w.undo();
+                w.clip(w.project.event(id).unwrap().clip.unwrap())
+                    .unwrap()
+                    .samples
+                    .len()
+            })
+            .collect();
+        assert_eq!(lengths, [96_000; 4], "die Länge bleibt");
+        assert_eq!(w.project.event(id).unwrap().clip, Some(source));
+    }
+
+    /// Ein Plugin, das sich nicht laden lässt: Fehler, und am Projekt ändert sich nichts.
+    #[test]
+    fn a_plugin_that_fails_leaves_the_project_unchanged() {
+        let (mut w, id, _) = window();
+        w.add_process(id, ProcessKind::FadeIn, (0, 4800)).unwrap();
+        let before = w.project.clone();
+        let depth = w.history_depth();
+        let slot = InsertSlot {
+            plugin_id: "gibt-es-nicht".into(),
+            name: "Fehlt".into(),
+            bypass: false,
+            params: Vec::new(),
+            state: None,
+            isolated: false,
+        };
+        assert!(w.add_plugin_process(id, slot, (0, 24_000)).is_err());
+        assert_eq!(w.project, before);
+        assert_eq!(w.history_depth(), depth, "kein Undo-Schritt");
+        // Ein Plugin-Eintrag ohne Plugin wird übersprungen, statt zu scheitern.
+        let (src, mut steps) = w.event_processes(id).unwrap();
+        steps.push(ClipProcess::new(ProcessKind::Plugin, 0, 24_000));
+        w.rerender_processes(id, src, steps).unwrap();
+    }
+
+    #[test]
+    fn the_list_has_a_limit() {
+        let (mut w, id, _) = window();
+        for _ in 0..MAX_PROCESSES {
+            w.add_process(id, ProcessKind::InvertPhase, (0, 10))
+                .unwrap();
+        }
+        assert!(
+            w.add_process(id, ProcessKind::InvertPhase, (0, 10))
+                .is_err()
+        );
+        assert_eq!(w.event_processes(id).unwrap().1.len(), MAX_PROCESSES);
+    }
+}
