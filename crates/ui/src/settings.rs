@@ -28,6 +28,8 @@ pub struct Settings {
     pub autosave_keep: u32,
     /// Sprache der Oberfläche.
     pub language: crate::i18n::Language,
+    /// Plugin-Ids, deren neue Inserts im eigenen Prozess laufen (Plugin-Liste).
+    pub own_process: Vec<String>,
 }
 
 /// Vorgaben der automatischen Sicherung.
@@ -89,6 +91,7 @@ impl Default for Settings {
             autosave_minutes: AUTOSAVE_MINUTES,
             autosave_keep: AUTOSAVE_KEEP,
             language: crate::i18n::Language::System,
+            own_process: Vec::new(),
         }
     }
 }
@@ -106,6 +109,8 @@ struct File {
     autosave_minutes: u32,
     autosave_keep: u32,
     language: String,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    own_process: Vec<String>,
 }
 
 #[derive(Default, serde::Serialize, serde::Deserialize)]
@@ -131,6 +136,9 @@ impl Default for File {
 
 /// Längste Zeichenkette aus der Datei (Gerätenamen); fremde Eingabe.
 const MAX_TEXT: usize = 256;
+/// Höchstzahl gemerkter Plugin-Ids und deren Länge.
+const MAX_PLUGINS: usize = 10_000;
+const MAX_ID: usize = 1024;
 
 fn text(v: Option<String>) -> Option<String> {
     v.map(|s| s.chars().take(MAX_TEXT).collect::<String>())
@@ -194,6 +202,7 @@ impl Settings {
             autosave_minutes: self.autosave_minutes,
             autosave_keep: self.autosave_keep,
             language: self.language.code().into(),
+            own_process: self.own_process.clone(),
         }
     }
 
@@ -225,6 +234,17 @@ impl Settings {
             autosave_minutes: f.autosave_minutes.min(120),
             autosave_keep: f.autosave_keep.clamp(1, 100),
             language: crate::i18n::Language::from_code(&f.language),
+            own_process: {
+                let mut ids: Vec<String> = f
+                    .own_process
+                    .into_iter()
+                    .filter(|id| !id.is_empty() && id.len() <= MAX_ID)
+                    .take(MAX_PLUGINS)
+                    .collect();
+                ids.sort();
+                ids.dedup();
+                ids
+            },
         }
     }
 
@@ -276,6 +296,7 @@ mod tests {
             autosave_minutes: 2,
             autosave_keep: 20,
             language: crate::i18n::Language::English,
+            own_process: vec!["com.example.a".into(), "com.example.b".into()],
         };
         s.save().unwrap();
         assert_eq!(Settings::load(), s);

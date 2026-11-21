@@ -191,14 +191,7 @@ impl ProjectWindow {
                     .show(ui, |ui| {
                         for p in list {
                             if ui.button(p.display_name()).clicked() {
-                                chosen = Some(InsertSlot {
-                                    plugin_id: p.id.clone(),
-                                    name: p.name.clone(),
-                                    bypass: false,
-                                    params: Vec::new(),
-                                    state: None,
-                                    isolated: false,
-                                });
+                                chosen = Some(self.new_slot(&p));
                                 ui.close();
                             }
                         }
