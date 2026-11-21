@@ -3264,7 +3264,7 @@ mod tests {
         assert_eq!(m.steps, [Cmd::ZoomIn, Cmd::Snap]);
         // Bind F9 (a capture in the dialog is covered by the test below).
         let f9 = egui::KeyboardShortcut::new(egui::Modifiers::NONE, Key::F9);
-        h.state_mut().keymap.assign(Cmd::Macro(1), f9);
+        h.state_mut().keymap.assign(Cmd::Macro(1), f9).unwrap();
         h.state_mut().key_dialog.open = false;
         h.run_steps(1);
         let (zoom, snap) = (h.state().view.px_per_quarter, h.state().snap);
@@ -5025,10 +5025,12 @@ mod tests {
     fn renders_key_commands_dialog() {
         shot("tastaturbefehle", |w| {
             w.key_dialog.open = true;
-            w.keymap.assign(
-                keymap::Cmd::Metronome,
-                egui::KeyboardShortcut::new(egui::Modifiers::NONE, Key::J),
-            );
+            w.keymap
+                .assign(
+                    keymap::Cmd::Metronome,
+                    egui::KeyboardShortcut::new(egui::Modifiers::NONE, Key::J),
+                )
+                .unwrap();
         });
     }
 
@@ -5230,7 +5232,10 @@ mod tests {
         assert!(h.state().marker_track().is_some());
         // "Zu Marker 3" has no default key; bound to Shift+3 it jumps there.
         let key = egui::KeyboardShortcut::new(egui::Modifiers::SHIFT, Key::Num3);
-        h.state_mut().keymap.assign(Cmd::GotoMarker(3), key);
+        h.state_mut()
+            .keymap
+            .assign(Cmd::GotoMarker(3), key)
+            .unwrap();
         h.state_mut().cursor = 0;
         h.key_press_modifiers(egui::Modifiers::SHIFT, Key::Num3);
         h.run_steps(1);
