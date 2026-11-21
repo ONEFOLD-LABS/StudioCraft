@@ -269,7 +269,7 @@ impl PluginHandle {
             Self::Lv2(h) => h.has_gui(),
             Self::Vst3(h) => h.has_gui(),
             Self::Au(h) => h.has_gui(),
-            Self::Bridged(_) => false,
+            Self::Bridged(h) => h.has_gui(),
         }
     }
 
@@ -279,7 +279,7 @@ impl PluginHandle {
             Self::Lv2(h) => h.gui_open(),
             Self::Vst3(h) => h.gui_open(),
             Self::Au(h) => h.gui_open(),
-            Self::Bridged(_) => false,
+            Self::Bridged(h) => h.gui_open(),
         }
     }
 
@@ -300,9 +300,7 @@ impl PluginHandle {
             Self::Lv2(h) => h.open_gui(title),
             Self::Vst3(h) => h.open_gui(title),
             Self::Au(h) => h.open_gui(title),
-            Self::Bridged(_) => {
-                Err("the editor of a plugin in its own process is not available yet".into())
-            }
+            Self::Bridged(h) => h.open_gui(title),
         }
     }
 
@@ -312,7 +310,7 @@ impl PluginHandle {
             Self::Lv2(h) => h.close_gui(),
             Self::Vst3(h) => h.close_gui(),
             Self::Au(h) => h.close_gui(),
-            Self::Bridged(_) => {}
+            Self::Bridged(h) => h.close_gui(),
         }
     }
 
@@ -323,7 +321,7 @@ impl PluginHandle {
             Self::Lv2(h) => h.idle(),
             Self::Vst3(h) => h.idle(),
             Self::Au(h) => h.idle(),
-            Self::Bridged(_) => false,
+            Self::Bridged(h) => h.idle(),
         }
     }
 
@@ -346,7 +344,7 @@ impl PluginHandle {
             Self::Lv2(h) => h.set_ui_value(id, value),
             Self::Vst3(h) => h.set_ui_value(id, value),
             Self::Au(_) => {}
-            Self::Bridged(_) => {}
+            Self::Bridged(h) => h.set_ui_value(id, value),
         }
     }
 }
