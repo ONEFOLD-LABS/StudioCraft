@@ -1309,8 +1309,9 @@ impl ProjectWindow {
         }
     }
 
-    /// Werkzeugzeile (docs/ui-parity.md, „Werkzeugzeile“): links globale Zustände und die
-    /// Transport-Kurzform, in der Mitte Werkzeuge und Snap, rechts die Zonen-Schalter.
+    /// Werkzeugzeile (docs/ui-parity.md, „Werkzeugzeile“): links globale Zustände, in der Mitte
+    /// Werkzeuge und Snap, rechts die Zonen-Schalter. Der Transport steht nur in der
+    /// Transportleiste.
     fn toolbar(&mut self, ui: &mut Ui) {
         use icons::{Icon, icon_button};
         let t = theme::tokens(ui.ctx());
@@ -1318,40 +1319,6 @@ impl ProjectWindow {
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 2.0;
             self.global_states(ui);
-            icons::group_gap(ui);
-            // Transport-Kurzform
-            if icon_button(ui, Icon::ToStart, false, None, tr("Zum Anfang (Pos1)")).clicked() {
-                self.locate(0);
-            }
-            if icon_button(ui, Icon::Stop, false, None, tr("Stopp")).clicked() {
-                self.stop();
-            }
-            let playing = self.is_playing();
-            if icon_button(
-                ui,
-                Icon::Start,
-                playing,
-                Some(t.monitor),
-                tr("Start (Leertaste)"),
-            )
-            .clicked()
-            {
-                self.toggle_play();
-            }
-            if icon_button(
-                ui,
-                Icon::Record,
-                self.recording,
-                Some(t.rec),
-                tr("Aufnahme (*)"),
-            )
-            .clicked()
-            {
-                self.toggle_record();
-            }
-            if icon_button(ui, Icon::Cycle, self.cycle, Some(t.accent), tr("Cycle (/)")).clicked() {
-                self.toggle_cycle();
-            }
 
             // Mitte: Werkzeuge und Snap, auf die Fensterbreite zentriert. Die Breite der
             // Gruppe stammt aus dem letzten Frame; ist kein Platz, folgt sie direkt links.
