@@ -907,3 +907,4 @@ Release-Seite	Release page
 Später	Later
 Neustart nicht möglich: {e}	Cannot restart: {e}
 {taste} war doppelt belegt; sie gilt jetzt nur für „{befehl}“, nicht mehr für „{anderer}“	{taste} was bound twice; it now works only for “{befehl}”, no longer for “{anderer}”
+Aufnahme an der Größengrenze einer WAV-Datei (4 GB) beendet; was danach kam, fehlt. Lange Aufnahmen mit vielen Eingängen in Abschnitten aufnehmen.	Recording stopped at the size limit of a WAV file (4 GB); what came after is missing. Record long sessions with many inputs in parts.

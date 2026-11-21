@@ -409,6 +409,7 @@ impl ProjectWindow {
             rec.overruns.load(std::sync::atomic::Ordering::Relaxed) - self.overruns_at_start;
         let result = rec.stop();
         let rate = self.sample_rate;
+        let full = result.as_ref().is_ok_and(|r| r.full);
         match result.and_then(|r| {
             // Latenzausgleich: dorthin legen, wo das Gespielte zum Gehörten passt.
             let (start, skip) = match (played_at, r.first_captured_at) {
@@ -421,6 +422,12 @@ impl ProjectWindow {
             let (start, skip) = drop_count_in(start, skip, self.count_in_frames);
             self.place_recording(&r, start, skip)
         }) {
+            Ok(_) if full => {
+                self.message = Some(
+                    tr("Aufnahme an der Größengrenze einer WAV-Datei (4 GB) beendet; was danach kam, fehlt. Lange Aufnahmen mit vielen Eingängen in Abschnitten aufnehmen.")
+                        .into(),
+                )
+            }
             Ok(n) if overruns > 0 => {
                 self.message = Some(crate::i18n::trf(
                     "{n} Take(s) aufgenommen, aber {overruns} Samples verloren (Puffer voll)",

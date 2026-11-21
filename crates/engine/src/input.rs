@@ -47,7 +47,14 @@ pub struct Recording {
     pub sample_rate: u32,
     /// Wann der erste Frame erfasst wurde (Uhr aus [`crate::clock`]), falls bekannt.
     pub first_captured_at: Option<u64>,
+    /// Die Datei hat die Größengrenze einer WAV-Datei erreicht; die Aufnahme endet dort, was
+    /// danach kam, fehlt.
+    pub full: bool,
 }
+
+/// Größte Datenmenge einer Aufnahmedatei in Byte: WAV zählt sie in 32 Bit. Bei acht Eingängen
+/// mit 48 kHz (32 Bit Float) reicht das für gut 46 Minuten, bei zweien für gut drei Stunden.
+const MAX_DATA_BYTES: u64 = u32::MAX as u64 - 1024;
 
 enum Control {
     Start(PathBuf),
@@ -381,10 +388,29 @@ impl Recorder {
         overruns: Arc<AtomicU64>,
         clock: Arc<CaptureClock>,
     ) -> Self {
+        Self::spawn_limited(
+            consumer,
+            channels,
+            sample_rate,
+            overruns,
+            clock,
+            MAX_DATA_BYTES,
+        )
+    }
+
+    /// Wie [`Self::spawn_with_clock`], mit einer anderen Größengrenze (für Tests).
+    fn spawn_limited(
+        consumer: rtrb::Consumer<f32>,
+        channels: u16,
+        sample_rate: u32,
+        overruns: Arc<AtomicU64>,
+        clock: Arc<CaptureClock>,
+        max_bytes: u64,
+    ) -> Self {
         let (tx, rx) = mpsc::channel();
         let thread = thread::Builder::new()
             .name("recorder".into())
-            .spawn(move || recorder_loop(consumer, rx, channels, sample_rate, &clock))
+            .spawn(move || recorder_loop(consumer, rx, channels, sample_rate, &clock, max_bytes))
             .ok();
         Self {
             control: tx,
@@ -425,6 +451,8 @@ struct Active {
     path: PathBuf,
     samples: u64,
     first_captured_at: Option<u64>,
+    /// Die Größengrenze ist erreicht: nichts mehr schreiben, die Datei bleibt gültig.
+    full: bool,
 }
 
 fn recorder_loop(
@@ -433,8 +461,11 @@ fn recorder_loop(
     channels: u16,
     rate: u32,
     clock: &CaptureClock,
+    max_bytes: u64,
 ) {
     let ch = u64::from(channels.max(1));
+    // Höchstens so viele Samples (ganze Frames) passen in eine Datei.
+    let max_samples = max_bytes / 4 / ch * ch;
     // Wie viele Samples insgesamt aus dem Puffer geholt wurden (für die Zeitzuordnung).
     let mut consumed = 0u64;
     let mut active: Option<Active> = None;
@@ -451,14 +482,21 @@ fn recorder_loop(
         let n = consumer.slots();
         if let Ok(chunk) = consumer.read_chunk(n) {
             if let Some(a) = active.as_mut().filter(|_| failed.is_none()) {
+                // Nur so viel, wie in die Datei passt; danach bleibt sie gültig und die
+                // Aufnahme endet dort (sonst liefe die Größe im WAV-Kopf über).
+                let room = max_samples.saturating_sub(a.samples);
+                let take = usize::try_from(room).map_or(n, |r| r.min(n));
+                if take < n {
+                    a.full = true;
+                }
                 let (x, y) = chunk.as_slices();
-                for &s in x.iter().chain(y) {
+                for &s in x.iter().chain(y).take(take) {
                     if let Err(e) = a.writer.write_sample(s) {
                         failed = Some(format!("{}: {e}", a.path.display()));
                         break;
                     }
                 }
-                a.samples += n as u64;
+                a.samples += take as u64;
             }
             chunk.commit_all();
             consumed += n as u64;
@@ -479,6 +517,7 @@ fn recorder_loop(
                         path,
                         samples: 0,
                         first_captured_at,
+                        full: false,
                     }),
                     Err(e) => {
                         failed = Some(format!("{}: {e}", path.display()));
@@ -493,6 +532,7 @@ fn recorder_loop(
                     (Some(a), None) => {
                         let frames = a.samples / ch;
                         let first_captured_at = a.first_captured_at;
+                        let full = a.full;
                         a.writer
                             .finalize()
                             .map(|()| Recording {
@@ -501,6 +541,7 @@ fn recorder_loop(
                                 channels,
                                 sample_rate: rate,
                                 first_captured_at,
+                                full,
                             })
                             .map_err(|e| e.to_string())
                     }
@@ -572,5 +613,66 @@ mod tests {
         let st = extract_channels(&done, 0, true).unwrap();
         assert_eq!(&st[..4], &[0.0, 0.25, 1.0, 1.25]);
         assert!(rec.stop().is_err(), "zweites Stopp ohne Aufnahme");
+    }
+
+    /// A take that reaches the size limit of a WAV file ends there: the file stays valid and
+    /// holds whole frames up to the limit, and the result says so. (The real limit is 4 GiB;
+    /// beyond it the size in the WAV header overflowed and the take was lost.)
+    #[test]
+    fn a_take_at_the_size_limit_ends_there_and_stays_readable() {
+        let (mut tx, rx) = rtrb::RingBuffer::new(4096);
+        let clock = Arc::new(CaptureClock::default());
+        // Room for 50 frames of three channels (and two bytes that fit no whole frame).
+        let rec = Recorder::spawn_limited(
+            rx,
+            3,
+            48_000,
+            Arc::new(AtomicU64::new(0)),
+            clock,
+            50 * 3 * 4 + 2,
+        );
+        let dir = std::env::temp_dir().join(format!("sc-rec-full-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("lang.wav");
+        rec.start(&path);
+        std::thread::sleep(Duration::from_millis(30));
+        for i in 0..120 {
+            for c in 0..3 {
+                tx.push(i as f32 + c as f32 * 0.25).unwrap();
+            }
+        }
+        std::thread::sleep(Duration::from_millis(50));
+        let r = rec.stop().unwrap();
+        assert!(r.full, "the take says it was cut");
+        assert_eq!(r.frames, 50);
+        let reader = hound::WavReader::open(&r.path).unwrap();
+        let samples: Vec<f32> = reader.into_samples().map(Result::unwrap).collect();
+        assert_eq!(samples.len(), 150, "whole frames up to the limit");
+        assert_eq!(samples[147..], [49.0, 49.25, 49.5]);
+        let both = extract_channels(&r, 0, true).unwrap();
+        assert_eq!(both.len(), 100);
+        let _ = std::fs::remove_dir_all(&dir);
+
+        // A take below the limit is not marked.
+        let (mut tx, rx) = rtrb::RingBuffer::new(4096);
+        let rec = Recorder::spawn_limited(
+            rx,
+            2,
+            48_000,
+            Arc::new(AtomicU64::new(0)),
+            Arc::new(CaptureClock::default()),
+            1_000_000,
+        );
+        std::fs::create_dir_all(&dir).unwrap();
+        rec.start(&path);
+        std::thread::sleep(Duration::from_millis(30));
+        for _ in 0..20 {
+            tx.push(0.5).unwrap();
+        }
+        std::thread::sleep(Duration::from_millis(30));
+        let r = rec.stop().unwrap();
+        assert!(!r.full);
+        assert_eq!(r.frames, 10);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

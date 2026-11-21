@@ -8147,6 +8147,7 @@ mod tests {
             channels: 2,
             sample_rate: 48_000,
             first_captured_at: None,
+            full: false,
         }
     }
 
