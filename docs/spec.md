@@ -407,7 +407,8 @@ Time-Stretch und Warp-Markern (0.7), Hitpoints und Tempo-Erkennung (0.7), Offlin
 Clip (0.7), Pakete für alle Plattformen und den Browser (0.5), englische Oberfläche (0.5),
 Linealspuren (0.8), MCP-Server und KI-Assistent (0.8), Plugins im eigenen Prozess (0.8),
 Noten-Editor mit Export als MusicXML und PDF (0.9), Audio-Parts mit Part-Editor (0.9),
-AAF/OMF-Import (0.10), Videospur mit Videofenster (0.10).
+AAF/OMF-Import (0.10), Videospur mit Videofenster (0.10), Selbst-Update mit signierten Releases
+(`docs/selbst-update.md`).
 
 **Offene Fragen**
 

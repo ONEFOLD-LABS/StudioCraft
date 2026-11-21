@@ -75,6 +75,10 @@ pub mod theme;
 mod timeline;
 pub mod titlebar;
 mod tools;
+#[cfg(not(target_arch = "wasm32"))]
+mod update;
+#[cfg(not(target_arch = "wasm32"))]
+mod update_ui;
 mod video;
 pub mod waveform;
 mod windows;
@@ -180,6 +184,11 @@ pub struct ProjectWindow {
     repeat_dialog: shortcuts::RepeatDialog,
     /// Dialog „Über StudioCraft“.
     about: about::About,
+    /// Täglich nach Updates suchen, und wann zuletzt (Einstellungen).
+    update_check: bool,
+    last_update_check: u64,
+    #[cfg(not(target_arch = "wasm32"))]
+    updates: update_ui::Updates,
     /// Fenster „Drum-Map bearbeiten“.
     drum_map_editor: drummap_ui::DrumMapEditor,
     /// Sample-Editor in der unteren Zone.
@@ -400,6 +409,10 @@ impl ProjectWindow {
             crossfade_editor: None,
             repeat_dialog: shortcuts::RepeatDialog::default(),
             about: about::About::Closed,
+            update_check: prefs.update_check,
+            last_update_check: prefs.last_update_check,
+            #[cfg(not(target_arch = "wasm32"))]
+            updates: update_ui::Updates::default(),
             drum_map_editor: drummap_ui::DrumMapEditor::default(),
             sample_editor: sampleeditor::SampleEditor::default(),
             quantize: studiocraft_project::Quantize::default(),
@@ -816,6 +829,8 @@ impl ProjectWindow {
             autosave_keep: self.autosave.keep,
             language: i18n::language(),
             own_process: self.plugins.preferred.iter().cloned().collect(),
+            update_check: self.update_check,
+            last_update_check: self.last_update_check,
         };
         if let Err(e) = s.save() {
             self.message = Some(crate::i18n::trf(
@@ -1078,6 +1093,8 @@ impl ProjectWindow {
             self.tick_autosave(web_time::Instant::now());
         }
         self.poll_latency();
+        #[cfg(not(target_arch = "wasm32"))]
+        self.tick_updates(ui.ctx());
         if self.idle_plugins() {
             // Plugin-Fenster brauchen ihre Timer auch ohne Mausbewegung.
             ui.ctx()
@@ -1099,6 +1116,8 @@ impl ProjectWindow {
             top = top.exact_size(32.0);
         }
         top.show(ui, |ui| self.top_bar(ui));
+        #[cfg(not(target_arch = "wasm32"))]
+        self.update_bar(ui);
         egui::Panel::top("werkzeugzeile").show(ui, |ui| self.toolbar(ui));
         if self.show_info {
             egui::Panel::top("info-zeile").show(ui, |ui| infoline::show(self, ui));
@@ -4870,6 +4889,18 @@ mod tests {
                 1.5,
                 image,
             ));
+        });
+    }
+
+    #[test]
+    fn renders_the_update_bar() {
+        shot("update_bar", |w| {
+            let json = br#"{"tag_name":"v99.0.0","html_url":"https://github.com/ONEFOLD-LABS/StudioCraft/releases/tag/v99.0.0","assets":[]}"#;
+            let current = crate::update::Version::parse("0.1.0").unwrap();
+            let release = crate::update::parse_release(json, &current)
+                .unwrap()
+                .unwrap();
+            w.show_update(release);
         });
     }
 

@@ -39,6 +39,14 @@ craft-media = { git = "https://github.com/storytold/craft-libs", rev = "56c3c833
 craft-video = { git = "https://github.com/storytold/craft-libs", rev = "56c3c833bb869a140271e2aceec2112322cacc58", features = ["av1-decode", "vp9-decode", "vp8-decode", "mpeg2-decode"] }
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 rfd = "0.17"
+# Selbst-Update (docs/selbst-update.md): Anfrage an GitHub über HTTPS (wie der KI-Assistent:
+# rustls mit ring und den Zertifikaten des Systems), minisign-Signaturen prüfen (MIT), Programme
+# aus dem Tarball lesen (tar, MIT OR Apache-2.0).
+ureq = { version = "3", default-features = false, features = ["rustls-no-provider"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+rustls-native-certs = "0.8"
+minisign-verify = "0.3"
+tar = { version = "0.4", default-features = false }
 
 # Browser: Datei-Auswahl (rfd, asynchron) und Downloads (Blob-Link).
 [target.'cfg(target_arch = "wasm32")'.dependencies]
