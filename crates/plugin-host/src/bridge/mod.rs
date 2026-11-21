@@ -19,8 +19,8 @@
 //!   its blocks for a second: the insert falls silent for good and [`BridgeHandle::crashed`]
 //!   says so; the app and the other tracks keep running.
 //!
-//! Unix only for now (Linux, macOS, FreeBSD); elsewhere [`BridgeInstance::spawn`] reports that
-//! the bridge is not available.
+//! Linux, macOS and FreeBSD use a socket file; Windows uses loopback TCP with a token
+//! ([`wire`]). The web build has no bridge.
 
 pub(crate) mod shm;
 mod wire;
@@ -153,9 +153,6 @@ impl BridgeInstance {
         max_frames: u32,
         exe: &Path,
     ) -> Result<Self, String> {
-        if !cfg!(unix) {
-            return Err("the plugin bridge is not available on this system yet".into());
-        }
         let dir = runtime_dir();
         let name = next_name();
         let shm_path = dir.join(format!("{name}.shm"));
@@ -173,8 +170,10 @@ impl BridgeInstance {
             }
         };
         let mut cmd = Command::new(exe);
+        #[cfg(not(unix))]
+        cmd.env(wire::TOKEN_ENV, listener.token());
         cmd.arg(BRIDGE_FLAG)
-            .arg(&sock_path)
+            .arg(listener.address())
             .arg(&shm_path)
             .arg(info.format.code())
             .arg(&info.path)

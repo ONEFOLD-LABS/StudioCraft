@@ -149,7 +149,8 @@ impl ProjectWindow {
 
     /// Neue Inserts dieses Plugins laufen im eigenen Prozess (Voreinstellung oder Sperrliste).
     pub(crate) fn own_process_default(&self, id: &str) -> bool {
-        cfg!(unix) && (self.plugins.preferred.contains(id) || self.needs_own_process(id))
+        cfg!(not(target_arch = "wasm32"))
+            && (self.plugins.preferred.contains(id) || self.needs_own_process(id))
     }
 
     /// Voreinstellung der Plugin-Liste setzen und für den nächsten Start merken.
@@ -761,8 +762,8 @@ impl ProjectWindow {
 
     /// Menü „…“ eines Inserts: eigener Prozess, nach einem Absturz neu laden.
     fn slot_menu(&mut self, ui: &mut Ui, track: usize, k: usize, crashed: bool) {
-        if !cfg!(unix) {
-            // Die Plugin-Bridge gibt es bisher nur unter Linux, macOS und FreeBSD.
+        if cfg!(target_arch = "wasm32") {
+            // Im Browser gibt es keine Plugin-Bridge.
             return;
         }
         let menu = ui.menu_button("…", |ui| {

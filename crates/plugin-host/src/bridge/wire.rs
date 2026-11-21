@@ -1,6 +1,10 @@
 //! The sockets between app and helper: a listener the helper connects to twice (control, then
 //! wake), the control connection with its line protocol, and the wake-up byte.
 //!
+//! Unix: a socket file in the user's runtime folder (mode 0600). Windows: TCP on the loopback
+//! address; the helper opens each connection with a secret token it got in its environment,
+//! so no other program can take its place.
+//!
 //! Control protocol, one request line from the app, reply lines from the helper ending in
 //! `END`. The helper opens with its parameters:
 //! `PARAM\t<id>\t<min>\t<max>\t<default>\t<value>\t<stepped>\t<name>\t<module>` lines, then `END`
@@ -28,6 +32,34 @@ const MAX_LINES: usize = 100_000;
 pub(crate) struct Listener {
     #[cfg(unix)]
     inner: std::os::unix::net::UnixListener,
+    #[cfg(unix)]
+    path: std::path::PathBuf,
+    #[cfg(not(unix))]
+    inner: std::net::TcpListener,
+    #[cfg(not(unix))]
+    token: String,
+}
+
+/// The environment variable that carries the token to the helper (Windows).
+#[cfg(not(unix))]
+pub(crate) const TOKEN_ENV: &str = "STUDIOCRAFT_BRIDGE_TOKEN";
+
+/// 128 bits the helper must present (from the hasher keys the system seeds at random).
+#[cfg(not(unix))]
+fn new_token() -> String {
+    use std::hash::{BuildHasher, Hasher};
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_nanos());
+    (0..2u64)
+        .map(|i| {
+            let mut h = std::collections::hash_map::RandomState::new().build_hasher();
+            h.write_u64(i);
+            h.write_u128(nanos);
+            h.write_u32(std::process::id());
+            format!("{:016x}", h.finish())
+        })
+        .collect()
 }
 
 impl Listener {
@@ -40,12 +72,44 @@ impl Listener {
             let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600));
         }
         inner.set_nonblocking(true).map_err(|e| e.to_string())?;
-        Ok(Self { inner })
+        Ok(Self {
+            inner,
+            path: path.to_path_buf(),
+        })
     }
 
+    /// `path` is not used: the listener takes a free loopback port.
     #[cfg(not(unix))]
     pub fn bind(_: &Path) -> Result<Self, String> {
-        Err("the plugin bridge is not available on this system yet".into())
+        let inner = std::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0))
+            .map_err(|e| format!("helper connection: {e}"))?;
+        inner.set_nonblocking(true).map_err(|e| e.to_string())?;
+        Ok(Self {
+            inner,
+            token: new_token(),
+        })
+    }
+
+    /// Where the helper connects to (its first argument after the flag).
+    pub fn address(&self) -> std::ffi::OsString {
+        #[cfg(unix)]
+        {
+            self.path.clone().into_os_string()
+        }
+        #[cfg(not(unix))]
+        {
+            self.inner
+                .local_addr()
+                .map(|a| a.to_string())
+                .unwrap_or_default()
+                .into()
+        }
+    }
+
+    /// The token the helper must present (Windows; nothing on Unix).
+    #[cfg(not(unix))]
+    pub fn token(&self) -> &str {
+        &self.token
     }
 
     /// The next connection of the helper, or an error once it has exited or `deadline` passed.
@@ -68,10 +132,58 @@ impl Listener {
         }
     }
 
+    /// The next connection that presents the token; others are dropped.
     #[cfg(not(unix))]
-    pub fn accept(&self, _: &mut Child, _: Instant) -> Result<Stream, String> {
-        Err("the plugin bridge is not available on this system yet".into())
+    pub fn accept(&self, child: &mut Child, deadline: Instant) -> Result<Stream, String> {
+        loop {
+            match self.inner.accept() {
+                Ok((s, _)) => {
+                    s.set_nonblocking(false).map_err(|e| e.to_string())?;
+                    let _ = s.set_nodelay(true);
+                    if self.presents_token(&s, deadline) {
+                        return Ok(s);
+                    }
+                }
+                Err(e) if e.kind() == ErrorKind::WouldBlock => {}
+                Err(e) => return Err(format!("helper connection: {e}")),
+            }
+            gone(child)?;
+            if Instant::now() > deadline {
+                return Err("the helper process did not start in time".into());
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
     }
+
+    #[cfg(not(unix))]
+    fn presents_token(&self, mut s: &Stream, deadline: Instant) -> bool {
+        let want = format!("{}\n", self.token);
+        let mut got = vec![0u8; want.len()];
+        let left = deadline
+            .saturating_duration_since(Instant::now())
+            .max(Duration::from_millis(1));
+        s.set_read_timeout(Some(left)).is_ok()
+            && s.read_exact(&mut got).is_ok()
+            && got == want.as_bytes()
+            && s.set_read_timeout(None).is_ok()
+    }
+}
+
+/// Connect to the app (helper side): the socket file, or the loopback address with the token.
+#[cfg(unix)]
+pub(crate) fn connect(address: &Path) -> Result<Stream, String> {
+    Stream::connect(address).map_err(|e| format!("{}: {e}", address.display()))
+}
+
+#[cfg(not(unix))]
+pub(crate) fn connect(address: &Path) -> Result<Stream, String> {
+    let address = address.to_str().ok_or("bad helper address")?;
+    let token = std::env::var(TOKEN_ENV).map_err(|_| "no bridge token".to_owned())?;
+    let mut s = Stream::connect(address).map_err(|e| format!("{address}: {e}"))?;
+    let _ = s.set_nodelay(true);
+    s.write_all(format!("{token}\n").as_bytes())
+        .map_err(|e| format!("{address}: {e}"))?;
+    Ok(s)
 }
 
 /// An error if the helper has exited.
