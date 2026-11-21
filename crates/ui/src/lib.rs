@@ -8413,6 +8413,7 @@ mod tests {
             sample_rate: 48_000,
             first_captured_at: None,
             problem: None,
+            more: Vec::new(),
         }
     }
 
@@ -8428,6 +8429,67 @@ mod tests {
         }
         w.clear_history();
         w
+    }
+
+    /// A take that went on in a second file (WAV size limit): each armed track gets one audio
+    /// part holding two events, one after the other without a gap, whose clips continue the
+    /// signal; the raw files are cleaned up.
+    #[test]
+    fn a_take_in_two_files_becomes_consecutive_events() {
+        let dir = temp_dir("rec-two-files");
+        let mut w = recording_window();
+        let bar = w.bar_ticks();
+        // Four seconds, cut after 1.5 s: the ramp on the left goes on in the second file.
+        let whole = two_channel_recording(&dir, 4 * 48_000);
+        // The same samples two_channel_recording writes.
+        let all: Vec<f32> = (0..4 * 48_000u64)
+            .flat_map(|i| [i as f32 / 1e6, 0.5])
+            .collect();
+        let cut = 72_000 * 2;
+        let second = dir.join("Aufnahme-002.wav");
+        studiocraft_engine::export::write_wav_f32_channels(&all[..cut], 2, 48_000, &whole.path)
+            .unwrap();
+        studiocraft_engine::export::write_wav_f32_channels(&all[cut..], 2, 48_000, &second)
+            .unwrap();
+        let rec = studiocraft_engine::Recording {
+            more: vec![second.clone()],
+            ..whole
+        };
+        assert_eq!(w.place_recording(&rec, 96_000, 0).unwrap(), 2, "two takes");
+        assert!(
+            !rec.path.exists() && !second.exists(),
+            "raw files cleaned up"
+        );
+        for track in &w.project.tracks {
+            // One audio part per take, named like a take, holding the two pieces.
+            let [part] = &track.events[..] else {
+                panic!("one part on {}", track.name);
+            };
+            assert!(part.is_audio_part());
+            assert_eq!(part.name, format!("{} 01", track.name));
+            assert_eq!(
+                (part.start.0, part.length),
+                (bar, 2 * bar),
+                "the whole take"
+            );
+            let [a, b] = &part.children[..] else {
+                panic!("two pieces in the part on {}", track.name);
+            };
+            assert_eq!(a.start.0, 0);
+            assert_eq!(b.start.0, a.end(), "no gap");
+            assert_ne!(a.clip, b.clip);
+            assert_eq!((a.offset, b.offset), (0, 0));
+        }
+        let mic = &w.project.tracks[0].events[0].children;
+        let first = &w.clips[&mic[0].clip.unwrap()].samples;
+        let next = &w.clips[&mic[1].clip.unwrap()].samples;
+        assert_eq!(first.len(), cut);
+        assert_eq!(first[cut - 2], 71_999.0 / 1e6);
+        assert_eq!(next[0], 72_000.0 / 1e6, "the signal goes on");
+        assert!(
+            dir.join("Aufnahme - Mikro.wav").exists()
+                && dir.join("Aufnahme - Mikro-002.wav").exists()
+        );
     }
 
     #[test]
