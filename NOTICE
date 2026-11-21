@@ -15,6 +15,11 @@ StudioCraft's wine red accent and the semantic colours.
 
 App icon: assets/app-icon is original StudioCraft artwork (see its README).
 
+Music font: assets/fonts/leland is the Leland font (version 0.80) by MuseScore
+Limited, embedded unmodified under the SIL Open Font Licence 1.1 (OFL.txt in
+that folder, also in THIRD-PARTY-LICENSES.txt). The score editor draws notes,
+clefs and accidentals with it.
+
 Third-party components: StudioCraft builds on open-source libraries under MIT,
 Apache-2.0, BSD, ISC, Zlib, BSL-1.0, Unicode-3.0, MPL-2.0 (Symphonia, unmodified)
 and other permissive licences, and embeds fonts under the SIL Open Font Licence

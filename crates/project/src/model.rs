@@ -182,6 +182,10 @@ pub struct Event {
     /// musikalische Stelle gehören.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub warp: Vec<crate::WarpPoint>,
+    /// MIDI-Parts: Anzeige-Quantisierung im Noten-Editor in Ticks (nur Darstellung);
+    /// `None`: die Vorgabe ([`crate::DEFAULT_SCORE_QUANTIZE`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub score_quantize: Option<u64>,
 }
 
 /// Art des Time-Stretch eines Audio-Events, das dem Tempo folgt.
@@ -976,6 +980,9 @@ pub struct Project {
     /// Gespeicherte Mixer-Ansichten: welche Kanäle sichtbar und welche schmal sind.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub mixer_views: Vec<MixerView>,
+    /// Tonart für den Noten-Editor (Vorzeichen); ändert keine Tonhöhen.
+    #[serde(default, skip_serializing_if = "crate::KeySignature::is_c_major")]
+    pub key: crate::KeySignature,
 }
 
 /// Farben neuer Spuren, reihum; auch die Palette der Farbauswahl.
@@ -1008,6 +1015,7 @@ impl Default for Project {
             layouts: Vec::new(),
             mixer_views: Vec::new(),
             pre_fader_inserts: DEFAULT_PRE_INSERTS,
+            key: crate::KeySignature::C_MAJOR,
         }
     }
 }
@@ -1198,6 +1206,7 @@ impl Project {
                         musical: None,
                         stretch_mode: StretchMode::Standard,
                         warp: Vec::new(),
+                        score_quantize: None,
                         gain_db: 0.0,
                         fade_in_curve: FadeCurve::Linear,
                         fade_out_curve: FadeCurve::Linear,
@@ -1415,6 +1424,7 @@ impl Project {
                 musical: None,
                 stretch_mode: StretchMode::Standard,
                 warp: Vec::new(),
+                score_quantize: None,
                 gain_db: 0.0,
                 fade_in_curve: FadeCurve::Linear,
                 fade_out_curve: FadeCurve::Linear,
@@ -1836,6 +1846,7 @@ impl Project {
                 musical: None,
                 stretch_mode: StretchMode::Standard,
                 warp: Vec::new(),
+                score_quantize: None,
                 gain_db: 0.0,
                 fade_in_curve: FadeCurve::Linear,
                 fade_out_curve: FadeCurve::Linear,
@@ -1937,6 +1948,7 @@ impl Project {
             musical: None,
             stretch_mode: StretchMode::Standard,
             warp: Vec::new(),
+            score_quantize: None,
             gain_db: 0.0,
             fade_in_curve: FadeCurve::Linear,
             fade_out_curve: FadeCurve::Linear,

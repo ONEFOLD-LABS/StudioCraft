@@ -43,6 +43,14 @@ impl Project {
 
         fix(self.layout.sanitize());
         clamp!(self.pre_fader_inserts, self.pre_fader_inserts.min(8));
+        clamp!(self.key, self.key.sane());
+        for e in self.tracks.iter_mut().flat_map(|t| t.events.iter_mut()) {
+            clamp!(
+                e.score_quantize,
+                e.score_quantize
+                    .filter(|q| crate::SCORE_QUANTIZE.contains(q))
+            );
+        }
         for t in &mut self.tracks {
             let (lo, hi) = crate::model::INPUT_GAIN_DB;
             clamp!(t.input_gain_db, finite_f32(t.input_gain_db, (lo, hi), 0.0));
