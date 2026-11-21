@@ -1784,185 +1784,255 @@ impl ProjectWindow {
     /// Positionsanzeige, Transportknöpfe, Tempo/Takt/Metronom, zusammen zentriert; rechts
     /// Meldungen ohne Statuszeile.
     fn transport_bar(&mut self, ui: &mut Ui) {
-        use icons::{Icon, icon_button};
-        let t = theme::tokens(ui.ctx());
+        // Gruppen: Locatoren | Position | Transportknöpfe | Auto | Tempo, Takt, Metronom. Ihre
+        // Breiten stammen aus dem letzten Bild. Passen alle in eine Zeile, stehen sie zusammen
+        // auf die Fensterbreite zentriert; sonst bricht die Leiste zwischen den Gruppen um.
+        let ids = [
+            "transportleiste-locatoren",
+            "transportleiste-position",
+            "transportleiste-knoepfe",
+            "transportleiste-auto",
+            "transportleiste-tempo",
+        ]
+        .map(egui::Id::unique);
+        let total_id = egui::Id::unique("transportleiste-breite");
+        let widths = ids.map(|id| ui.ctx().data(|d| d.get_temp::<f32>(id)).unwrap_or(0.0));
+        let total = ui
+            .ctx()
+            .data(|d| d.get_temp::<f32>(total_id))
+            .unwrap_or(0.0);
         let row = ui.available_rect_before_wrap();
-        ui.horizontal(|ui| {
+        let one_row = total <= row.width();
+        let mut measured = widths;
+        let mut used = total;
+        let mut groups = |ui: &mut Ui, wrap: bool| {
             ui.spacing_mut().item_spacing.x = 2.0;
-            // Alle Gruppen zusammen auf die Fensterbreite zentriert. Die Breite stammt aus dem
-            // letzten Bild; ist kein Platz, beginnen sie am linken Rand.
-            let id = egui::Id::unique("transportleiste-breite");
-            let width = ui.ctx().data(|d| d.get_temp::<f32>(id)).unwrap_or(0.0);
-            let x = (row.center().x - width / 2.0).max(ui.cursor().left());
-            ui.add_space((x - ui.cursor().left()).max(0.0));
             let start = ui.cursor().left();
-            let tempo = self.project.tempo.clone();
-            let fmt = |ticks: u64| {
-                let (b, be, s, _) = tempo.bars_beats(Position(ticks));
-                format!("{b}.{be}.{s}")
-            };
-            // Locatoren, dazwischen Punch-In, Cycle, Punch-Out
-            ui.label(RichText::new(format!("L {}", fmt(self.left_locator))).monospace())
-                .on_hover_text(tr("Linker Locator (Strg+Klick ins Lineal)"));
-            ui.add_space(4.0);
-            if icon_button(
-                ui,
-                Icon::PunchIn,
-                self.punch_in,
-                Some(t.rec),
-                tr("Punch-In (I)"),
-            )
-            .clicked()
-            {
-                self.punch_in = !self.punch_in;
-            }
-            if icon_button(ui, Icon::Cycle, self.cycle, Some(t.accent), tr("Cycle (/)")).clicked() {
-                self.toggle_cycle();
-            }
-            if icon_button(
-                ui,
-                Icon::PunchOut,
-                self.punch_out,
-                Some(t.rec),
-                tr("Punch-Out (O)"),
-            )
-            .clicked()
-            {
-                self.punch_out = !self.punch_out;
-            }
-            ui.add_space(4.0);
-            ui.label(RichText::new(format!("R {}", fmt(self.right_locator))).monospace())
-                .on_hover_text(tr("Rechter Locator (Alt+Klick ins Lineal)"));
-            icons::group_gap(ui);
-
-            // Positionsanzeige
-            let (bar, beat, six, tick) = tempo.bars_beats(Position(self.cursor));
-            let secs = tempo.seconds(Position(self.cursor));
-            egui::Frame::new()
-                .fill(t.counter_bg)
-                .corner_radius(3)
-                .inner_margin(egui::Margin::symmetric(8, 1))
-                .show(ui, |ui| {
-                    ui.spacing_mut().item_spacing.x = 10.0;
-                    ui.label(
-                        RichText::new(format!("{bar}.{beat}.{six}.{tick:03}"))
-                            .monospace()
-                            .size(18.0)
-                            .color(t.counter_text),
-                    );
-                    ui.label(
-                        RichText::new(format!("{:02}:{:06.3}", (secs / 60.0) as u32, secs % 60.0))
-                            .monospace()
-                            .color(t.text_dim),
-                    );
-                });
-            icons::group_gap(ui);
-
-            // Transportknöpfe
-            let bar_len = self.bar_ticks();
-            if icon_button(
-                ui,
-                Icon::ToStart,
-                false,
-                None,
-                tr("Zum Anfang (Pos1, Komma)"),
-            )
-            .clicked()
-            {
-                self.locate(0);
-            }
-            if icon_button(
-                ui,
-                Icon::Rewind,
-                false,
-                None,
-                tr("Zurückspulen um einen Takt"),
-            )
-            .clicked()
-            {
-                self.locate(self.cursor.saturating_sub(bar_len));
-            }
-            if icon_button(
-                ui,
-                Icon::Forward,
-                false,
-                None,
-                tr("Vorspulen um einen Takt"),
-            )
-            .clicked()
-            {
-                self.locate(self.cursor.saturating_add(bar_len));
-            }
-            if icon_button(ui, Icon::Stop, false, None, tr("Stopp")).clicked() {
-                self.stop();
-            }
-            let playing = self.is_playing();
-            if icon_button(
-                ui,
-                Icon::Start,
-                playing,
-                Some(t.monitor),
-                tr("Start (Leertaste)"),
-            )
-            .clicked()
-            {
-                self.toggle_play();
-            }
-            if icon_button(
-                ui,
-                Icon::Record,
-                self.recording,
-                Some(t.rec),
-                tr("Aufnahme (*)"),
-            )
-            .clicked()
-            {
-                self.toggle_record();
-            }
-            // Vorzähler: verbleibende Zählzeiten.
-            if let Some(beats) = self.count_in_beats() {
-                ui.colored_label(
-                    t.rec,
-                    crate::i18n::trf("Vorzähler {beats}", &[("beats", &beats)]),
-                );
-            }
-            icons::group_gap(ui);
-            ui.spacing_mut().item_spacing.x = 6.0;
-            // Automationsmodus für Spuren mit W; rot, solange geschrieben wird.
-            let writing = self.writing_automation();
-            let label = RichText::new(tr("Auto"));
-            let l = ui.label(if writing { label.color(t.rec) } else { label });
-            egui::ComboBox::from_id_salt("automationsmodus")
-                .selected_text(self.auto_writer.mode.label())
-                .width(84.0)
-                .show_ui(ui, |ui| {
-                    for m in automation_write::WriteMode::ALL {
-                        ui.selectable_value(&mut self.auto_writer.mode, m, m.label());
+            for (i, width) in widths.iter().enumerate() {
+                if i > 0 {
+                    // Umbrechend: die Trennlinie nur zwischen Gruppen derselben Zeile.
+                    let gap = 8.0 + ui.spacing().item_spacing.x * 3.0 + 6.0;
+                    if wrap && ui.available_size_before_wrap().x < gap + width {
+                        ui.end_row();
+                    } else {
+                        icons::group_gap(ui);
                     }
-                })
-                .response
-                .labelled_by(l.id)
-                .on_hover_text(tr("Automation schreiben bei W: Touch oder Auto-Latch"));
-            icons::group_gap(ui);
-            self.tempo_controls(ui);
-            let used = ui.cursor().left() - start;
-            if (used - width).abs() > 0.5 {
-                ui.ctx().data_mut(|d| d.insert_temp(id, used));
+                }
+                measured[i] = measure(ui, |ui| match i {
+                    0 => self.transport_locators(ui),
+                    1 => self.transport_position(ui),
+                    2 => self.transport_buttons(ui),
+                    3 => self.transport_auto(ui),
+                    _ => self.tempo_controls(ui),
+                });
+            }
+            if !wrap {
+                used = ui.cursor().left() - start;
+            }
+            self.transport_message(ui);
+        };
+        if one_row {
+            ui.horizontal(|ui| {
+                let x = (row.center().x - total / 2.0).max(ui.cursor().left());
+                ui.add_space((x - ui.cursor().left()).max(0.0));
+                groups(ui, false);
+            });
+        } else {
+            ui.horizontal_wrapped(|ui| groups(ui, true));
+            // Breite der ganzen Leiste in einer Zeile: Gruppen plus Trennlinien.
+            used = measured.iter().sum::<f32>() + 4.0 * (8.0 + 2.0 * 3.0 + 6.0);
+        }
+        for (id, (new, old)) in ids.iter().zip(measured.into_iter().zip(widths)) {
+            if (new - old).abs() > 0.5 {
+                ui.ctx().data_mut(|d| d.insert_temp(*id, new));
                 ui.ctx().request_repaint();
             }
+        }
+        if (used - total).abs() > 0.5 {
+            ui.ctx().data_mut(|d| d.insert_temp(total_id, used));
+            ui.ctx().request_repaint();
+        }
+    }
 
-            // Ohne Statuszeile: Meldungen rechts in der Transportleiste, gekürzt auf den freien
-            // Platz, damit sie nie über Tempo und Takt laufen.
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if !self.show_status
-                    && let Some(m) = &self.message
-                    && ui.available_width() > 24.0
-                {
-                    let text = RichText::new(m.as_str()).color(ui.visuals().warn_fg_color);
-                    ui.add(egui::Label::new(text).truncate())
-                        .on_hover_text(m.as_str());
-                }
+    /// Transportleiste: Locatoren, dazwischen Punch-In, Cycle, Punch-Out.
+    fn transport_locators(&mut self, ui: &mut Ui) {
+        use icons::{Icon, icon_button};
+        let t = theme::tokens(ui.ctx());
+        let tempo = &self.project.tempo;
+        let fmt = |ticks: u64| {
+            let (b, be, s, _) = tempo.bars_beats(Position(ticks));
+            format!("{b}.{be}.{s}")
+        };
+        let (left, right) = (fmt(self.left_locator), fmt(self.right_locator));
+        // Locatoren, dazwischen Punch-In, Cycle, Punch-Out
+        ui.label(RichText::new(format!("L {left}")).monospace())
+            .on_hover_text(tr("Linker Locator (Strg+Klick ins Lineal)"));
+        ui.add_space(4.0);
+        if icon_button(
+            ui,
+            Icon::PunchIn,
+            self.punch_in,
+            Some(t.rec),
+            tr("Punch-In (I)"),
+        )
+        .clicked()
+        {
+            self.punch_in = !self.punch_in;
+        }
+        if icon_button(ui, Icon::Cycle, self.cycle, Some(t.accent), tr("Cycle (/)")).clicked() {
+            self.toggle_cycle();
+        }
+        if icon_button(
+            ui,
+            Icon::PunchOut,
+            self.punch_out,
+            Some(t.rec),
+            tr("Punch-Out (O)"),
+        )
+        .clicked()
+        {
+            self.punch_out = !self.punch_out;
+        }
+        ui.add_space(4.0);
+        ui.label(RichText::new(format!("R {right}")).monospace())
+            .on_hover_text(tr("Rechter Locator (Alt+Klick ins Lineal)"));
+    }
+
+    /// Transportleiste: Positionsanzeige in Takten und Sekunden.
+    fn transport_position(&mut self, ui: &mut Ui) {
+        let t = theme::tokens(ui.ctx());
+        let tempo = &self.project.tempo;
+        // Positionsanzeige
+        let (bar, beat, six, tick) = tempo.bars_beats(Position(self.cursor));
+        let secs = tempo.seconds(Position(self.cursor));
+        egui::Frame::new()
+            .fill(t.counter_bg)
+            .corner_radius(3)
+            .inner_margin(egui::Margin::symmetric(8, 1))
+            .show(ui, |ui| {
+                ui.spacing_mut().item_spacing.x = 10.0;
+                ui.label(
+                    RichText::new(format!("{bar}.{beat}.{six}.{tick:03}"))
+                        .monospace()
+                        .size(18.0)
+                        .color(t.counter_text),
+                );
+                ui.label(
+                    RichText::new(format!("{:02}:{:06.3}", (secs / 60.0) as u32, secs % 60.0))
+                        .monospace()
+                        .color(t.text_dim),
+                );
             });
+    }
+
+    /// Transportleiste: Zum Anfang, Spulen, Stopp, Start, Aufnahme und der Vorzähler.
+    fn transport_buttons(&mut self, ui: &mut Ui) {
+        use icons::{Icon, icon_button};
+        let t = theme::tokens(ui.ctx());
+        // Transportknöpfe
+        let bar_len = self.bar_ticks();
+        if icon_button(
+            ui,
+            Icon::ToStart,
+            false,
+            None,
+            tr("Zum Anfang (Pos1, Komma)"),
+        )
+        .clicked()
+        {
+            self.locate(0);
+        }
+        if icon_button(
+            ui,
+            Icon::Rewind,
+            false,
+            None,
+            tr("Zurückspulen um einen Takt"),
+        )
+        .clicked()
+        {
+            self.locate(self.cursor.saturating_sub(bar_len));
+        }
+        if icon_button(
+            ui,
+            Icon::Forward,
+            false,
+            None,
+            tr("Vorspulen um einen Takt"),
+        )
+        .clicked()
+        {
+            self.locate(self.cursor.saturating_add(bar_len));
+        }
+        if icon_button(ui, Icon::Stop, false, None, tr("Stopp")).clicked() {
+            self.stop();
+        }
+        let playing = self.is_playing();
+        if icon_button(
+            ui,
+            Icon::Start,
+            playing,
+            Some(t.monitor),
+            tr("Start (Leertaste)"),
+        )
+        .clicked()
+        {
+            self.toggle_play();
+        }
+        if icon_button(
+            ui,
+            Icon::Record,
+            self.recording,
+            Some(t.rec),
+            tr("Aufnahme (*)"),
+        )
+        .clicked()
+        {
+            self.toggle_record();
+        }
+        // Vorzähler: verbleibende Zählzeiten.
+        if let Some(beats) = self.count_in_beats() {
+            ui.colored_label(
+                t.rec,
+                crate::i18n::trf("Vorzähler {beats}", &[("beats", &beats)]),
+            );
+        }
+    }
+
+    /// Transportleiste: Automationsmodus für Spuren mit W; rot, solange geschrieben wird.
+    fn transport_auto(&mut self, ui: &mut Ui) {
+        let t = theme::tokens(ui.ctx());
+        ui.spacing_mut().item_spacing.x = 6.0;
+        // Automationsmodus für Spuren mit W; rot, solange geschrieben wird.
+        let writing = self.writing_automation();
+        let label = RichText::new(tr("Auto"));
+        let l = ui.label(if writing { label.color(t.rec) } else { label });
+        egui::ComboBox::from_id_salt("automationsmodus")
+            .selected_text(self.auto_writer.mode.label())
+            .width(84.0)
+            .show_ui(ui, |ui| {
+                for m in automation_write::WriteMode::ALL {
+                    ui.selectable_value(&mut self.auto_writer.mode, m, m.label());
+                }
+            })
+            .response
+            .labelled_by(l.id)
+            .on_hover_text(tr("Automation schreiben bei W: Touch oder Auto-Latch"));
+    }
+
+    /// Transportleiste: ohne Statuszeile die Meldung rechts im freien Rest der Zeile.
+    fn transport_message(&mut self, ui: &mut Ui) {
+        // Ohne Statuszeile: Meldungen rechts in der Transportleiste, gekürzt auf den freien
+        // Platz, damit sie nie über Tempo und Takt laufen.
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            if !self.show_status
+                && let Some(m) = &self.message
+                && ui.available_width() > 24.0
+            {
+                let text = RichText::new(m.as_str()).color(ui.visuals().warn_fg_color);
+                ui.add(egui::Label::new(text).truncate())
+                    .on_hover_text(m.as_str());
+            }
         });
     }
 
@@ -6754,6 +6824,69 @@ mod tests {
         let centre = (first.left() + last.right()) / 2.0;
         let middle = h.ctx.content_rect().center().x;
         assert!((centre - middle).abs() < 40.0, "{first:?} … {last:?}");
+    }
+
+    #[test]
+    fn transport_bar_keeps_every_button_inside_narrow_windows() {
+        let labels = [
+            "Punch-In (I)",
+            "Punch-Out (O)",
+            "Zum Anfang (Pos1, Komma)",
+            "Stopp",
+            "Aufnahme (*)",
+            "Metronom (C)",
+        ];
+        for width in [800.0, 1024.0, 1400.0] {
+            let (w, _) = one_event_window();
+            let mut h = Harness::builder()
+                .with_size(egui::vec2(width, 600.0))
+                .with_step_dt(1.0 / 60.0)
+                .build_ui_state(|ui, w: &mut ProjectWindow| w.ui(ui), w);
+            // Die Gruppenbreiten stammen aus dem letzten Bild.
+            h.run_steps(4);
+            let rects: Vec<egui::Rect> = labels.iter().map(|l| h.get_by_label(l).rect()).collect();
+            for (label, r) in labels.iter().zip(&rects) {
+                assert!(
+                    r.left() >= 0.0 && r.right() <= width,
+                    "{label} at {r:?} leaves a {width} px window"
+                );
+            }
+            for (i, a) in rects.iter().enumerate() {
+                for (j, b) in rects.iter().enumerate().skip(i + 1) {
+                    assert!(
+                        !a.shrink(1.0).intersects(b.shrink(1.0)),
+                        "{} and {} overlap in a {width} px window",
+                        labels[i],
+                        labels[j]
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn transport_message_never_covers_tempo_and_metre() {
+        for width in [800.0, 1024.0, 1400.0] {
+            let (mut w, _) = one_event_window();
+            w.show_status = false;
+            w.message =
+                Some("Eine recht lange Meldung, die nicht über Tempo und Takt laufen darf".into());
+            let mut h = Harness::builder()
+                .with_size(egui::vec2(width, 600.0))
+                .with_step_dt(1.0 / 60.0)
+                .build_ui_state(|ui, w: &mut ProjectWindow| w.ui(ui), w);
+            h.run_steps(4);
+            let metronome = h.get_by_label("Metronom (C)").rect();
+            let message = h.get_by_label_contains("Eine recht lange Meldung").rect();
+            assert!(
+                message.right() <= width && !message.intersects(metronome),
+                "{message:?} vs {metronome:?} in a {width} px window"
+            );
+            assert!(
+                message.left() >= metronome.right() || message.top() >= metronome.bottom(),
+                "{message:?} vs {metronome:?} in a {width} px window"
+            );
+        }
     }
 
     #[test]
