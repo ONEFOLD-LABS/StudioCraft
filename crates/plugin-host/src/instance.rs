@@ -33,6 +33,17 @@ impl PluginInstance {
         }
     }
 
+    /// Wie [`Self::new`], aber in einem Helferprozess (`exe`: das eigene Programm, das
+    /// [`crate::run_bridge_child`] aufruft). Nur im Hauptthread.
+    pub fn new_isolated(
+        info: &PluginInfo,
+        sample_rate: u32,
+        max_frames: u32,
+        exe: &std::path::Path,
+    ) -> Result<Self, String> {
+        BridgeInstance::spawn(info, sample_rate, max_frames, exe).map(Self::Bridged)
+    }
+
     pub fn info(&self) -> &PluginInfo {
         match self {
             Self::Clap(i) => &i.info,
@@ -150,6 +161,20 @@ pub enum PluginHandle {
 }
 
 impl PluginHandle {
+    /// Läuft das Plugin in einem eigenen Prozess (Plugin-Bridge)?
+    pub fn is_isolated(&self) -> bool {
+        matches!(self, Self::Bridged(_))
+    }
+
+    /// Ist der Prozess eines isolierten Plugins abgestürzt oder hängt er? Der Insert schweigt
+    /// dann. Plugins im Programm selbst: immer `false`.
+    pub fn crashed(&self) -> bool {
+        match self {
+            Self::Bridged(h) => h.crashed(),
+            _ => false,
+        }
+    }
+
     pub fn save_state(&self) -> Option<Vec<u8>> {
         match self {
             Self::Clap(h) => h.save_state(),

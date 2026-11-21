@@ -798,3 +798,11 @@ http:// nur zu diesem Rechner; sonst https:// verwenden.	http:// only to this co
 leer für lokale Server	empty for local servers
 {n} Modelle gefunden.	{n} models found.
 Keine Zertifikate des Systems gefunden.	No system certificates found.
+Eigener Prozess ist hier nicht verfügbar	Own process is not available here
+{name} ist abgestürzt und schweigt; das Programm läuft weiter (Insert-Menü: Neu laden)	{name} crashed and is silent; the program keeps running (insert menu: Reload)
+{name} (abgestürzt)	{name} (crashed)
+Läuft in einem eigenen Prozess	Runs in its own process
+In eigenem Prozess	In its own process
+Stürzt das Plugin ab oder hängt es, verstummt nur dieser Insert (ein Block mehr Latenz)	If the plugin crashes or hangs, only this insert falls silent (one block more latency)
+Den abgestürzten Prozess neu starten	Restart the crashed process
+Insert-Menü	Insert menu

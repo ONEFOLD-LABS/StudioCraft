@@ -737,6 +737,10 @@ pub struct InsertSlot {
     /// Kompletter Plugin-Zustand (`clap.state`), Base64. Wird beim Speichern erfasst.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub state: Option<String>,
+    /// In einem eigenen Prozess rechnen (Plugin-Bridge, Issue #146): stürzt das Plugin ab,
+    /// verstummt nur dieser Insert. Fehlt in älteren Dateien.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub isolated: bool,
 }
 
 impl InsertSlot {
@@ -747,9 +751,10 @@ impl InsertSlot {
         }
     }
 
-    /// Gleiches Plugin an gleicher Stelle (Parameter und Bypass dürfen abweichen).
+    /// Gleiches Plugin an gleicher Stelle, im selben Prozess (Parameter und Bypass dürfen
+    /// abweichen).
     pub fn same_plugin(&self, other: &Self) -> bool {
-        self.plugin_id == other.plugin_id
+        self.plugin_id == other.plugin_id && self.isolated == other.isolated
     }
 }
 
