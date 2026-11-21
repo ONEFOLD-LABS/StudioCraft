@@ -350,7 +350,9 @@ impl InputSink {
             self.levels.feed(c, p);
         }
 
-        let n = data.len().min(self.producer.slots());
+        // Nur ganze Frames: ein angeschnittenes Frame verschöbe alle Kanäle für den Rest der
+        // Aufnahme um eins.
+        let n = data.len().min(self.producer.slots()) / channels * channels;
         if let Ok(mut chunk) = self.producer.write_chunk_uninit(n) {
             let (a, b) = chunk.as_mut_slices();
             let mut src = data.iter().enumerate().map(|(i, s)| sample(i, s));
@@ -616,13 +618,14 @@ fn recorder_loop(
                     }
                     a.in_file += 1;
                 }
-                // Kopf nachführen: nach einem Absturz ist die Datei bis hierher lesbar. Mitten
-                // in einem Frame meldet hound das, schreibt aber trotzdem.
-                if failed.is_none() && a.last_flush.elapsed() >= FLUSH_EVERY {
+                // Kopf nachführen: nach einem Absturz ist die Datei bis hierher lesbar. Nur an
+                // einer Frame-Grenze: mitten im Frame bricht hound nach dem Kopf ab, ohne an das
+                // Dateiende zurückzuspringen, und alles Weitere überschriebe den Anfang.
+                if failed.is_none() && a.in_file % ch == 0 && a.last_flush.elapsed() >= FLUSH_EVERY
+                {
                     a.last_flush = std::time::Instant::now();
-                    match a.writer.flush() {
-                        Ok(()) | Err(hound::Error::UnfinishedSample) => {}
-                        Err(e) => failed = Some(format!("{}: {e}", a.path.display())),
+                    if let Err(e) = a.writer.flush() {
+                        failed = Some(format!("{}: {e}", a.path.display()));
                     }
                 }
             }
@@ -922,6 +925,79 @@ mod tests {
         let left: Vec<f32> = mono.chunks_exact(2).map(|f| f[0]).collect();
         let want: Vec<f32> = (0..120).map(|i| i as f32 + 0.25).collect();
         assert_eq!(left, want);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A full ring takes whole frames only: a cut frame would shift every channel of the rest
+    /// of the take by one.
+    #[test]
+    fn a_full_ring_takes_whole_frames_only() {
+        let (producer, mut consumer) = rtrb::RingBuffer::new(10);
+        let overruns = Arc::new(AtomicU64::new(0));
+        let mut sink = InputSink {
+            producer,
+            monitor: rtrb::RingBuffer::new(64).0,
+            overruns: overruns.clone(),
+            clock: Arc::new(CaptureClock::default()),
+            levels: Arc::new(InputLevels::default()),
+            channels: 3,
+            frames_seen: 0,
+        };
+        let frame = |k: f32| [k, k + 0.25, k + 0.5];
+        sink.push(&[frame(0.0), frame(1.0), frame(2.0)].concat(), 0);
+        // One slot left: the next frames do not fit, not even in part.
+        sink.push(&[frame(3.0), frame(4.0)].concat(), 0);
+        assert_eq!(consumer.slots(), 9, "whole frames only");
+        assert_eq!(overruns.load(Ordering::Relaxed), 6);
+        let mut got = Vec::new();
+        while let Ok(v) = consumer.pop() {
+            got.push(v);
+        }
+        assert_eq!(got, [frame(0.0), frame(1.0), frame(2.0)].concat());
+    }
+
+    /// The header is brought up to date only at a frame border: hound's flush in the middle of
+    /// a frame left the write position at the start of the data, and the following samples
+    /// overwrote the beginning of the take.
+    #[test]
+    fn a_flush_never_happens_inside_a_frame() {
+        let (mut tx, rx) = rtrb::RingBuffer::new(1 << 12);
+        let rec = Recorder::spawn_with_clock(
+            rx,
+            3,
+            48_000,
+            Arc::new(AtomicU64::new(0)),
+            Arc::new(CaptureClock::default()),
+        );
+        let dir = std::env::temp_dir().join(format!("sc-rec-flush-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("take.wav");
+        rec.start(&path).unwrap();
+        let mut want = Vec::new();
+        let mut push = |tx: &mut rtrb::Producer<f32>, v: f32| {
+            tx.push(v).unwrap();
+            want.push(v);
+        };
+        // Two thirds of a frame, then longer than the flush interval, then the rest.
+        for round in 0..4 {
+            let base = round as f32 * 10.0;
+            push(&mut tx, base);
+            push(&mut tx, base + 1.0);
+            std::thread::sleep(FLUSH_EVERY * 3);
+            push(&mut tx, base + 2.0);
+            for k in 0..3 {
+                push(&mut tx, base + 3.0 + k as f32);
+            }
+            std::thread::sleep(FLUSH_EVERY * 2);
+        }
+        let r = rec.stop().unwrap();
+        assert_eq!(r.problem, None);
+        let got: Vec<f32> = hound::WavReader::open(&r.path)
+            .unwrap()
+            .into_samples()
+            .map(Result::unwrap)
+            .collect();
+        assert_eq!(got, want, "every sample once, in order");
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
