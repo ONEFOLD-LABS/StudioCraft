@@ -10,6 +10,8 @@
 //!   helper by writing one byte to a non-blocking socket. The callback never waits: if the
 //!   helper is still busy, the insert outputs silence for that block. The extra block is part
 //!   of the reported latency.
+//! - **Offline** (export, rendering): [`BridgeInstance::set_offline`] makes every block a round
+//!   trip that waits for the helper, so no block is dropped and no latency is added.
 //! - **Main-thread calls** (state, parameters, latency) go as text lines over a second socket,
 //!   with a timeout.
 //! - **Crash detection**: the helper exits, a main-thread call times out, or the helper misses
@@ -97,6 +99,8 @@ pub struct BridgeInstance {
     late: u64,
     /// After this many late frames the helper counts as hung (one second).
     late_limit: u64,
+    /// Offline rendering: wait for each block instead of running one behind.
+    offline: bool,
 }
 
 /// The main-thread side of a bridged plugin.
@@ -217,6 +221,7 @@ impl BridgeInstance {
             count: 0,
             late: 0,
             late_limit: u64::from(sample_rate.max(1)),
+            offline: false,
         })
     }
 
@@ -275,6 +280,10 @@ impl BridgeInstance {
     /// One stereo block in place (audio thread): the result of the previous block comes out,
     /// this block goes to the helper. Never waits, never allocates.
     pub fn process(&mut self, left: &mut [f32], right: &mut [f32]) {
+        if self.offline {
+            self.process_offline(left, right);
+            return;
+        }
         let n = left.len().min(right.len()).min(MAX_FRAMES);
         let silence = |l: &mut [f32], r: &mut [f32]| {
             l.fill(0.0);
@@ -319,6 +328,57 @@ impl BridgeInstance {
     pub fn stop_processing(&mut self) {
         self.link.shm.region().stop.store(1, Ordering::Release);
         self.pending = false;
+    }
+
+    /// Offline rendering (export, clip processing; not on the audio thread): every block
+    /// waits for the helper's result, so nothing is dropped and the bridge adds no latency.
+    /// Call before the first block.
+    pub fn set_offline(&mut self, offline: bool) {
+        self.offline = offline;
+        self.pending = false;
+        self.link.last_frames.store(0, Ordering::Relaxed);
+    }
+
+    fn process_offline(&mut self, left: &mut [f32], right: &mut [f32]) {
+        let n = left.len().min(right.len()).min(MAX_FRAMES);
+        let r = self.link.shm.region();
+        let ready = |req: u32| -> bool {
+            let deadline = Instant::now() + CALL_TIMEOUT;
+            while r.done.load(Ordering::Acquire) != req {
+                if self.link.dead.load(Ordering::Acquire) || Instant::now() > deadline {
+                    return false;
+                }
+                std::thread::yield_now();
+            }
+            true
+        };
+        // A block still running from before the switch is taken first.
+        if self.link.dead.load(Ordering::Acquire) || !ready(self.req) {
+            self.fail(left, right);
+            return;
+        }
+        self.link.shm.write_input(&left[..n], &right[..n]);
+        self.link.shm.write_events(&self.events[..self.count]);
+        self.count = 0;
+        r.frames.store(n as u32, Ordering::Relaxed);
+        self.req = self.req.wrapping_add(1);
+        r.req.store(self.req, Ordering::Release);
+        self.wake.ring();
+        if !ready(self.req) {
+            self.fail(left, right);
+            return;
+        }
+        self.link.shm.read_output(&mut left[..n], &mut right[..n]);
+        left[n..].fill(0.0);
+        right[n..].fill(0.0);
+    }
+
+    /// The helper is gone or hung: silence from now on.
+    fn fail(&mut self, left: &mut [f32], right: &mut [f32]) {
+        self.link.dead.store(true, Ordering::Release);
+        self.count = 0;
+        left.fill(0.0);
+        right.fill(0.0);
     }
 }
 

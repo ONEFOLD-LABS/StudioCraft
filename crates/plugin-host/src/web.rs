@@ -55,6 +55,9 @@ impl PluginInstance {
     pub fn stop_processing(&mut self) {
         match self.0 {}
     }
+    pub fn set_offline(&mut self, _: bool) {
+        match self.0 {}
+    }
 }
 
 /// Gibt es im Browser nicht (entsteht nur aus einer Instanz).

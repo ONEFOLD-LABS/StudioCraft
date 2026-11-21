@@ -164,6 +164,27 @@ fn gain_round_trip() {
     println!("gain: one block behind, parameters, state and latency through the bridge");
 }
 
+fn offline_waits_for_every_block() {
+    let mut b = BridgeInstance::spawn(&info("test:gain"), 48_000, 512, &exe()).expect("spawn");
+    let h = b.handle();
+    b.set_offline(true);
+    b.set_param_at(0, 0, 3.0);
+    // Faster than real time and without pauses: every block comes back at once, none dropped.
+    for k in 0..200 {
+        let v = (k % 7) as f32 * 0.1;
+        let (mut l, mut r) = (vec![v; 256], vec![v; 256]);
+        b.process(&mut l, &mut r);
+        assert!(
+            l.iter().chain(&r).all(|&s| (s - v * 3.0).abs() < 1e-6),
+            "block {k}: {:?}",
+            &l[..2]
+        );
+    }
+    assert_eq!(h.latency(), 7, "no extra block offline");
+    assert!(!h.crashed());
+    println!("offline: 200 blocks without a pause, each result in its own block");
+}
+
 fn crash_silences_only_the_insert() {
     let mut b = BridgeInstance::spawn(&info("test:crash"), 48_000, 512, &exe()).expect("spawn");
     let h = b.handle();
@@ -229,6 +250,7 @@ fn main() {
         return;
     }
     gain_round_trip();
+    offline_waits_for_every_block();
     crash_silences_only_the_insert();
     hang_counts_as_crash();
     load_error_is_reported();
