@@ -2,7 +2,7 @@
 //! Fokus, ein schmaler Rahmen in Akzentfarbe zeigt ihn. Hat der Key-Editor in der unteren Zone
 //! den Fokus, wirken Bearbeitungsbefehle auf seine Noten.
 
-use egui::{Context, Id, LayerId, Order, Pos2, Rect, Stroke, StrokeKind};
+use egui::{Context, LayerId, Order, Pos2, Rect, Stroke, StrokeKind};
 
 use crate::{LowerZone, ProjectWindow};
 
@@ -47,6 +47,12 @@ impl ZoneRects {
     }
 }
 
+/// Ebene des Fokusrahmens: die der Zonen selbst. Nach ihrem Inhalt gemalt liegt er über der
+/// Zone, aber unter Menüs, Popups und schwebenden Fenstern.
+fn frame_layer() -> LayerId {
+    LayerId::background()
+}
+
 impl ProjectWindow {
     /// Nach dem Zeichnen aller Zonen: Fokus beim Mausdruck umsetzen und den Rahmen malen.
     pub(crate) fn update_focus(&mut self, ctx: &Context, rects: ZoneRects) {
@@ -77,13 +83,12 @@ impl ProjectWindow {
             return;
         };
         let accent = crate::theme::tokens(ctx).accent;
-        ctx.layer_painter(LayerId::new(Order::Foreground, Id::unique("fokusrahmen")))
-            .rect_stroke(
-                rect.shrink(1.0),
-                0.0,
-                Stroke::new(1.5, accent),
-                StrokeKind::Inside,
-            );
+        ctx.layer_painter(frame_layer()).rect_stroke(
+            rect.shrink(1.0),
+            0.0,
+            Stroke::new(1.5, accent),
+            StrokeKind::Inside,
+        );
     }
 }
 
@@ -91,6 +96,12 @@ impl ProjectWindow {
 mod tests {
     use super::*;
     use egui::pos2;
+
+    #[test]
+    fn the_frame_lies_below_menus_and_windows() {
+        assert!(frame_layer().order < Order::Middle);
+        assert!(frame_layer().order < Order::Foreground);
+    }
 
     #[test]
     fn the_lower_zone_wins_where_rects_touch() {
