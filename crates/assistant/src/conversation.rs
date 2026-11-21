@@ -443,11 +443,16 @@ mod tests {
         };
         // Small results (an unknown tool's short error): the round limit stops it. Large ones
         // (the project of 300 tracks, again and again): the size limit.
-        let by_rounds = trf(
-            "Nach {n} Schritten angehalten; schreib weiter, um fortzufahren.",
-            &[("n", &MAX_STEPS)],
-        );
-        let by_size = tr("Abgebrochen: zu viele Schritte – der Verlauf für das Modell ist zu groß geworden. Schreib weiter, um neu anzusetzen.").to_owned();
+        // Both languages: other tests switch the process-wide language meanwhile.
+        let by_rounds = [
+            "Nach 24 Schritten angehalten; schreib weiter, um fortzufahren.",
+            "Stopped after 24 steps; write again to continue.",
+        ];
+        let by_size = [
+            "Abgebrochen: zu viele Schritte – der Verlauf für das Modell ist zu groß geworden. Schreib weiter, um neu anzusetzen.",
+            "Stopped: too many steps – the history for the model has grown too large. Write again to start afresh.",
+        ];
+        assert_eq!(MAX_STEPS, 24, "the texts above name it");
         for (tool, tracks, stop) in [
             ("kein_werkzeug", 0, by_rounds),
             ("inspect_project", 300, by_size),
@@ -473,8 +478,8 @@ mod tests {
             let said = c
                 .entries()
                 .iter()
-                .any(|e| matches!(e, Entry::Error(t) if *t == stop));
-            assert!(said, "{tool}: the stop is shown ({stop})");
+                .any(|e| matches!(e, Entry::Error(t) if stop.contains(&t.as_str())));
+            assert!(said, "{tool}: the stop is shown ({stop:?})");
             if tracks > 0 {
                 let noted = c
                     .messages()
