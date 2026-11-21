@@ -1,212 +1,18 @@
 //! Randomised robustness tests for everything that reads foreign files (AGENTS.md, Robustness):
 //! project files and Standard MIDI Files, changed at random, must load or fail with an error,
 //! never panic; what loads must survive editing and saving. No extra tools: a seeded generator
-//! makes every run repeatable. `STUDIOCRAFT_FUZZ_ITERS=<n>` runs longer (e.g. nightly),
-//! `STUDIOCRAFT_FUZZ_SEED=<n>` starts elsewhere, and `STUDIOCRAFT_FUZZ_CASE=<n>` runs only the
-//! case a failure printed.
+//! makes every run repeatable (see `fuzzkit/mod.rs` for the environment variables).
 
 use studiocraft_project::{
     AutoParam, AutoPoint, AutomationLane, Note, PoolClip, Project, Quantize, TrackKind, file, smf,
 };
 
-/// xorshift64*: small, fast, good enough to pick mutations.
-struct Rng(u64);
+#[path = "fuzzkit/json.rs"]
+mod fuzzjson;
+mod fuzzkit;
 
-impl Rng {
-    fn next(&mut self) -> u64 {
-        let mut x = self.0;
-        x ^= x >> 12;
-        x ^= x << 25;
-        x ^= x >> 27;
-        self.0 = x;
-        x.wrapping_mul(0x2545_f491_4f6c_dd1d)
-    }
-
-    fn below(&mut self, n: usize) -> usize {
-        if n == 0 {
-            0
-        } else {
-            (self.next() % n as u64) as usize
-        }
-    }
-
-    fn chance(&mut self, one_in: u64) -> bool {
-        self.next() % one_in == 0
-    }
-}
-
-fn env_number(name: &str) -> Option<u64> {
-    std::env::var(name).ok().and_then(|v| v.trim().parse().ok())
-}
-
-/// The seeds of one test's cases: `default` many (or `STUDIOCRAFT_FUZZ_ITERS`), derived from
-/// the base seed and `salt`; only `STUDIOCRAFT_FUZZ_CASE` when that is set.
-fn cases(salt: u64, default: usize) -> Vec<u64> {
-    if let Some(case) = env_number("STUDIOCRAFT_FUZZ_CASE") {
-        return vec![case];
-    }
-    let base = env_number("STUDIOCRAFT_FUZZ_SEED").unwrap_or(0x5eed_0f57_d10c_4a00) ^ salt;
-    let n = env_number("STUDIOCRAFT_FUZZ_ITERS").map_or(default, |n| n as usize);
-    (0..n as u64)
-        .map(|k| base ^ k.wrapping_mul(0x9e37_79b9_7f4a_7c15))
-        .collect()
-}
-
-/// Prints the case that was running when a panic unwinds through it.
-struct Case(&'static str, u64);
-
-impl Drop for Case {
-    fn drop(&mut self) {
-        if std::thread::panicking() {
-            eprintln!(
-                "fuzz case {} failed: rerun with STUDIOCRAFT_FUZZ_CASE={}",
-                self.0, self.1
-            );
-        }
-    }
-}
-
-const INTERESTING: [u8; 10] = [0x00, 0x01, 0x7f, 0x80, 0xff, 0xfe, b'"', b'-', b'9', b'{'];
-
-/// One random change of a byte string: flip, overwrite, insert, delete, duplicate, cut.
-fn mutate_bytes(rng: &mut Rng, b: &mut Vec<u8>) {
-    let len = b.len();
-    match rng.below(6) {
-        0 if len > 0 => {
-            let i = rng.below(len);
-            b[i] ^= 1 << rng.below(8);
-        }
-        1 if len > 0 => {
-            let i = rng.below(len);
-            b[i] = INTERESTING[rng.below(INTERESTING.len())];
-        }
-        2 => {
-            let i = rng.below(len + 1);
-            let n = 1 + rng.below(8);
-            for _ in 0..n {
-                b.insert(i, rng.next() as u8);
-            }
-        }
-        3 if len > 0 => {
-            let i = rng.below(len);
-            let n = (1 + rng.below(16)).min(len - i);
-            b.drain(i..i + n);
-        }
-        4 if len > 0 => {
-            let i = rng.below(len);
-            let n = (1 + rng.below(32)).min(len - i);
-            let chunk: Vec<u8> = b[i..i + n].to_vec();
-            let at = rng.below(len + 1);
-            b.splice(at..at, chunk);
-        }
-        _ => {
-            b.truncate(rng.below(len + 1));
-        }
-    }
-}
-
-/// A replacement for `old`: mostly a value of the same kind that no writer would produce
-/// (extreme numbers, odd strings), sometimes a value of another type.
-fn odd_value(rng: &mut Rng, old: &serde_json::Value) -> serde_json::Value {
-    use serde_json::{Value, json};
-    if !rng.chance(4) {
-        match old {
-            Value::Number(n) => {
-                let x = n.as_i64().unwrap_or(0);
-                let unsigned = x >= 0;
-                return match rng.below(12) {
-                    0 | 1 => json!(x.saturating_add(1)),
-                    2 | 3 if unsigned => json!(x.saturating_sub(1).max(0)),
-                    4 if unsigned => json!(x.saturating_mul(1000)),
-                    5 => json!(0),
-                    6 if unsigned => json!(u32::MAX),
-                    7 if unsigned => json!(u64::MAX),
-                    8 => json!(i64::MIN),
-                    9 => json!(1e308),
-                    10 => json!(-1),
-                    _ => json!(x / 2),
-                };
-            }
-            Value::String(_) => {
-                return match rng.below(4) {
-                    0 => json!(""),
-                    1 => json!("\u{0}\u{202e}x"),
-                    2 => json!("../../etc/passwd"),
-                    _ => json!("x".repeat(10_000)),
-                };
-            }
-            Value::Bool(b) => return Value::Bool(!b),
-            _ => {}
-        }
-    }
-    match rng.below(6) {
-        0 => Value::Null,
-        1 => Value::Bool(rng.chance(2)),
-        2 => json!(u64::MAX),
-        3 => json!(""),
-        4 => json!([]),
-        _ => json!({}),
-    }
-}
-
-/// One random change of the JSON tree: replace, remove, duplicate, swap, nudge a number.
-fn mutate_json(rng: &mut Rng, v: &mut serde_json::Value) {
-    use serde_json::Value;
-    // Walk down a random path; stop at a leaf or by chance.
-    let mut node = v;
-    loop {
-        let go_on = !rng.chance(4);
-        let next = match node {
-            Value::Array(a) if !a.is_empty() && go_on => {
-                let i = rng.below(a.len());
-                Some(i)
-            }
-            Value::Object(o) if !o.is_empty() && go_on => Some(rng.below(o.len())),
-            _ => None,
-        };
-        let Some(i) = next else { break };
-        // Change this container sometimes instead of going deeper.
-        if rng.chance(3) {
-            match node {
-                Value::Array(a) => match rng.below(3) {
-                    0 => {
-                        a.remove(i);
-                    }
-                    1 => {
-                        let copy = a[i].clone();
-                        a.insert(i, copy);
-                    }
-                    _ => {
-                        let j = rng.below(a.len());
-                        a.swap(i, j);
-                    }
-                },
-                Value::Object(o) => {
-                    if let Some(key) = o.keys().nth(i).cloned() {
-                        if rng.chance(2) {
-                            o.remove(&key);
-                        } else {
-                            let old = o.get(&key).cloned().unwrap_or_default();
-                            o.insert(key, odd_value(rng, &old));
-                        }
-                    }
-                }
-                _ => {}
-            }
-            return;
-        }
-        node = match node {
-            Value::Array(a) => &mut a[i],
-            Value::Object(o) => match o.values_mut().nth(i) {
-                Some(x) => x,
-                None => return,
-            },
-            _ => return,
-        };
-    }
-    let old = node.clone();
-    *node = odd_value(rng, &old);
-}
+use fuzzjson::mutate_json;
+use fuzzkit::{Case, Rng, cases, mutate_bytes};
 
 /// A project that uses most of the file format.
 fn rich_project() -> Project {
@@ -401,4 +207,57 @@ fn typed_positions_and_lengths_never_panic() {
         let _ = tempo.parse_position(&text);
         let _ = tempo.parse_length(&text);
     }
+}
+
+#[test]
+fn drum_map_files_survive_changes() {
+    let mut map = studiocraft_project::DrumMap::general_midi();
+    if let Some(r) = map.rows.first_mut() {
+        r.mute = true;
+    }
+    let seed_doc: serde_json::Value = map
+        .to_file_text()
+        .ok()
+        .and_then(|t| serde_json::from_str(&t).ok())
+        .unwrap_or_default();
+    let mut loaded = 0;
+    let all = cases(0xd7, 600);
+    let n = all.len();
+    for seed in all {
+        let _case = Case("drum-map", seed);
+        let mut rng = Rng(seed | 1);
+        let mut doc = seed_doc.clone();
+        for _ in 0..1 + rng.below(3) {
+            mutate_json(&mut rng, &mut doc);
+        }
+        let mut text = serde_json::to_string(&doc).unwrap_or_default().into_bytes();
+        if rng.below(4) == 0 {
+            mutate_bytes(&mut rng, &mut text);
+        }
+        let Ok(mut m) =
+            studiocraft_project::DrumMap::from_file_text(&String::from_utf8_lossy(&text))
+        else {
+            continue;
+        };
+        loaded += 1;
+        assert!(!m.sanitize(), "sanitize is stable after loading");
+        for pitch in [0, 36, 127, 128, 255] {
+            let _ = m.row(pitch);
+            let _ = m.name_of(pitch);
+            let _ = m.audible(pitch);
+            assert!(m.output_of(pitch) < 128 || pitch >= 128);
+        }
+        let _ = m.remaps();
+        let _ = m.filters();
+        if let Some(i) = m.add_row(60) {
+            let _ = m.move_row(i, true);
+            let _ = m.set_pitch(i, 61);
+        }
+        let again = m
+            .to_file_text()
+            .ok()
+            .and_then(|t| studiocraft_project::DrumMap::from_file_text(&t).ok());
+        assert!(again.is_some(), "a loaded map saves and loads again");
+    }
+    assert!(loaded * 10 > n, "only {loaded} of {n} variants loaded");
 }
