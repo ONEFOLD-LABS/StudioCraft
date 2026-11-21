@@ -412,7 +412,7 @@ AAF/OMF-Import (0.10), Videospur mit Videofenster (0.10), Selbst-Update mit sign
 
 **Offene Fragen**
 
-- [ ] Projektname: entschieden, StudioCraft (Repo unter Dokumente/GitHub/StudioCraft). Verworfen: SoundCraft (in der Familie vergeben), AudioCraft (Meta), MixCraft (bestehende DAW), RecordCraft (Rust-Recorder kaptaindieter/RecordCraft). Markenrecherche steht noch aus.
+- [ ] Projektname: entschieden, StudioCraft (Repo: github.com/ONEFOLD-LABS/StudioCraft). Markenrecherche steht noch aus.
 - [x] GUI-Toolkit: entschieden, egui/eframe (nativ und Web). Prototyp bestätigt: 0,15 ms CPU pro Frame bei 100 und 1000 Spuren (Release-Build)
 - [x] Plugin-GUIs unter Wayland (#175, 0.8): CLAP-Plugins öffnen zuerst ein eigenes
   Wayland-Fenster, sonst bettet StudioCraft den Editor über XWayland in ein eigenes Fenster ein
