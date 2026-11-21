@@ -195,6 +195,7 @@ impl ProjectWindow {
                                     bypass: false,
                                     params: Vec::new(),
                                     state: None,
+                                    isolated: false,
                                 });
                                 ui.close();
                             }

@@ -56,6 +56,24 @@ fn app_icon() -> egui::IconData {
     eframe::icon_data::from_png_bytes(png).unwrap_or_default()
 }
 
+/// Meldet dem Plugin-Host das Hauptfenster: Plugin-Fenster hängen unter X11 daran und
+/// wählen unter Wayland ihren Weg danach (Issue #175).
+fn report_main_window(cc: &eframe::CreationContext<'_>) {
+    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+    use studiocraft_plugin_host::MainWindow;
+    let window = match cc.window_handle().map(|h| h.as_raw()) {
+        // `c_ulong`: 64 bits on Linux, 32 on Windows, where the conversion is a no-op.
+        #[allow(clippy::useless_conversion)]
+        Ok(RawWindowHandle::Xlib(h)) => {
+            u32::try_from(h.window).map_or(MainWindow::Other, MainWindow::X11)
+        }
+        Ok(RawWindowHandle::Xcb(h)) => MainWindow::X11(h.window.get()),
+        Ok(RawWindowHandle::Wayland(_)) => MainWindow::Wayland,
+        _ => MainWindow::Other,
+    };
+    studiocraft_plugin_host::set_main_window(window);
+}
+
 struct App {
     // Reihenfolge der Felder = Reihenfolge beim Aufräumen: erst der Steuerkanal (nimmt die
     // Token-Datei weg), dann das Fenster (es hält Plugin-Handles), dann der Kern mit den
@@ -202,6 +220,10 @@ fn main() -> ExitCode {
     // Kindprozess des Plugin-Scans: nur diese eine Datei prüfen, dann beenden.
     let raw: Vec<String> = std::env::args().collect();
     if let Some(code) = studiocraft_ui::run_plugin_scan_child(&raw) {
+        return ExitCode::from(u8::try_from(code).unwrap_or(1));
+    }
+    // Plugin im eigenen Prozess (Bridge, Issue #146): dieser Prozess ist der Helfer.
+    if let Some(code) = studiocraft_ui::run_plugin_bridge_child(&raw) {
         return ExitCode::from(u8::try_from(code).unwrap_or(1));
     }
     if let Ok(exe) = std::env::current_exe() {
@@ -356,6 +378,7 @@ fn main() -> ExitCode {
         Box::new(move |cc| {
             let mut window = window;
             window.enable_assistant();
+            report_main_window(cc);
             let control = control_port.and_then(|port| {
                 let ctx = cc.egui_ctx.clone();
                 match Control::start(port, move || ctx.request_repaint()) {

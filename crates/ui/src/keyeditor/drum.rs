@@ -289,10 +289,10 @@ pub(super) fn show(w: &mut ProjectWindow, ui: &mut Ui, part: EventId, track: usi
         }
         let rect = Rect::from_min_size(pos2(grid.left(), top), vec2(grid.width(), ROW_H));
         if i % 2 == 1 {
-            p.rect_filled(rect, 0.0, Color32::from_black_alpha(40));
+            p.rect_filled(rect, 0.0, crate::theme::tokens(p.ctx()).key_black_row);
         }
         if !map.audible(row.pitch) {
-            p.rect_filled(rect, 0.0, Color32::from_black_alpha(70));
+            p.rect_filled(rect, 0.0, crate::theme::tokens(p.ctx()).outside_part);
         }
         p.hline(
             rect.x_range(),
@@ -305,7 +305,7 @@ pub(super) fn show(w: &mut ProjectWindow, ui: &mut Ui, part: EventId, track: usi
         Rect::from_x_y_ranges(grid.left()..=a, grid.y_range()),
         Rect::from_x_y_ranges(b..=grid.right(), grid.y_range()),
     ] {
-        p.rect_filled(out, 0.0, Color32::from_black_alpha(90));
+        p.rect_filled(out, 0.0, crate::theme::tokens(p.ctx()).outside_part);
     }
     let t0 = g.tick(grid.left()).max(0.0);
     let t1 = g.tick(grid.right()).max(0.0);

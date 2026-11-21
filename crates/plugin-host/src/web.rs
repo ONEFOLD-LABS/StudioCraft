@@ -13,6 +13,15 @@ use crate::info::{ParamInfo, PluginInfo, Preset, ScanOptions, ScanReport};
 pub struct PluginInstance(Infallible);
 
 impl PluginInstance {
+    pub fn new_isolated(
+        info: &PluginInfo,
+        sample_rate: u32,
+        max_frames: u32,
+        _exe: &std::path::Path,
+    ) -> Result<Self, String> {
+        Self::new(info, sample_rate, max_frames)
+    }
+
     pub fn new(info: &PluginInfo, _: u32, _: u32) -> Result<Self, String> {
         Err(format!("{}: Plugins gibt es im Browser nicht", info.name))
     }
@@ -52,6 +61,14 @@ impl PluginInstance {
 pub struct PluginHandle(Infallible);
 
 impl PluginHandle {
+    pub fn is_isolated(&self) -> bool {
+        false
+    }
+
+    pub fn crashed(&self) -> bool {
+        false
+    }
+
     pub fn save_state(&self) -> Option<Vec<u8>> {
         match self.0 {}
     }
@@ -128,6 +145,11 @@ pub fn clear_scan_cache(_: &Path) -> std::io::Result<()> {
 
 /// Im Browser gibt es keine Kindprozesse.
 pub fn run_scan_child(_: &[String]) -> Option<i32> {
+    None
+}
+
+/// Im Browser gibt es keine Hilfsprozesse (Plugin-Bridge).
+pub fn run_bridge_child(_: &[String]) -> Option<i32> {
     None
 }
 

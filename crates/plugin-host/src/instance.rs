@@ -1,6 +1,7 @@
 //! Formatneutrale Plugin-Instanz und Griff: Engine und Oberfläche sprechen nur mit diesen
 //! Typen; dahinter steht je Format die eigene Umsetzung (heute CLAP).
 
+use crate::bridge::{BridgeHandle, BridgeInstance};
 use crate::{
     au::{AuHandle, AuInstance},
     clap::{ClapHandle, ClapInstance, ParamInfo},
@@ -16,6 +17,8 @@ pub enum PluginInstance {
     Lv2(Lv2Instance),
     Vst3(Vst3Instance),
     Au(AuInstance),
+    /// In a helper process (plugin bridge, Issue #146).
+    Bridged(BridgeInstance),
 }
 
 impl PluginInstance {
@@ -30,12 +33,24 @@ impl PluginInstance {
         }
     }
 
+    /// Wie [`Self::new`], aber in einem Helferprozess (`exe`: das eigene Programm, das
+    /// [`crate::run_bridge_child`] aufruft). Nur im Hauptthread.
+    pub fn new_isolated(
+        info: &PluginInfo,
+        sample_rate: u32,
+        max_frames: u32,
+        exe: &std::path::Path,
+    ) -> Result<Self, String> {
+        BridgeInstance::spawn(info, sample_rate, max_frames, exe).map(Self::Bridged)
+    }
+
     pub fn info(&self) -> &PluginInfo {
         match self {
             Self::Clap(i) => &i.info,
             Self::Lv2(i) => &i.info,
             Self::Vst3(i) => &i.info,
             Self::Au(i) => &i.info,
+            Self::Bridged(i) => &i.info,
         }
     }
 
@@ -46,6 +61,7 @@ impl PluginInstance {
             Self::Lv2(i) => &i.params,
             Self::Vst3(i) => &i.params,
             Self::Au(i) => &i.params,
+            Self::Bridged(i) => &i.params,
         }
     }
 
@@ -56,6 +72,7 @@ impl PluginInstance {
             Self::Lv2(i) => PluginHandle::Lv2(i.handle()),
             Self::Vst3(i) => PluginHandle::Vst3(i.handle()),
             Self::Au(i) => PluginHandle::Au(i.handle()),
+            Self::Bridged(i) => PluginHandle::Bridged(i.handle()),
         }
     }
 
@@ -66,6 +83,7 @@ impl PluginInstance {
             Self::Lv2(_) => None,
             Self::Vst3(_) => None,
             Self::Au(_) => None,
+            Self::Bridged(_) => None,
         }
     }
 
@@ -75,6 +93,7 @@ impl PluginInstance {
             Self::Lv2(i) => i.set_param(id, value),
             Self::Vst3(i) => i.set_param(id, value),
             Self::Au(i) => i.set_param(id, value),
+            Self::Bridged(i) => i.set_param(id, value),
         }
     }
 
@@ -85,6 +104,7 @@ impl PluginInstance {
             Self::Lv2(i) => i.set_param_at(time, id, value),
             Self::Vst3(i) => i.set_param_at(time, id, value),
             Self::Au(i) => i.set_param_at(time, id, value),
+            Self::Bridged(i) => i.set_param_at(time, id, value),
         }
     }
 
@@ -94,6 +114,7 @@ impl PluginInstance {
             Self::Lv2(i) => i.midi(time, data),
             Self::Vst3(i) => i.midi(time, data),
             Self::Au(i) => i.midi(time, data),
+            Self::Bridged(i) => i.midi(time, data),
         }
     }
 
@@ -103,6 +124,7 @@ impl PluginInstance {
             Self::Lv2(i) => i.note(time, key, velocity, on),
             Self::Vst3(i) => i.note(time, key, velocity, on),
             Self::Au(i) => i.note(time, key, velocity, on),
+            Self::Bridged(i) => i.note(time, key, velocity, on),
         }
     }
 
@@ -113,6 +135,7 @@ impl PluginInstance {
             Self::Lv2(i) => i.process(left, right),
             Self::Vst3(i) => i.process(left, right),
             Self::Au(i) => i.process(left, right),
+            Self::Bridged(i) => i.process(left, right),
         }
     }
 
@@ -122,6 +145,7 @@ impl PluginInstance {
             Self::Lv2(i) => i.stop_processing(),
             Self::Vst3(i) => i.stop_processing(),
             Self::Au(i) => i.stop_processing(),
+            Self::Bridged(i) => i.stop_processing(),
         }
     }
 }
@@ -133,15 +157,31 @@ pub enum PluginHandle {
     Lv2(Lv2Handle),
     Vst3(Vst3Handle),
     Au(AuHandle),
+    Bridged(BridgeHandle),
 }
 
 impl PluginHandle {
+    /// Läuft das Plugin in einem eigenen Prozess (Plugin-Bridge)?
+    pub fn is_isolated(&self) -> bool {
+        matches!(self, Self::Bridged(_))
+    }
+
+    /// Ist der Prozess eines isolierten Plugins abgestürzt oder hängt er? Der Insert schweigt
+    /// dann. Plugins im Programm selbst: immer `false`.
+    pub fn crashed(&self) -> bool {
+        match self {
+            Self::Bridged(h) => h.crashed(),
+            _ => false,
+        }
+    }
+
     pub fn save_state(&self) -> Option<Vec<u8>> {
         match self {
             Self::Clap(h) => h.save_state(),
             Self::Lv2(h) => h.save_state(),
             Self::Vst3(h) => h.save_state(),
             Self::Au(h) => h.save_state(),
+            Self::Bridged(h) => h.save_state(),
         }
     }
 
@@ -151,6 +191,7 @@ impl PluginHandle {
             Self::Lv2(h) => h.load_state(data),
             Self::Vst3(h) => h.load_state(data),
             Self::Au(h) => h.load_state(data),
+            Self::Bridged(h) => h.load_state(data),
         }
     }
 
@@ -161,6 +202,7 @@ impl PluginHandle {
             Self::Lv2(h) => h.presets(),
             Self::Vst3(_) => Vec::new(),
             Self::Au(_) => Vec::new(),
+            Self::Bridged(_) => Vec::new(),
         }
     }
 
@@ -177,6 +219,7 @@ impl PluginHandle {
     pub fn param_values(&self) -> Vec<(u32, f64)> {
         match self {
             Self::Clap(h) => h.param_values(),
+            Self::Bridged(h) => h.param_values(),
             _ => Vec::new(),
         }
     }
@@ -188,6 +231,7 @@ impl PluginHandle {
             Self::Lv2(h) => h.preset_values(uri),
             Self::Vst3(_) => Vec::new(),
             Self::Au(_) => Vec::new(),
+            Self::Bridged(_) => Vec::new(),
         }
     }
 
@@ -197,6 +241,7 @@ impl PluginHandle {
             Self::Lv2(h) => h.latency(),
             Self::Vst3(h) => h.latency(),
             Self::Au(h) => h.latency(),
+            Self::Bridged(h) => h.latency(),
         }
     }
 
@@ -206,6 +251,7 @@ impl PluginHandle {
             Self::Lv2(h) => h.take_latency_changed(),
             Self::Vst3(h) => h.take_latency_changed(),
             Self::Au(h) => h.take_latency_changed(),
+            Self::Bridged(h) => h.take_latency_changed(),
         }
     }
 
@@ -215,6 +261,7 @@ impl PluginHandle {
             Self::Lv2(h) => h.has_gui(),
             Self::Vst3(h) => h.has_gui(),
             Self::Au(h) => h.has_gui(),
+            Self::Bridged(_) => false,
         }
     }
 
@@ -224,6 +271,7 @@ impl PluginHandle {
             Self::Lv2(h) => h.gui_open(),
             Self::Vst3(h) => h.gui_open(),
             Self::Au(h) => h.gui_open(),
+            Self::Bridged(_) => false,
         }
     }
 
@@ -234,6 +282,7 @@ impl PluginHandle {
             Self::Lv2(_) => false,
             Self::Vst3(_) => false,
             Self::Au(_) => false,
+            Self::Bridged(h) => h.take_dirty(),
         }
     }
 
@@ -243,6 +292,9 @@ impl PluginHandle {
             Self::Lv2(h) => h.open_gui(title),
             Self::Vst3(h) => h.open_gui(title),
             Self::Au(h) => h.open_gui(title),
+            Self::Bridged(_) => {
+                Err("the editor of a plugin in its own process is not available yet".into())
+            }
         }
     }
 
@@ -252,6 +304,7 @@ impl PluginHandle {
             Self::Lv2(h) => h.close_gui(),
             Self::Vst3(h) => h.close_gui(),
             Self::Au(h) => h.close_gui(),
+            Self::Bridged(_) => {}
         }
     }
 
@@ -262,6 +315,7 @@ impl PluginHandle {
             Self::Lv2(h) => h.idle(),
             Self::Vst3(h) => h.idle(),
             Self::Au(h) => h.idle(),
+            Self::Bridged(_) => false,
         }
     }
 
@@ -273,6 +327,7 @@ impl PluginHandle {
             Self::Lv2(h) => h.take_param_changes(),
             Self::Vst3(h) => h.take_param_changes(),
             Self::Au(_) => Vec::new(),
+            Self::Bridged(h) => h.take_param_changes(),
         }
     }
 
@@ -283,6 +338,7 @@ impl PluginHandle {
             Self::Lv2(h) => h.set_ui_value(id, value),
             Self::Vst3(h) => h.set_ui_value(id, value),
             Self::Au(_) => {}
+            Self::Bridged(_) => {}
         }
     }
 }

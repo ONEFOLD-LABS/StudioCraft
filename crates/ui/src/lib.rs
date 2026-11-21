@@ -95,6 +95,7 @@ pub struct LoadedClip {
 }
 
 pub use inserts::enable_isolated_plugin_scan;
+pub use studiocraft_plugin_host::run_bridge_child as run_plugin_bridge_child;
 pub use studiocraft_plugin_host::run_scan_child as run_plugin_scan_child;
 pub use tools::{Grid, Tool};
 
@@ -1974,21 +1975,21 @@ mod tests {
     use studiocraft_project::TempoMap;
 
     /// Rendert das Projektfenster headless. Mit `STUDIOCRAFT_SHOTS=<ordner>`
-    /// werden die Bilder gespeichert, sonst wird nur geprüft, dass es rendert.
-    fn shot(name: &str, setup: impl FnOnce(&mut ProjectWindow)) {
+    /// werden die Bilder gespeichert (dazu jede Ansicht ein zweites Mal im hellen Theme als
+    /// `<name>-hell.png`), sonst wird nur geprüft, dass es rendert.
+    fn shot(name: &str, setup: impl Fn(&mut ProjectWindow)) {
         shot_sized(name, egui::vec2(1400.0, 860.0), setup);
     }
 
-    fn shot_sized(name: &str, size: egui::Vec2, setup: impl FnOnce(&mut ProjectWindow)) {
+    /// Wie [`shot`], nur dunkel: für Einrichtungen, die etwas verbrauchen (eine Engine).
+    fn shot_once(name: &str, setup: impl FnOnce(&mut ProjectWindow)) {
         let mut w = ProjectWindow::new(Project::demo(100), None, "kein Audio (Test)".into());
         setup(&mut w);
         let mut harness = Harness::builder()
-            .with_size(size)
+            .with_size(egui::vec2(1400.0, 860.0))
             .with_step_dt(1.0 / 60.0)
             .wgpu()
             .build_ui(move |ui| w.ui(ui));
-        // Pegelanzeigen klingen ab und fordern weitere Frames an: feste Schrittzahl,
-        // danach die Barrierefreiheit ausdrücklich prüfen.
         harness.run_steps(4);
         harness.check_accessibility();
         let Ok(img) = harness.render() else {
@@ -1998,6 +1999,42 @@ mod tests {
         if let Ok(dir) = std::env::var("STUDIOCRAFT_SHOTS") {
             img.save(std::path::Path::new(&dir).join(format!("{name}.png")))
                 .unwrap();
+        }
+    }
+
+    fn shot_sized(name: &str, size: egui::Vec2, setup: impl Fn(&mut ProjectWindow)) {
+        let dir = std::env::var("STUDIOCRAFT_SHOTS").ok();
+        let light_too = dir.is_some() && !name.ends_with("hell");
+        for light in [false, true] {
+            if light && !light_too {
+                break;
+            }
+            let mut w = ProjectWindow::new(Project::demo(100), None, "kein Audio (Test)".into());
+            setup(&mut w);
+            if light {
+                w.theme = egui::ThemePreference::Light;
+            }
+            let mut harness = Harness::builder()
+                .with_size(size)
+                .with_step_dt(1.0 / 60.0)
+                .wgpu()
+                .build_ui(move |ui| w.ui(ui));
+            // Pegelanzeigen klingen ab und fordern weitere Frames an: feste Schrittzahl,
+            // danach die Barrierefreiheit ausdrücklich prüfen.
+            harness.run_steps(4);
+            harness.check_accessibility();
+            let Ok(img) = harness.render() else {
+                eprintln!("kein GPU-Renderer verfügbar, Bild übersprungen");
+                return;
+            };
+            if let Some(dir) = &dir {
+                let file = if light {
+                    format!("{name}-hell.png")
+                } else {
+                    format!("{name}.png")
+                };
+                img.save(std::path::Path::new(dir).join(file)).unwrap();
+            }
         }
     }
 
@@ -3805,6 +3842,7 @@ mod tests {
                 bypass: false,
                 params: Vec::new(),
                 state: None,
+                isolated: false,
             });
         let range = w.render_range(0).unwrap();
         w.render_in_place(render::RenderSpec::track(0, range, false));
@@ -3844,6 +3882,7 @@ mod tests {
             bypass: false,
             params: Vec::new(),
             state: None,
+            isolated: false,
         };
         w.add_plugin_process(id, slot, (0, 24_000))
             .unwrap_or_else(|e| panic!("{}: {e}", fx.name));
@@ -3937,6 +3976,7 @@ mod tests {
                 bypass: false,
                 params: Vec::new(),
                 state: None,
+                isolated: false,
             });
         w.selected_track = Some(0);
         w
@@ -6750,6 +6790,7 @@ mod tests {
                 bypass: false,
                 params: Vec::new(),
                 state: None,
+                isolated: false,
             });
         let first = w.project.tracks[0].name.clone();
         w.show_lower = true;
@@ -6848,6 +6889,7 @@ mod tests {
                     bypass: true,
                     params: Vec::new(),
                     state: None,
+                    isolated: false,
                 });
         });
     }
@@ -7263,7 +7305,7 @@ mod tests {
     #[test]
     fn renders_recording_in_progress() {
         let (mut core, ctl) = studiocraft_engine::engine(48_000, TempoMap::default());
-        shot("aufnahme", move |w| {
+        shot_once("aufnahme", move |w| {
             w.project = Project::default();
             let bar = 4 * TICKS_PER_QUARTER;
             w.import_clip("Playback", None, tone_clip(8.0, 110.0), None)
@@ -7329,6 +7371,7 @@ mod tests {
                 bypass: false,
                 params: Vec::new(),
                 state: None,
+                isolated: false,
             });
         w.checkpoint(before);
         w.sync_inserts();
@@ -7377,6 +7420,7 @@ mod tests {
                 bypass: false,
                 params: Vec::new(),
                 state: None,
+                isolated: false,
             });
         w.sync_inserts();
         let h = w.plugins.sent[0].handles[0].as_ref().unwrap();
@@ -7396,6 +7440,7 @@ mod tests {
                 bypass: false,
                 params: Vec::new(),
                 state: None,
+                isolated: false,
             });
         w.sync_inserts();
         assert!(
@@ -7471,6 +7516,51 @@ mod tests {
         h.get_by_label("Kein Kanal");
     }
 
+    /// Insert-Menü „…“: „In eigenem Prozess“ ist ein Undo-Schritt; ohne Helferprogramm (Tests)
+    /// meldet das Laden das, statt abzustürzen; „Neu laden“ nach einem Absturz.
+    #[cfg(unix)]
+    #[test]
+    fn an_insert_can_be_switched_to_its_own_process() {
+        let mut p = Project::default();
+        let t = p.add_track(TrackKind::Audio, "A");
+        p.tracks[t].inserts.push(studiocraft_project::InsertSlot {
+            plugin_id: "test.missing".into(),
+            name: "Fehlt".into(),
+            bypass: false,
+            params: Vec::new(),
+            state: None,
+            isolated: false,
+        });
+        let mut w = ProjectWindow::new(p, None, String::new());
+        w.selected_track = Some(t);
+        w.show_inspector = true;
+        let mut h = window_harness(w);
+        h.get_by_label("Insert-Menü").click();
+        h.run_steps(2);
+        h.get_by_label("In eigenem Prozess").click();
+        h.run_steps(2);
+        assert!(h.state().project.tracks[t].inserts[0].isolated);
+        h.state_mut().undo();
+        assert!(!h.state().project.tracks[t].inserts[0].isolated);
+
+        // Isoliert, aber ohne Helferprogramm: eine Meldung, kein Absturz.
+        let w = h.state_mut();
+        w.project.tracks[t].inserts[0].isolated = true;
+        w.plugins.list = Some(vec![studiocraft_plugin_host::PluginInfo {
+            id: "test.missing".into(),
+            name: "Fehlt".into(),
+            ..Default::default()
+        }]);
+        let slot = w.project.tracks[t].inserts[0].clone();
+        let e = w.instantiate(&slot).err().unwrap_or_default();
+        assert!(e.contains("Eigener Prozess"), "{e}");
+
+        // Nach einem gemeldeten Absturz baut „Neu laden“ die Kette neu.
+        w.plugins.crashed.insert((t, 0));
+        w.reload_insert(t, 0);
+        assert!(!w.plugins.crashed.contains(&(t, 0)));
+    }
+
     #[test]
     fn renders_inserts_in_inspector() {
         shot("inserts", |w| {
@@ -7486,6 +7576,7 @@ mod tests {
                         bypass: false,
                         params: Vec::new(),
                         state: None,
+                        isolated: false,
                     });
                 w.sync_inserts();
             }
@@ -7987,6 +8078,7 @@ mod tests {
                 bypass: false,
                 params: Vec::new(),
                 state: None,
+                isolated: false,
             });
         w.sync_inserts();
         core.process(&mut [0.0; 512]);
@@ -8040,6 +8132,7 @@ mod tests {
             bypass: false,
             params: Vec::new(),
             state: None,
+            isolated: false,
         };
         w.add_audio_track();
         w.project.tracks[0].inserts.push(slot(&fx));
@@ -8161,6 +8254,7 @@ mod tests {
                         bypass: false,
                         params: Vec::new(),
                         state: None,
+                        isolated: false,
                     });
             }
             w.selected_track = Some(0);
