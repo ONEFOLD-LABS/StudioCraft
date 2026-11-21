@@ -48,6 +48,10 @@ Eine Zeile, Gruppen durch schmale Trenner getrennt, Knöpfe quadratisch mit Symb
 3. **Rechts:** die Zonen-Schalter linke Zone (Alt+L), untere Zone, rechte Zone (Alt+R),
    hervorgehoben, wenn die Zone sichtbar ist.
 
+**Schmale Fenster:** Passen die drei Bereiche nicht in eine Zeile, bricht die Werkzeugzeile um:
+oben globale Zustände und Zonen-Schalter, darunter Werkzeuge und Snap-Gruppe. Kein Knopf liegt
+außerhalb des Fensters.
+
 ## Info-Zeile
 
 Direkt unter der Werkzeugzeile, eine Zeile mit beschrifteten Feldern. Ohne Auswahl ein grauer
@@ -55,6 +59,7 @@ Hinweis „Keine Auswahl“. Bei einem Event: Name, Anfang, Ende, Länge, Versat
 Fade-In, Fade-Out, Stumm. Zeitwerte im Format des Lineals (Takt.Zählzeit.Sechzehntel.Ticks).
 Bei Mehrfachauswahl: Werte des frühesten Events, Beschriftungen gelb, davor die Anzahl; Zeitwerte
 ändern alle relativ, Name und Stumm gelten für alle; ein Rückgängig-Schritt je Änderung.
+In schmalen Fenstern bricht die Zeile um; eine Beschriftung bleibt bei ihrem Feld.
 
 ## Spurliste
 
@@ -132,8 +137,8 @@ zeigen die Plugin-Liste schon gefiltert. Auf der Startseite gibt es kein Suchfel
 
 ## Transportleiste
 
-Gruppen von links nach rechts, durch Trenner getrennt und zusammen auf die Fensterbreite zentriert
-(in schmalen Fenstern ab dem linken Rand):
+Gruppen von links nach rechts, durch Trenner getrennt und zusammen auf die Fensterbreite zentriert.
+In schmalen Fenstern bricht die Leiste zwischen den Gruppen um, nie innerhalb einer Gruppe:
 
 1. Locatoren: L und R mit Position, Punch-In, Cycle, Punch-Out dazwischen
 2. Hauptanzeige: Position in Takten groß, darunter/daneben Zeit
@@ -142,9 +147,36 @@ Gruppen von links nach rechts, durch Trenner getrennt und zusammen auf die Fenst
 5. Tempo und Taktart, Metronom (Klick), Vorzähler
 
 Gerät, Last und Meldungen stehen in der Statuszeile darunter; ist sie ausgeblendet, erscheinen
-Meldungen rechts in der Transportleiste.
+Meldungen rechts in der Transportleiste, gekürzt auf den freien Platz, nie über Tempo und Takt.
 
 Die Positionsanzeige hat einen dunklen Hintergrund (`counter_bg`) mit heller Schrift.
+
+## Kleine Fenster
+
+Bis etwa 800 × 500 Pixel bleibt jedes Bedienelement erreichbar (Tests in `crates/ui/src/lib.rs`):
+Werkzeugzeile, Info-Zeile, Transportleiste und die Kopfzeilen von Key-, Drum- und Noten-Editor
+brechen um; die Liste der Bearbeitungen im Sample-Editor bricht lange Namen um. Die untere Zone
+lässt dem Arrangement immer Platz und scrollt ihren Inhalt; die linke Zone scrollt in niedrigen
+Fenstern.
+
+## Dialoge
+
+- Escape schließt den obersten offenen Dialog, nicht aber, solange ein Textfeld den Fokus hat, ein
+  Menü offen ist, die Rückfrage „Ungesicherte Änderungen“ offen ist oder der Dialog
+  Tastaturbefehle eine Taste aufnimmt.
+- Beim Öffnen bekommt ein Dialog den Tastaturfokus, beim Schließen geht er zurück.
+- Modal sind die kurzen Bestätigungsdialoge Über, Audio- und MIDI-Geräte, Stems exportieren, Noten
+  exportieren und Wiederholen: Tab bleibt im Dialog, dahinter wirken weder Klicks noch
+  Tastenkürzel. Die Wiedergabe läuft weiter.
+- Frei bedienbar bleiben die Arbeitsfenster Tastaturbefehle, Drum-Map, Fade/Crossfade,
+  Quantisierung, Video und Audio-Anschlüsse.
+
+## Bedienhilfen
+
+Jedes Bedienelement hat einen Namen für Screenreader (Render-Tests prüfen das mit
+`check_accessibility`). Die gezeichneten Flächen sagen, was sie zeigen: Event-Anzeige, Notenraster,
+Drum-Raster und Partitur nennen Inhalt und Anzahl; ein Kanalzug im Mixer ist ein Knopf
+„Kanal … wählen“.
 
 ## Farben
 
@@ -153,6 +185,9 @@ Die Positionsanzeige hat einen dunklen Hintergrund (`counter_bg`) mit heller Sch
 - Weinrot nur für: aktives Werkzeug, aktive Reiter, Auswahlrahmen, Cycle-Bereich, Fokusrahmen.
   Nicht für ganze Zeilen- oder Kanalhintergründe.
 - Statusfarben (Mute, Solo, Aufnahme, Monitor) bleiben eindeutig und unabhängig vom Akzent.
+- Schrift auf Spurfarben (Eventköpfe, Namensfelder im Mixer, Inspector-Kopf) ist schwarz oder
+  weiß, je nachdem, was mehr Kontrast hat (`theme::text_on`), auch bei eigenen, sehr dunklen
+  Spurfarben.
 
 ## Reihenfolge der Umsetzung
 

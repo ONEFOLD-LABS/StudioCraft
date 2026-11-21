@@ -1,6 +1,6 @@
 # Cleanroom-Spezifikation: DAW-Bedienkonzept
 
-Stand: 2026-11-18
+Stand: 2026-11-21
 
 > Diese Datei ist ein Export. Änderungen bitte zuerst in der lebenden Fassung machen und danach hier nachziehen.
 
@@ -56,7 +56,7 @@ Ein Projekt besteht aus Spuren, auf denen Events liegen; Audio-Events verweisen 
 
 **Undo:** Jede Bearbeitung ist ein Befehl im Undo-Verlauf. Der Verlauf ist unbegrenzt konfigurierbar und wird mit dem Projekt nicht gespeichert.
 
-**Automatische Sicherung:** In einstellbarem Abstand (Datei → „Automatisch sichern“, Standard 5 Minuten, „Aus“ möglich) sichert StudioCraft geänderte Projekte als nummerierte Dateien neben der Projektdatei (`Name.backup-07.studiocraft`), ungespeicherte Projekte im Einstellungsordner. Die ältesten Sicherungen über der eingestellten Anzahl (Standard 10) werden gelöscht. Sicherungen schreiben atomar im Hintergrund und markieren das Projekt nicht als gespeichert. Wurde StudioCraft nicht sauber beendet, bietet es beim nächsten Start die neueste Sicherung an; sie öffnet sich als ungespeicherte Fassung des ursprünglichen Projekts.
+**Automatische Sicherung:** In einstellbarem Abstand (Datei → „Automatisch sichern“, Standard 5 Minuten, „Aus“ möglich) sichert StudioCraft geänderte Projekte als nummerierte Dateien neben der Projektdatei (`Name.backup-07.studiocraft`), ungespeicherte Projekte im Einstellungsordner. Die ältesten Sicherungen über der eingestellten Anzahl (Standard 10) werden gelöscht. Sicherungen schreiben atomar im Hintergrund und markieren das Projekt nicht als gespeichert. Wurde StudioCraft nicht sauber beendet, bietet es beim nächsten Start die neueste Sicherung an; sie öffnet sich als ungespeicherte Fassung des ursprünglichen Projekts. Aufnahmen im Aufnahmeordner des Projekts, die neuer als die Sicherung sind und von keinem Clip benutzt werden, bietet ein Dialog „Aufnahmen nach der Sicherung“ an: „Als Takes einfügen“ legt sie auf neue Audiospuren (mehrkanalige Rohaufnahmen als eine Mono-Datei je Kanal neben dem Original), in einem Undo-Schritt; gelöscht wird nichts.
 
 ## Fenster-Architektur
 
@@ -86,6 +86,9 @@ Alles passiert in einem Projektfenster: In der Mitte liegt die Event-Anzeige, um
 - Zonengrößen sind per Trenner ziehbar und werden im Projekt gespeichert
 - Fensterlayouts (welche Zonen und Fenster offen sind) lassen sich benennen und per Tastenkombination abrufen
 - Mehrere Monitore: jedes eigenständige Fenster merkt sich Bildschirm und Position
+- Kleine Fenster: Werkzeugzeile, Info-Zeile und Transportleiste brechen zwischen ihren Gruppen in weitere Zeilen um, statt Knöpfe hinter dem Fensterrand zu verlieren; breit stehen Werkzeuge und Transportleiste zentriert in einer Zeile. Die untere Zone lässt dem Arrangement immer Platz, linke und untere Zone scrollen ihren Inhalt in niedrigen Fenstern (Einzelheiten in `docs/ui-parity.md`)
+
+**Dialoge:** Escape schließt den obersten offenen Dialog, je Tastendruck einen; nicht, solange ein Textfeld den Fokus hat, ein Menü offen ist oder im Dialog Tastaturbefehle eine Taste aufgenommen wird. Beim Öffnen bekommt ein Dialog den Tastaturfokus, beim Schließen geht er zurück. Kurze Bestätigungsdialoge (Über, Audio- und MIDI-Geräte, Stems exportieren, Noten exportieren, Wiederholen) sind modal: Tab bleibt im Dialog, dahinter wirken weder Klicks noch Tastenkürzel, Wiedergabe und Aufnahme laufen weiter. Arbeitsfenster (Tastaturbefehle, Drum-Map, Fades, Quantisierung, Video, Audio-Anschlüsse) bleiben frei bedienbar.
 
 ## Spurtypen und Inspector
 
@@ -167,6 +170,8 @@ Bearbeiten → „Spur einfrieren“ rendert eine Audio- oder Instrument-Spur mi
 
 Datei → „Stems exportieren …“ schreibt je gewähltem Kanal eine Datei: Spuren, Gruppen und FX-Kanäle (samt allem, was in sie hineinläuft) und den Hauptmix. Alle Dateien decken denselben Bereich ab (zwischen den Locatoren, sonst das ganze Projekt, mit 2 s Nachklang) und sind sampelgenau gleich lang. „Mit Kanalbearbeitung“ nimmt Inserts, EQ, Fader und Panorama des Kanals mit, sonst nur, was hineinläuft. Dateiname nach Muster (`{projekt}`, `{kanal}`, `{nr}`), Format wie beim Mixdown (WAV, FLAC, AIFF mit 24 Bit, Projekt-Abtastrate).
 
+**Grenzen beim Export:** Ein Mixdown- oder Stem-Bereich darf höchstens so lang sein, wie eine 24-Bit-Stereo-WAV fassen kann (gut vier Stunden bei 48 kHz). Längere Bereiche lehnt StudioCraft vor dem Schreiben mit einer Meldung ab, die Grenze und Abhilfe nennt.
+
 **Verschieben und Kopieren**
 
 | Aktion | Eingabe |
@@ -208,6 +213,8 @@ Die Transportleiste unten im Projektfenster bedient Wiedergabe, Aufnahme und Loc
 | Nachträgliches Retrospective Record | – | Gespielte Noten ohne Aufnahme nachträglich als Part übernehmen (Umschalt + Nummernblock-Mal) |
 
 Die MIDI-Modi stehen unter Transport → „MIDI-Aufnahme“ (Projekteinstellung; Standard: neuer Part, im Cycle gestapelt). „Nachträgliche Aufnahme“ (Umschalt + Nummernblock-Mal, auch im Menü Transport) übernimmt die zuletzt gespielten, nicht aufgenommenen Noten der Keyboard-Spur als neuen Part: während der Wiedergabe an ihrer Position (im Cycle der letzte Durchgang), im Stopp ab dem Cursor im gespielten Abstand.
+
+**Aufnahme sicher:** Eine Aufnahmedatei, die sich nicht anlegen lässt, meldet StudioCraft vor dem Start, und die Aufnahme beginnt nicht. Bricht das Schreiben während der Aufnahme ab (z. B. volle Platte), wird der bis dahin geschriebene Teil als Take übernommen, mit einer Meldung. Neu, Öffnen, Beenden und das Schließen des Fensters beenden eine laufende Aufnahme zuerst und legen den Take ab; danach fragt StudioCraft wie gewohnt nach dem Speichern. Der Dateikopf wird während der Aufnahme regelmäßig geschrieben, sodass die Datei nach einem Absturz bis kurz davor lesbar ist. Eine WAV-Datei fasst höchstens 4 GiB (bei acht Eingängen und 48 kHz etwa 46 Minuten); längere Aufnahmen laufen nahtlos in Folgedateien weiter („Name-002.wav“, „-003“ …). Jede Datei wird je Spur ein Clip, der Take liegt als Audio-Part aus lückenlos aufeinanderfolgenden Events auf der Spur.
 
 **Takes und Lanes:** Takes einer Spur liegen in Lanes unter ihr. Mit dem Comp-Werkzeug wählt man pro Abschnitt den besten Take; die Spur spielt nur die gewählten Abschnitte. Comping ist seit 0.7 da (Comp-Werkzeug, kurze Crossfades an den Abschnittsgrenzen).
 
@@ -366,7 +373,7 @@ Alle Befehle laufen über eine zentrale Befehlsliste mit frei belegbaren Tasten;
 | Bearbeitung | J / Q / X | Snap / Quantisieren / Crossfade |
 | Transport | C / I / O | Metronom / Punch-In / Punch-Out |
 
-**Fokus-Regel:** Tasten wirken auf das Fenster unter dem Fokus. Hat ein Editor in der unteren Zone den Fokus, beziehen sich Bearbeitungsbefehle auf seine Noten, nicht auf die Events im Projektfenster. Ein schmaler Rahmen zeigt, welche Zone den Fokus hat.
+**Fokus-Regel:** Unter einem modalen Dialog wirken keine Tastenkürzel (siehe Fenster-Architektur, Dialoge). Tasten wirken auf das Fenster unter dem Fokus. Hat ein Editor in der unteren Zone den Fokus, beziehen sich Bearbeitungsbefehle auf seine Noten, nicht auf die Events im Projektfenster. Ein schmaler Rahmen zeigt, welche Zone den Fokus hat.
 
 ## Grundsatzentscheidungen, MVP und offene Fragen
 
@@ -378,6 +385,8 @@ Der MVP ist erreicht, wenn man ein Lied mit Audio- und Instrument-Spuren aufnehm
 | --- | --- |
 | Fensternamen | allgemeine Begriffe: Mixer, Browser, Inspector |
 | Erscheinungsbild | nur ein dunkles Theme, auch im Browser; keine Wahl zwischen hell und dunkel (2026-11-21) |
+| Sprache | Deutsch und Englisch. Eingebaute Standardnamen (Busse „Eingang 1/2“, Zeilen der General-MIDI-Drum-Map) werden nur in der Anzeige übersetzt, solange der Nutzer sie nicht umbenannt hat; Projektdateien speichern sie deutsch |
+| Grenzen | Positionen und Längen höchstens 100 000 Takte, beim Laden von Projektdateien wie bei Befehlen über den MCP-Server; Export höchstens so lang, wie eine 24-Bit-Stereo-WAV fasst |
 | Plugin-Formate | CLAP zuerst, dann VST3, AU (nur macOS) und LV2; kein VST2 |
 | Audio-Backend | cpal: PipeWire, ALSA, JACK (Linux, FreeBSD), WASAPI (Windows; dazu eigene Hosts für WASAPI exklusiv und mit geringer Latenz), CoreAudio (macOS), Web Audio (WASM). ASIO nicht in den Paketen (SDK-Lizenz), nur als Feature im Code |
 | Lizenzierung | keine Aktivierung; eigener Code MIT oder Apache-2.0, Lizenzhinweise aller Komponenten in THIRD-PARTY-LICENSES.txt |
