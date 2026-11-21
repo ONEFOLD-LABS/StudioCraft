@@ -111,6 +111,8 @@ impl crate::ProjectWindow {
         let (mut out_curve, mut in_curve) = (a.fade_out_curve, b.fade_in_curve);
         let overlap = a.end().saturating_sub(b.start.0);
         let tempo = self.project.tempo.clone();
+        self.dialogs
+            .escape_closes(ctx, crate::dialog::window_id(tr("Crossfade")), &mut open);
         egui::Window::new(tr("Crossfade"))
             .open(&mut open)
             .resizable(false)
@@ -195,6 +197,8 @@ impl crate::ProjectWindow {
         };
         let mut open = true;
         let mut new = ev.clone();
+        self.dialogs
+            .escape_closes(ctx, crate::dialog::window_id(tr("Fade")), &mut open);
         egui::Window::new(tr("Fade"))
             .open(&mut open)
             .resizable(false)

@@ -207,6 +207,8 @@ impl ProjectWindow {
         let mut open = true;
         let mut changes = Vec::new();
         let (mut save, mut load) = (false, false);
+        self.dialogs
+            .escape_closes(ctx, egui::Id::unique("drum-map-editor"), &mut open);
         let r = egui::Window::new(trf("Drum-Map: {spur}", &[("spur", &track_name)]))
             .id(egui::Id::unique("drum-map-editor"))
             .open(&mut open)

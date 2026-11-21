@@ -803,6 +803,8 @@ impl ProjectWindow {
             v.poll(ctx);
         }
         let mut open = true;
+        self.dialogs
+            .escape_closes(ctx, crate::dialog::window_id(tr("Video")), &mut open);
         egui::Window::new(tr("Video"))
             .open(&mut open)
             .default_size([480.0, 300.0])

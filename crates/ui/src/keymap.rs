@@ -1401,6 +1401,14 @@ impl crate::ProjectWindow {
             return;
         }
         let mut open = true;
+        // Nimmt der Dialog gerade eine Taste auf, gehört Escape der Aufnahme (Abbruch).
+        if self.key_dialog.capturing.is_none() {
+            self.dialogs.escape_closes(
+                ctx,
+                crate::dialog::window_id(tr("Tastaturbefehle")),
+                &mut open,
+            );
+        }
         egui::Window::new(tr("Tastaturbefehle"))
             .open(&mut open)
             .default_size([560.0, 520.0])

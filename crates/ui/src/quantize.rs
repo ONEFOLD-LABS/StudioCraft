@@ -46,6 +46,11 @@ pub(crate) fn panel(w: &mut ProjectWindow, ctx: &Context) {
         return;
     }
     let mut open = true;
+    w.dialogs.escape_closes(
+        ctx,
+        crate::dialog::window_id(tr("Quantisierung")),
+        &mut open,
+    );
     egui::Window::new(tr("Quantisierung"))
         .open(&mut open)
         .resizable(false)

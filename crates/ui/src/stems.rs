@@ -187,6 +187,11 @@ impl ProjectWindow {
         let mut open = true;
         let mut run = false;
         let d = &mut self.stems;
+        self.dialogs.escape_closes(
+            ctx,
+            crate::dialog::window_id(tr("Stems exportieren")),
+            &mut open,
+        );
         egui::Window::new(tr("Stems exportieren"))
             .open(&mut open)
             .resizable(false)

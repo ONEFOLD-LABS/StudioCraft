@@ -31,6 +31,11 @@ impl ProjectWindow {
             return;
         }
         let mut open = true;
+        self.dialogs.escape_closes(
+            ui.ctx(),
+            crate::dialog::window_id(tr("Über StudioCraft")),
+            &mut open,
+        );
         egui::Window::new(tr("Über StudioCraft"))
             .open(&mut open)
             .collapsible(false)
