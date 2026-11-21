@@ -926,8 +926,6 @@ pub(crate) mod cocoawin {
 
 #[cfg(test)]
 mod tests {
-    use clap_sys::ext::gui::{CLAP_WINDOW_API_WAYLAND, CLAP_WINDOW_API_X11};
-
     use super::*;
 
     /// Die Tests ändern das gemeldete Hauptfenster (global): nacheinander.
@@ -938,6 +936,7 @@ mod tests {
     #[cfg(all(unix, not(target_os = "macos")))]
     #[test]
     fn the_window_plan_follows_the_session() {
+        use clap_sys::ext::gui::{CLAP_WINDOW_API_WAYLAND, CLAP_WINDOW_API_X11};
         let all = |_: &CStr, _: bool| true;
         assert_eq!(
             plan(true, all),
