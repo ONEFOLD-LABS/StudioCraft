@@ -920,3 +920,4 @@ Nicht einfügen	Don't Insert
 Die Dateien bleiben im Aufnahmeordner.	The files stay in the recordings folder.
 {name} (+{n} Folgedateien)	{name} (+{n} continuation files)
 {name} (+1 Folgedatei)	{name} (+1 continuation file)
+Abgebrochen: zu viele Schritte – der Verlauf für das Modell ist zu groß geworden. Schreib weiter, um neu anzusetzen.	Stopped: too many steps – the history for the model has grown too large. Write again to start afresh.
