@@ -157,15 +157,7 @@ pub(crate) fn field(
 ) -> Option<String> {
     let id = ui.make_persistent_id(("infozeile", label));
     // Beschriftung und Feld bleiben beim Umbrechen beisammen.
-    let label_width = egui::WidgetText::from(label)
-        .into_galley(
-            ui,
-            Some(egui::TextWrapMode::Extend),
-            f32::INFINITY,
-            egui::TextStyle::Body,
-        )
-        .size()
-        .x;
+    let label_width = text_width(ui, label);
     let margin = ui.spacing().button_padding.x * 2.0;
     keep_together(
         ui,
@@ -194,6 +186,19 @@ pub(crate) fn field(
     ui.data_mut(|d| d.remove_temp::<String>(id));
     let cancelled = ui.input(|i| i.key_pressed(Key::Escape));
     (r.lost_focus() && !cancelled && text != value).then_some(text)
+}
+
+/// Breite von `text` in der Grundschrift, ohne Umbruch.
+pub(crate) fn text_width(ui: &Ui, text: &str) -> f32 {
+    egui::WidgetText::from(text)
+        .into_galley(
+            ui,
+            Some(egui::TextWrapMode::Extend),
+            f32::INFINITY,
+            egui::TextStyle::Body,
+        )
+        .size()
+        .x
 }
 
 /// Beginnt in einer umbrechenden Zeile eine neue Zeile, wenn `width` nicht mehr in die laufende
