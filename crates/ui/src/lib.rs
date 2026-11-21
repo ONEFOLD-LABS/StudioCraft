@@ -5672,6 +5672,63 @@ mod tests {
         });
     }
 
+    /// Prüft in einem `width` breiten Fenster, dass die Widgets `labels` ganz im Fenster liegen.
+    fn assert_inside(width: f32, labels: &[&str], setup: impl FnOnce(&mut ProjectWindow)) {
+        let mut w = ProjectWindow::new(Project::default(), None, String::new());
+        setup(&mut w);
+        let mut h = Harness::builder()
+            .with_size(egui::vec2(width, 600.0))
+            .with_step_dt(1.0 / 60.0)
+            .build_ui_state(|ui, w: &mut ProjectWindow| w.ui(ui), w);
+        h.run_steps(3);
+        for label in labels {
+            let r = h.get_by_label(label).rect();
+            assert!(
+                r.right() <= width,
+                "{label} at {r:?} is cut off in a {width} px window"
+            );
+        }
+    }
+
+    #[test]
+    fn editor_header_rows_wrap_inside_narrow_windows() {
+        let note = studiocraft_project::Note {
+            pitch: 60,
+            velocity: 96,
+            start: 960,
+            length: 960,
+            spelling: 0,
+        };
+        // Key-Editor mit gewählter Note: die Werte der Note stehen in der Kopfzeile.
+        assert_inside(800.0, &["Tonhöhe", "Velocity"], |w| {
+            let row = w.project.add_track(TrackKind::Instrument, "Synth");
+            let part = w.project.create_event(row, 0, 4 * 3840).unwrap();
+            w.project.event_mut(part).unwrap().notes = vec![note];
+            w.open_key_editor(part);
+            w.key_editor.selection = vec![0];
+        });
+        // Drum-Editor: dieselbe Kopfzeile mit dem Namen der Drum-Map davor.
+        assert_inside(800.0, &["Folgen (F)", "Tonhöhe", "Velocity"], |w| {
+            let row = w.project.add_track(TrackKind::Instrument, "Drums");
+            w.project.tracks[row].drum_map = Some(studiocraft_project::DrumMap::general_midi());
+            let part = w.project.create_event(row, 0, 4 * 3840).unwrap();
+            w.project.event_mut(part).unwrap().notes = vec![note];
+            w.open_key_editor(part);
+            w.key_editor.selection = vec![0];
+        });
+        // Noten-Editor: Werkzeuge für Notenwert und Vorzeichen.
+        assert_inside(
+            800.0,
+            &["Exportieren …", "Enharmonisch verwechseln"],
+            |w| {
+                score_part(w);
+                w.key_editor.selection = vec![3];
+                w.show_lower = true;
+                w.lower = LowerZone::Score;
+            },
+        );
+    }
+
     #[test]
     fn renders_key_editor_with_several_parts() {
         shot("key-editor-parts", |w| {
