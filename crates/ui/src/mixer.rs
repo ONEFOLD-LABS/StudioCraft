@@ -326,7 +326,7 @@ pub(crate) fn show(w: &mut ProjectWindow, ui: &mut Ui) {
             .io
             .outputs
             .first()
-            .map_or_else(|| tr("Ausgang").to_owned(), |b| b.name.clone());
+            .map_or_else(|| tr("Ausgang").to_owned(), |b| crate::names::bus(&b.name));
         let master = Strip {
             id: usize::MAX,
             name: &main_name,
@@ -378,7 +378,7 @@ fn io_strips(w: &mut ProjectWindow, ui: &mut Ui, height: f32, outputs: bool) -> 
         } else {
             usize::MAX - 1 - studiocraft_project::MAX_IO_BUSES - k
         };
-        let name = bus.name.clone();
+        let name = crate::names::bus(&bus.name);
         let strip = Strip {
             id,
             name: &name,

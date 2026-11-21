@@ -59,6 +59,7 @@ mod menu;
 mod midi_file;
 mod midiout_ui;
 mod mixer;
+mod names;
 mod noteinfo;
 mod panel_undo;
 #[cfg(test)]
@@ -4456,6 +4457,40 @@ mod tests {
         ];
         i18n::set_language(i18n::Language::German);
         assert_eq!(found, [true; 3]);
+    }
+
+    #[test]
+    fn english_shows_built_in_names_translated_but_saves_them_german() {
+        i18n::set_language(i18n::Language::English);
+        // Mixer: the input bus strip.
+        let mixer = window_harness(ProjectWindow::new(Project::demo(4), None, String::new()));
+        let strip = mixer.query_by_label("Select channel Input 1/2").is_some();
+        // Drum editor with the built-in General MIDI map.
+        let mut w = ProjectWindow::new(Project::demo(4), None, String::new());
+        // A second input bus: not the default set any more, so the busses are saved.
+        w.project.io.add(false, true).unwrap();
+        let row = w.project.add_track(TrackKind::Instrument, "Drums");
+        w.project.tracks[row].drum_map = Some(studiocraft_project::DrumMap::general_midi());
+        let part = w.project.create_event(row, 0, 4 * 3840).unwrap();
+        w.open_key_editor(part);
+        let h = window_harness(w);
+        let found = [strip, h.query_by_label_contains("Muted Triangle").is_some()];
+        let json = studiocraft_project::file::to_json(&h.state().project);
+        i18n::set_language(i18n::Language::German);
+        assert_eq!(found, [true; 2]);
+        assert!(
+            json.contains("\"Eingang 1/2\""),
+            "input bus saved in German"
+        );
+        assert!(
+            json.contains("\"Eingang 3/4\""),
+            "new input bus named in German"
+        );
+        assert!(
+            json.contains("Triangel gedämpft"),
+            "drum row saved in German"
+        );
+        assert!(!json.contains("Input ") && !json.contains("Muted Triangle"));
     }
 
     #[test]

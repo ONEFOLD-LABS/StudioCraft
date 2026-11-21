@@ -924,3 +924,40 @@ Mute aufheben (alle Spuren)	Clear mute (all tracks)
 Solo aufheben (alle Spuren)	Clear solo (all tracks)
 Doppelklick: an den Cursor der gewählten Audio-Spur	Double-click: to the cursor on the selected audio track
 Doppelklick: auf eine neue Audio-Spur	Double-click: onto a new audio track
+Bassdrum 2	Bass Drum 2
+Bassdrum	Bass Drum
+Sidestick	Side Stick
+Klatschen	Clap
+Tom tief 2	Low Tom 2
+Hi-Hat zu	Closed Hi-Hat
+Tom tief	Low Tom
+Hi-Hat Pedal	Pedal Hi-Hat
+Tom mittel 2	Mid Tom 2
+Hi-Hat offen	Open Hi-Hat
+Tom mittel	Mid Tom
+Tom hoch 2	High Tom 2
+Tom hoch	High Tom
+Ride-Glocke	Ride Bell
+Tamburin	Tambourine
+Kuhglocke	Cowbell
+Bongo hoch	High Bongo
+Bongo tief	Low Bongo
+Conga hoch gedämpft	Muted High Conga
+Conga hoch offen	Open High Conga
+Conga tief	Low Conga
+Timbale hoch	High Timbale
+Timbale tief	Low Timbale
+Agogo hoch	High Agogo
+Agogo tief	Low Agogo
+Pfeife kurz	Short Whistle
+Pfeife lang	Long Whistle
+Guiro kurz	Short Guiro
+Guiro lang	Long Guiro
+Holzblock hoch	High Wood Block
+Holzblock tief	Low Wood Block
+Cuica gedämpft	Muted Cuica
+Cuica offen	Open Cuica
+Triangel gedämpft	Muted Triangle
+Triangel offen	Open Triangle
+Eingang {ports}	Input {ports}
+Ausgang {ports}	Output {ports}
