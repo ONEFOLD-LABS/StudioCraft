@@ -133,4 +133,7 @@ pub struct ScanReport {
     pub errors: Vec<String>,
     /// Gesperrte Dateien (Absturz oder Zeitüberschreitung beim Scan) mit Grund.
     pub blocked: Vec<(PathBuf, String)>,
+    /// Ids der Plugins aus gesperrten Dateien, die der Scan vor dem Absturz vollständig
+    /// gemeldet hat: Sie stehen in `plugins`, laufen aber nur im eigenen Prozess.
+    pub own_process: Vec<String>,
 }

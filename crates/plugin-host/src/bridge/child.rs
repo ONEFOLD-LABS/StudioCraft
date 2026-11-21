@@ -46,23 +46,13 @@ fn parse(args: &[String]) -> Result<BridgeArgs, String> {
     })
 }
 
-#[cfg(unix)]
-fn connect(path: &std::path::Path) -> Result<Stream, String> {
-    Stream::connect(path).map_err(|e| format!("{}: {e}", path.display()))
-}
-
-#[cfg(not(unix))]
-fn connect(_: &std::path::Path) -> Result<Stream, String> {
-    Err("the plugin bridge is not available on this system yet".into())
-}
-
 pub(super) fn run(
     args: &[String],
     load: impl FnOnce(&BridgeArgs) -> Result<Hosted, String>,
 ) -> Result<(), String> {
     let a = parse(args)?;
-    let control = connect(&a.socket)?;
-    let wake = connect(&a.socket)?;
+    let control = wire::connect(&a.socket)?;
+    let wake = wire::connect(&a.socket)?;
     let shm = Shared::open(&a.shm)?;
     let mut out = control.try_clone().map_err(|e| e.to_string())?;
     let (params, audio, mut main) = match load(&a) {
@@ -75,6 +65,7 @@ pub(super) fn run(
     for p in &params {
         writeln!(out, "{}", wire::param_line(p)).map_err(|e| e.to_string())?;
     }
+    writeln!(out, "GUI\t{}", u8::from(main.has_gui())).map_err(|e| e.to_string())?;
     writeln!(out, "END").map_err(|e| e.to_string())?;
     let shm = Arc::new(shm);
     shm.region()
@@ -165,7 +156,15 @@ fn control_loop(
         .map_err(|e| e.to_string())?;
     let mut reader = BufReader::new(control);
     let mut pending = String::new();
+    // The plugin's main-thread work runs at least this often, also between busy requests.
+    let every = std::time::Duration::from_millis(15);
+    let mut last_idle = std::time::Instant::now();
+    let mut open = false;
     loop {
+        if last_idle.elapsed() >= every {
+            open = main.idle();
+            last_idle = std::time::Instant::now();
+        }
         match (&mut reader).take(MAX_REQUEST).read_line(&mut pending) {
             Ok(0) => return Ok(()), // the app closed the connection
             Ok(_) if pending.ends_with('\n') => {}
@@ -176,7 +175,8 @@ fn control_loop(
                     std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
                 ) =>
             {
-                main.idle();
+                open = main.idle();
+                last_idle = std::time::Instant::now();
                 continue;
             }
             Err(e) => return Err(e.to_string()),
@@ -203,6 +203,43 @@ fn control_loop(
             "values" => wire::values_lines(&main.param_values()),
             "changes" => wire::values_lines(&main.take_param_changes()),
             "dirty" => vec![if main.take_dirty() { "1" } else { "0" }.into()],
+            // Once per frame of the app: window state, unsaved changes, knob moves.
+            "poll" => {
+                let mut l = vec![
+                    format!("OPEN\t{}", u8::from(open && main.gui_open())),
+                    format!("DIRTY\t{}", u8::from(main.take_dirty())),
+                ];
+                l.extend(wire::values_lines(&main.take_param_changes()));
+                l
+            }
+            "gui_open" => {
+                let (window, title) = rest.split_once('\t').unwrap_or(("", rest));
+                crate::gui::set_main_window_code(window);
+                match main.open_gui(&wire::unescape(title)) {
+                    Ok(()) => {
+                        open = true;
+                        vec!["OK".into()]
+                    }
+                    // Not ERR: that would count as a broken helper.
+                    Err(e) => vec![format!("FAIL\t{}", wire::escape(&e))],
+                }
+            }
+            "gui_close" => {
+                main.close_gui();
+                open = false;
+                vec!["OK".into()]
+            }
+            "ui" => {
+                let mut f = rest.split('\t');
+                if let (Some(Ok(id)), Some(Ok(v))) = (
+                    f.next().map(str::parse::<u32>),
+                    f.next().map(str::parse::<f64>),
+                ) && v.is_finite()
+                {
+                    main.set_ui_value(id, v);
+                }
+                continue; // no reply
+            }
             "set" => {
                 let mut f = rest.split('\t');
                 if let (Some(Ok(id)), Some(Ok(v))) = (
@@ -271,7 +308,22 @@ impl BridgedMain for crate::PluginHandle {
     fn take_dirty(&self) -> bool {
         crate::PluginHandle::take_dirty(self)
     }
-    fn idle(&mut self) {
-        let _ = crate::PluginHandle::idle(self);
+    fn idle(&mut self) -> bool {
+        crate::PluginHandle::idle(self)
+    }
+    fn has_gui(&self) -> bool {
+        crate::PluginHandle::has_gui(self)
+    }
+    fn gui_open(&self) -> bool {
+        crate::PluginHandle::gui_open(self)
+    }
+    fn open_gui(&mut self, title: &str) -> Result<(), String> {
+        crate::PluginHandle::open_gui(self, title)
+    }
+    fn close_gui(&mut self) {
+        crate::PluginHandle::close_gui(self);
+    }
+    fn set_ui_value(&self, id: u32, value: f64) {
+        crate::PluginHandle::set_ui_value(self, id, value);
     }
 }

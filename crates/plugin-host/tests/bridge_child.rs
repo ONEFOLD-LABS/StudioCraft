@@ -5,11 +5,14 @@
 //! - `test:crash` aborts in its third block
 //! - `test:hang` stops answering in its third block
 //! - `test:fail` cannot be loaded
+//! - `test:window` has a fake window: once open it reports a knob move and unsaved changes,
+//!   echoes host values as moves of parameter 1 and closes itself after 40 idle passes (as if
+//!   the user closed it); the title `refuse` makes opening fail
 
 use std::{
     path::PathBuf,
     sync::{
-        Arc,
+        Arc, Mutex,
         atomic::{AtomicU64, Ordering},
     },
     time::{Duration, Instant},
@@ -56,6 +59,16 @@ impl BridgedAudio for Fake {
 
 struct FakeMain {
     gain: Arc<AtomicU64>,
+    window: bool,
+    win: Mutex<FakeWindow>,
+}
+
+#[derive(Default)]
+struct FakeWindow {
+    open: bool,
+    ticks: u32,
+    dirty: bool,
+    changes: Vec<(u32, f64)>,
 }
 
 impl BridgedMain for FakeMain {
@@ -79,10 +92,46 @@ impl BridgedMain for FakeMain {
         vec![(0, f64::from_bits(self.gain.load(Ordering::Relaxed)))]
     }
     fn take_param_changes(&self) -> Vec<(u32, f64)> {
-        Vec::new()
+        std::mem::take(&mut self.win.lock().unwrap().changes)
     }
     fn take_dirty(&self) -> bool {
-        false
+        std::mem::take(&mut self.win.lock().unwrap().dirty)
+    }
+    fn idle(&mut self) -> bool {
+        let w = self.win.get_mut().unwrap();
+        if w.open {
+            w.ticks += 1;
+            if w.ticks == 3 {
+                w.changes.push((0, 0.5));
+                w.dirty = true;
+            }
+            if w.ticks >= 40 {
+                w.open = false;
+            }
+        }
+        w.open
+    }
+    fn has_gui(&self) -> bool {
+        self.window
+    }
+    fn gui_open(&self) -> bool {
+        self.win.lock().unwrap().open
+    }
+    fn open_gui(&mut self, title: &str) -> Result<(), String> {
+        if title == "refuse" {
+            return Err("no display for the window".into());
+        }
+        *self.win.get_mut().unwrap() = FakeWindow {
+            open: true,
+            ..FakeWindow::default()
+        };
+        Ok(())
+    }
+    fn close_gui(&mut self) {
+        self.win.get_mut().unwrap().open = false;
+    }
+    fn set_ui_value(&self, _id: u32, value: f64) {
+        self.win.lock().unwrap().changes.push((1, value));
     }
 }
 
@@ -108,7 +157,11 @@ fn load(a: &BridgeArgs) -> Result<Hosted, String> {
             gain: Arc::clone(&gain),
             blocks: 0,
         }),
-        Box::new(FakeMain { gain }),
+        Box::new(FakeMain {
+            gain,
+            window: a.info.id == "test:window",
+            win: Mutex::default(),
+        }),
     ))
 }
 
@@ -185,6 +238,49 @@ fn offline_waits_for_every_block() {
     println!("offline: 200 blocks without a pause, each result in its own block");
 }
 
+/// Poll like the app's frames until `done` holds (at most two seconds).
+fn poll_until(h: &studiocraft_plugin_host::BridgeHandle, done: impl Fn(bool) -> bool) -> bool {
+    let t = Instant::now();
+    while t.elapsed() < Duration::from_secs(2) {
+        if done(h.idle()) {
+            return true;
+        }
+        std::thread::sleep(Duration::from_millis(16));
+    }
+    false
+}
+
+fn window_through_the_bridge() {
+    let b = BridgeInstance::spawn(&info("test:window"), 48_000, 512, &exe()).expect("spawn");
+    let h = b.handle();
+    assert!(h.has_gui() && !h.gui_open());
+    let e = h.open_gui("refuse").expect_err("refused");
+    assert!(e.contains("no display"), "{e}");
+    assert!(!h.crashed(), "a refused window is not a crash");
+
+    h.open_gui("Spur – Fenster").expect("open");
+    assert!(h.gui_open());
+    // The knob move and the unsaved change arrive with the polls.
+    assert!(poll_until(&h, |_| h
+        .take_param_changes()
+        .contains(&(0, 0.5))));
+    assert!(h.take_dirty() || poll_until(&h, |_| h.take_dirty()));
+    h.set_ui_value(0, 0.75);
+    assert!(poll_until(&h, |_| h
+        .take_param_changes()
+        .contains(&(1, 0.75))));
+    // Closed in the helper (by the user): the app sees it.
+    assert!(poll_until(&h, |open| !open), "closed by the user");
+    assert!(!h.gui_open());
+    h.open_gui("again").expect("open again");
+    h.close_gui();
+    assert!(!h.gui_open() && !h.idle());
+
+    let plain = BridgeInstance::spawn(&info("test:gain"), 48_000, 512, &exe()).expect("spawn");
+    assert!(!plain.handle().has_gui());
+    println!("window: opened, knob moves and host values both ways, closed in the helper");
+}
+
 fn crash_silences_only_the_insert() {
     let mut b = BridgeInstance::spawn(&info("test:crash"), 48_000, 512, &exe()).expect("spawn");
     let h = b.handle();
@@ -245,12 +341,9 @@ fn main() {
         };
         std::process::exit(code.unwrap_or(1));
     }
-    if !cfg!(unix) {
-        println!("plugin bridge: not available on this system yet");
-        return;
-    }
     gain_round_trip();
     offline_waits_for_every_block();
+    window_through_the_bridge();
     crash_silences_only_the_insert();
     hang_counts_as_crash();
     load_error_is_reported();
@@ -282,13 +375,24 @@ fn real_plugin(name: &str) {
     assert!(energy > 0.0, "{name}: signal through the bridge");
     let state = h.save_state();
     println!(
-        "{name}: {} parameters, latency {}, state {} bytes, energy {energy:.1}",
+        "{name}: {} parameters, latency {}, state {} bytes, energy {energy:.1}, window {}",
         b.params.len(),
         h.latency(),
-        state.as_ref().map_or(0, Vec::len)
+        state.as_ref().map_or(0, Vec::len),
+        h.has_gui()
     );
     if let Some(s) = state {
         assert!(h.load_state(&s), "{name}: state loads back");
+    }
+    // With a display (`STUDIOCRAFT_GUI_TEST=1`): the editor opens from the helper.
+    if std::env::var_os("STUDIOCRAFT_GUI_TEST").is_some() && h.has_gui() {
+        h.open_gui(&format!("{name} (bridge)"))
+            .expect("editor opens");
+        let shown = poll_until(&h, |open| !open);
+        assert!(!shown, "{name}: the editor stays open");
+        h.close_gui();
+        assert!(!h.idle(), "{name}: closed");
+        println!("{name}: editor opened and closed through the bridge");
     }
     assert!(!h.crashed());
 }

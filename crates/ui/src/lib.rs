@@ -483,6 +483,7 @@ impl ProjectWindow {
                 Err(e) => w.message = Some(e),
             }
         }
+        w.plugins.preferred = prefs.own_process.into_iter().collect();
         w.saved = Some(w.project.clone());
         w.send_locators();
         w
@@ -780,6 +781,7 @@ impl ProjectWindow {
             autosave_minutes: self.autosave.minutes,
             autosave_keep: self.autosave.keep,
             language: i18n::language(),
+            own_process: self.plugins.preferred.iter().cloned().collect(),
         };
         if let Err(e) = s.save() {
             self.message = Some(crate::i18n::trf(
@@ -2897,6 +2899,47 @@ mod tests {
         }
         h.event(button(to, false));
         h.run_steps(2);
+    }
+
+    /// Plugin-Liste: „Immer in eigenem Prozess“ im Kontextmenü; neue Inserts übernehmen es,
+    /// bestehende bleiben, wie sie sind. Ein Plugin von der Sperrliste ist fest so markiert.
+    #[test]
+    fn the_plugin_list_sets_the_own_process_default() {
+        let mut p = Project::default();
+        let audio = p.add_track(TrackKind::Audio, "Gesang");
+        let mut w = ProjectWindow::new(p, None, String::new());
+        w.plugins.list = Some(vec![
+            fake_plugin("test.hall", "Hall", false),
+            fake_plugin("test.blocked", "Gesperrt", false),
+        ]);
+        w.plugins.own_process.insert("test.blocked".into());
+        let hall = fake_plugin("test.hall", "Hall", false);
+        w.add_insert(audio, &hall);
+        w.show_inspector = false;
+        w.show_right = true;
+        w.right.tab = rightzone::Tab::Plugins;
+        let mut h = window_harness(w);
+        h.get_by_label("Gesperrt  ·  eigener Prozess");
+        h.get_by_label("Hall").click_secondary();
+        h.run_steps(2);
+        h.get_by_label("Immer in eigenem Prozess").click();
+        h.run_steps(2);
+        assert!(h.state().plugins.preferred.contains("test.hall"));
+        h.get_by_label("Hall  ·  eigener Prozess");
+        let w = h.state_mut();
+        w.add_insert(audio, &hall);
+        let isolated: Vec<bool> = w.project.tracks[audio]
+            .inserts
+            .iter()
+            .map(|s| s.isolated)
+            .collect();
+        assert_eq!(isolated, [false, true], "only the new insert");
+        w.set_own_process_default("test.hall", false);
+        w.add_insert(audio, &hall);
+        assert!(!w.project.tracks[audio].inserts[2].isolated);
+        let blocked = fake_plugin("test.blocked", "Gesperrt", false);
+        w.add_insert(audio, &blocked);
+        assert!(w.project.tracks[audio].inserts[3].isolated);
     }
 
     #[test]
@@ -7518,7 +7561,6 @@ mod tests {
 
     /// Insert-Menü „…“: „In eigenem Prozess“ ist ein Undo-Schritt; ohne Helferprogramm (Tests)
     /// meldet das Laden das, statt abzustürzen; „Neu laden“ nach einem Absturz.
-    #[cfg(unix)]
     #[test]
     fn an_insert_can_be_switched_to_its_own_process() {
         let mut p = Project::default();
@@ -7559,6 +7601,50 @@ mod tests {
         w.plugins.crashed.insert((t, 0));
         w.reload_insert(t, 0);
         assert!(!w.plugins.crashed.contains(&(t, 0)));
+    }
+
+    /// Ein Plugin, dessen Datei beim Scan abstürzte, läuft nur im eigenen Prozess: Der Schalter
+    /// steht fest an, das Laden geht über die Bridge, auch wenn der Slot es nicht verlangt.
+    #[test]
+    fn a_plugin_blocked_by_the_scan_runs_only_in_its_own_process() {
+        let mut p = Project::default();
+        let t = p.add_track(TrackKind::Audio, "A");
+        p.tracks[t].inserts.push(studiocraft_project::InsertSlot {
+            plugin_id: "test.blocked".into(),
+            name: "Gesperrt".into(),
+            bypass: false,
+            params: Vec::new(),
+            state: None,
+            isolated: false,
+        });
+        let mut w = ProjectWindow::new(p, None, String::new());
+        w.selected_track = Some(t);
+        w.show_inspector = true;
+        w.plugins.list = Some(vec![studiocraft_plugin_host::PluginInfo {
+            id: "test.blocked".into(),
+            name: "Gesperrt".into(),
+            ..Default::default()
+        }]);
+        w.plugins.own_process.insert("test.blocked".into());
+        let slot = w.project.tracks[t].inserts[0].clone();
+        let e = w.instantiate(&slot).err().unwrap_or_default();
+        assert!(
+            e.contains("Eigener Prozess"),
+            "loads through the bridge: {e}"
+        );
+
+        // Auch mit gesetztem Schalter lässt er sich nicht ausschalten.
+        w.project.tracks[t].inserts[0].isolated = true;
+        let mut h = window_harness(w);
+        h.get_by_label("Insert-Menü").click();
+        h.run_steps(2);
+        let before = h.state().project.clone();
+        h.get_by_label("In eigenem Prozess").click();
+        h.run_steps(2);
+        assert!(
+            h.state().project == before,
+            "the switch is fixed: no change, no undo step"
+        );
     }
 
     #[test]

@@ -47,6 +47,29 @@ fn main_window() -> Option<MainWindow> {
     MAIN_WINDOW.lock().ok().and_then(|m| *m)
 }
 
+/// Das Hauptfenster als Text für einen Hilfsprozess (Plugin-Bridge); leer, wenn unbekannt.
+pub(crate) fn main_window_code() -> String {
+    match main_window() {
+        Some(MainWindow::X11(id)) => format!("x11:{id}"),
+        Some(MainWindow::Wayland) => "wayland".into(),
+        Some(MainWindow::Other) => "other".into(),
+        None => String::new(),
+    }
+}
+
+/// Gegenstück zu [`main_window_code`] im Hilfsprozess; Unbekanntes bleibt ungesetzt.
+pub(crate) fn set_main_window_code(code: &str) {
+    let window = match code {
+        "wayland" => MainWindow::Wayland,
+        "other" => MainWindow::Other,
+        c => match c.strip_prefix("x11:").and_then(|v| v.parse().ok()) {
+            Some(id) => MainWindow::X11(id),
+            None => return,
+        },
+    };
+    set_main_window(window);
+}
+
 /// Läuft die App als Wayland-Client? Ohne Meldung der App entscheidet die Umgebung.
 fn wayland_session() -> bool {
     match main_window() {
