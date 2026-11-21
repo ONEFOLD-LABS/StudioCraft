@@ -170,12 +170,7 @@ impl ProjectWindow {
             let exe = PLUGIN_SCANNER
                 .get()
                 .ok_or_else(|| tr("Eigener Prozess ist hier nicht verfügbar").to_owned())?;
-            PluginInstance::Bridged(studiocraft_plugin_host::BridgeInstance::spawn(
-                &info,
-                self.sample_rate,
-                MAX_BLOCK,
-                exe,
-            )?)
+            PluginInstance::new_isolated(&info, self.sample_rate, MAX_BLOCK, exe)?
         } else {
             PluginInstance::new(&info, self.sample_rate, MAX_BLOCK)?
         };

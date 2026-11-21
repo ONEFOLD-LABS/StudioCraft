@@ -33,6 +33,17 @@ impl PluginInstance {
         }
     }
 
+    /// Wie [`Self::new`], aber in einem Helferprozess (`exe`: das eigene Programm, das
+    /// [`crate::run_bridge_child`] aufruft). Nur im Hauptthread.
+    pub fn new_isolated(
+        info: &PluginInfo,
+        sample_rate: u32,
+        max_frames: u32,
+        exe: &std::path::Path,
+    ) -> Result<Self, String> {
+        BridgeInstance::spawn(info, sample_rate, max_frames, exe).map(Self::Bridged)
+    }
+
     pub fn info(&self) -> &PluginInfo {
         match self {
             Self::Clap(i) => &i.info,
