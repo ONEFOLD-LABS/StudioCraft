@@ -1,0 +1,5 @@
+# Update-Schlüssel von StudioCraft: der öffentliche minisign-Schlüssel, mit dem die Release-Dateien
+# signiert werden (packaging/sign-release.sh). Solange hier kein Schlüssel steht, melden Builds neue
+# Versionen nur und installieren nichts. Ein Maintainer ersetzt diese Zeilen durch die zwei Zeilen
+# der .pub-Datei von `minisign -G`; der geheime Schlüssel kommt als MINISIGN_SECRET_KEY (und
+# MINISIGN_PASSWORD) in die Secrets des Repos, nie ins Repo.
