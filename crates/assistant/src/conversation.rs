@@ -22,6 +22,27 @@ const MAX_RESULT: usize = 30_000;
 const MAX_MESSAGES: usize = 400;
 /// Longest text of the person or the model kept (characters).
 const MAX_TEXT: usize = 20_000;
+/// Largest history sent to the model (bytes of JSON, about 100 000 tokens).
+pub const MAX_HISTORY: usize = 400_000;
+/// When the history is too large, older tool results are cut to this many characters.
+const SHORT_RESULT: usize = 2_000;
+
+/// `text` cut to `max` characters with a note for the model, never silently.
+fn cut_note(text: &str, max: usize) -> String {
+    let total = text.chars().count();
+    if total <= max {
+        return text.to_owned();
+    }
+    format!(
+        "{} [truncated: {max} of {total} characters]",
+        shorten(text, max)
+    )
+}
+
+/// Size of a message as it goes to the model.
+fn size(m: &Value) -> usize {
+    m.to_string().len()
+}
 
 /// A line in the panel.
 #[derive(Clone, Debug, PartialEq)]
@@ -108,6 +129,7 @@ impl Conversation {
         self.messages.push(json!({"role": "user", "content": text}));
         self.steps = 0;
         self.trim();
+        self.fit();
     }
 
     /// The request failed with `error`.
@@ -169,11 +191,18 @@ impl Conversation {
                 "role": "tool",
                 "tool_call_id": id,
                 "name": name,
-                "content": shorten(&content, MAX_RESULT),
+                "content": cut_note(&content, MAX_RESULT),
             }));
         }
         self.steps += 1;
         self.trim();
+        if !self.fit() {
+            self.entries.push(Entry::Error(
+                tr("Abgebrochen: zu viele Schritte – der Verlauf für das Modell ist zu groß geworden. Schreib weiter, um neu anzusetzen.")
+                    .into(),
+            ));
+            return Next::Done;
+        }
         if self.steps >= MAX_STEPS {
             self.entries.push(Entry::Error(trf(
                 "Nach {n} Schritten angehalten; schreib weiter, um fortzufahren.",
@@ -182,6 +211,51 @@ impl Conversation {
             return Next::Done;
         }
         Next::Ask
+    }
+
+    /// Size of the history as it goes to the model.
+    pub fn history_size(&self) -> usize {
+        self.messages.iter().map(size).sum()
+    }
+
+    /// Keeps the history within [`MAX_HISTORY`]: first older long tool results are cut (with
+    /// a note for the model), then the oldest exchanges dropped. `false` when even the
+    /// current exchange alone is too large.
+    fn fit(&mut self) -> bool {
+        let mut total = self.history_size();
+        for m in &mut self.messages {
+            if total <= MAX_HISTORY {
+                return true;
+            }
+            if m["role"] != "tool" {
+                continue;
+            }
+            let Some(text) = m["content"].as_str() else {
+                continue;
+            };
+            // Already cut ones (the note adds a few dozen characters) stay as they are.
+            if text.chars().count() <= SHORT_RESULT + 64 {
+                continue;
+            }
+            let before = size(m);
+            m["content"] = json!(cut_note(text, SHORT_RESULT));
+            total = total - before + size(m);
+        }
+        while total > MAX_HISTORY {
+            let next_user = self
+                .messages
+                .iter()
+                .enumerate()
+                .skip(2)
+                .find(|(_, m)| m["role"] == "user")
+                .map(|(i, _)| i);
+            let Some(i) = next_user else {
+                return false;
+            };
+            self.messages.drain(1..i);
+            total = self.history_size();
+        }
+        true
     }
 
     /// Drop the oldest exchanges (from one message of the person to the next) while there are
@@ -261,7 +335,7 @@ fn short_args(args: &Value) -> String {
 
 #[cfg(test)]
 mod tests {
-    use studiocraft_project::Project;
+    use studiocraft_project::{Project, TrackKind};
 
     use super::*;
 
@@ -349,10 +423,70 @@ mod tests {
             assert!(c.messages().len() <= MAX_MESSAGES + exchange);
             for m in c.messages() {
                 let text = m["content"].as_str().unwrap_or("");
-                assert!(text.chars().count() <= MAX_TEXT.max(MAX_RESULT) + 1);
+                // The cut text, its ellipsis and the note for the model.
+                assert!(text.chars().count() <= MAX_TEXT.max(MAX_RESULT) + 64);
             }
         }
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A model that calls tools without end: the exchange stops with a visible message, every
+    /// request it would send stays within MAX_HISTORY, long results carry a note, and the
+    /// next message of the person starts afresh within the limit.
+    #[test]
+    fn an_endless_tool_loop_stops_and_the_history_stays_bounded() {
+        let endless = |tool: &str| {
+            let calls: Vec<Value> = (0..MAX_CALLS)
+                .map(|i| call(&format!("c{i}"), tool, "{}"))
+                .collect();
+            json!({"role": "assistant", "content": "", "tool_calls": calls})
+        };
+        // Small results (an unknown tool's short error): the round limit stops it. Large ones
+        // (the project of 300 tracks, again and again): the size limit.
+        let by_rounds = trf(
+            "Nach {n} Schritten angehalten; schreib weiter, um fortzufahren.",
+            &[("n", &MAX_STEPS)],
+        );
+        let by_size = tr("Abgebrochen: zu viele Schritte – der Verlauf für das Modell ist zu groß geworden. Schreib weiter, um neu anzusetzen.").to_owned();
+        for (tool, tracks, stop) in [
+            ("kein_werkzeug", 0, by_rounds),
+            ("inspect_project", 300, by_size),
+        ] {
+            let endless = endless(tool);
+            let mut w = window();
+            for i in 0..tracks {
+                w.project
+                    .add_track(TrackKind::Audio, format!("Spur mit langem Namen {i}"));
+            }
+            let mut c = Conversation::new();
+            c.user("Bitte");
+            let mut rounds = 0;
+            while c.reply(&endless, &mut w, None) == Next::Ask {
+                rounds += 1;
+                assert!(rounds < MAX_STEPS, "the exchange ends");
+                assert!(
+                    c.history_size() <= MAX_HISTORY,
+                    "request {rounds}: {} bytes",
+                    c.history_size()
+                );
+            }
+            let said = c
+                .entries()
+                .iter()
+                .any(|e| matches!(e, Entry::Error(t) if *t == stop));
+            assert!(said, "{tool}: the stop is shown ({stop})");
+            if tracks > 0 {
+                let noted = c
+                    .messages()
+                    .iter()
+                    .filter(|m| m["role"] == "tool")
+                    .filter(|m| m["content"].as_str().unwrap_or("").contains("[truncated: "))
+                    .count();
+                assert!(noted > 0, "cut results say so");
+            }
+            c.user("weiter");
+            assert!(c.history_size() <= MAX_HISTORY, "the next request fits");
+        }
     }
 
     #[test]
