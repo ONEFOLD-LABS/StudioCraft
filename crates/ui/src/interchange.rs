@@ -18,6 +18,7 @@ use crate::i18n::{tr, trf};
 /// Endungen von AAF- und OMF-Dateien.
 pub(crate) const EXTENSIONS: [&str; 2] = ["aaf", "omf"];
 /// Größte Datei, die gelesen wird (eingebettetes Audio kann groß sein).
+#[cfg(not(target_arch = "wasm32"))]
 pub(crate) const MAX_FILE_BYTES: u64 = 1 << 30;
 /// Höchstens so viele Spuren und Clips werden übernommen.
 const MAX_TRACKS: usize = 256;
