@@ -592,6 +592,34 @@ mod tests {
         assert_eq!(w.project.tracks[0].name, "Dialog");
     }
 
+    /// AAF and OMF files changed at random import or are refused, never panic; what imports
+    /// leaves a project that needs no repair.
+    #[test]
+    fn fuzzed_aaf_and_omf_files() {
+        use crate::fuzzkit::{Case, Rng, cases, mutate_bytes};
+        let mut report = craft_aaf::Report::default();
+        let omf = craft_aaf::omf::write(&document(), &options().identity, &mut report)
+            .unwrap_or_default();
+        let seeds = [aaf_bytes(), omf];
+        let mut w = ProjectWindow::new(Project::default(), None, "Fuzz".into());
+        for seed in &seeds {
+            assert!(w.import_interchange_bytes("seed", seed, None).is_ok());
+        }
+        for seed in cases(0xaaf, 300) {
+            let _case = Case("aaf-omf", seed);
+            let mut rng = Rng(seed | 1);
+            let mut bytes = seeds[rng.below(seeds.len())].clone();
+            for _ in 0..1 + rng.below(4) {
+                mutate_bytes(&mut rng, &mut bytes);
+            }
+            w.project = Project::default();
+            if w.import_interchange_bytes("x", &bytes, None).is_ok() {
+                let mut p = w.project.clone();
+                assert_eq!(p.sanitize(), 0, "the import leaves valid values");
+            }
+        }
+    }
+
     #[test]
     fn missing_media_and_hostile_files_are_reported() {
         let mut doc = document();
