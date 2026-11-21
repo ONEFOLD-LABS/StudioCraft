@@ -6,6 +6,10 @@
 //! an audio part, a video track with sound, MIDI notes, groups, sends, EQ, automation, a tempo
 //! change, metronome, cycle, locating, starting and stopping, and swapping the song.
 
+// The helpers outside the #[test] functions may unwrap and panic like the tests themselves
+// (Cargo.toml lints, clippy.toml).
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::cell::Cell;
 use std::collections::HashMap;
