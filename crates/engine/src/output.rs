@@ -21,7 +21,7 @@ use cpal::{
     traits::{DeviceTrait, HostTrait, StreamTrait},
 };
 
-use crate::EngineCore;
+use crate::{EngineCore, EngineError};
 
 /// Gewünschte Audio-Geräte (Dialog „Audio- und MIDI-Geräte“); `None` heißt Standard.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -34,11 +34,14 @@ pub struct DeviceChoice {
 }
 
 /// Host nach Namen; ohne Namen der Standard des Systems.
-pub(crate) fn host_by_name(name: Option<&str>) -> Result<Host, String> {
+pub(crate) fn host_by_name(name: Option<&str>) -> Result<Host, EngineError> {
     // Die eigenen WASAPI-Hosts zeigen dieselben Geräte wie der WASAPI-Host von cpal.
     #[cfg(windows)]
     if name.and_then(crate::wasapi::Mode::from_host).is_some() {
-        return cpal::host_from_id(cpal::HostId::Wasapi).map_err(|e| format!("WASAPI: {e}"));
+        return cpal::host_from_id(cpal::HostId::Wasapi).map_err(|e| EngineError::Host {
+            name: "WASAPI".into(),
+            detail: e.to_string(),
+        });
     }
     match name {
         None => Ok(cpal::default_host()),
@@ -46,13 +49,14 @@ pub(crate) fn host_by_name(name: Option<&str>) -> Result<Host, String> {
             let id = cpal::available_hosts()
                 .into_iter()
                 .find(|h| h.name().eq_ignore_ascii_case(name))
-                .ok_or_else(|| {
-                    format!(
-                        "Audio-Host „{name}“ gibt es in diesem Build nicht (verfügbar: {})",
-                        available_hosts().join(", ")
-                    )
+                .ok_or_else(|| EngineError::HostMissing {
+                    name: name.to_owned(),
+                    available: available_hosts().into_iter().map(str::to_owned).collect(),
                 })?;
-            cpal::host_from_id(id).map_err(|e| format!("Audio-Host „{name}“: {e}"))
+            cpal::host_from_id(id).map_err(|e| EngineError::Host {
+                name: name.to_owned(),
+                detail: e.to_string(),
+            })
         }
     }
 }
@@ -64,7 +68,7 @@ pub(crate) fn device_name(d: &Device) -> String {
 }
 
 /// Namen der Aus- und Eingabegeräte eines Hosts.
-pub fn device_names(host: Option<&str>) -> Result<(Vec<String>, Vec<String>), String> {
+pub fn device_names(host: Option<&str>) -> Result<(Vec<String>, Vec<String>), EngineError> {
     let host = host_by_name(host)?;
     let outputs = host
         .output_devices()
@@ -98,8 +102,9 @@ pub struct OutputInfo {
     pub sample_format: String,
     /// Ausgangslatenz in Frames, die der Treiber meldet (Puffer plus Gerät), falls bekannt.
     pub latency_frames: Option<u32>,
-    /// Hinweis, wenn statt der Wahl ein anderer Modus läuft (z. B. exklusiv abgelehnt).
-    pub note: Option<String>,
+    /// Warum statt der Wahl ein anderer Modus läuft (z. B. exklusiv abgelehnt): je
+    /// abgelehntem Host der Grund. Leer, wenn die Wahl läuft.
+    pub fallback: Vec<(String, crate::WasapiProblem)>,
 }
 
 impl OutputInfo {
@@ -165,7 +170,7 @@ impl AudioOutput {
     /// einem anderen Gerät weiterläuft (gleiche Abtastrate). Der Kern behält Song, Plugins und
     /// Transport. Antwortet der Audio-Thread nicht (Gerät weg), bleibt der Stream bestehen und
     /// kommt mit dem Fehler zurück: so wird der Kern samt Plugins nie nebenbei zerstört.
-    pub fn take_core(mut self, timeout: Duration) -> Result<EngineCore, Box<(Self, String)>> {
+    pub fn take_core(mut self, timeout: Duration) -> Result<EngineCore, Box<(Self, EngineError)>> {
         self.shared.give_back.store(true, Ordering::Release);
         // Im Browser läuft der Audio-Rückruf im selben Thread: Warten käme nie zum Ziel, und
         // `thread::sleep` gibt es dort nicht. Der Kern kommt nur zurück, wenn er schon da ist.
@@ -186,10 +191,7 @@ impl AudioOutput {
                 if let Ok(core) = self.handback.pop() {
                     let _ = self.inbound.push(core);
                 }
-                return Err(Box::new((
-                    self,
-                    "Das Audiogerät antwortet nicht; der Wechsel gilt nach einem Neustart".into(),
-                )));
+                return Err(Box::new((self, EngineError::NotResponding)));
             }
             #[cfg(not(target_arch = "wasm32"))]
             std::thread::sleep(Duration::from_millis(2));
@@ -212,7 +214,7 @@ pub fn available_hosts() -> Vec<&'static str> {
 impl PreparedOutput {
     /// Wählt Host und Standard-Ausgabegerät. Unterstützt das Gerät
     /// `preferred_rate`, wird diese genommen, sonst seine Standardrate.
-    pub fn open(host_name: Option<&str>, preferred_rate: u32) -> Result<Self, String> {
+    pub fn open(host_name: Option<&str>, preferred_rate: u32) -> Result<Self, EngineError> {
         Self::open_with(&DeviceChoice {
             host: host_name.map(str::to_owned),
             sample_rate: Some(preferred_rate),
@@ -222,7 +224,7 @@ impl PreparedOutput {
 
     /// Wie [`Self::open`], mit Gerät, Abtastrate und Blockgröße aus `choice`. Ein genanntes
     /// Gerät, das es nicht (mehr) gibt, ist ein Fehler.
-    pub fn open_with(choice: &DeviceChoice) -> Result<Self, String> {
+    pub fn open_with(choice: &DeviceChoice) -> Result<Self, EngineError> {
         #[cfg(windows)]
         if let Some(mode) = choice
             .host
@@ -238,23 +240,33 @@ impl PreparedOutput {
     /// eine Stufe zurück: exklusiv → geringe Latenz → gemeinsamer Modus über cpal. Der Grund
     /// steht in [`OutputInfo::note`].
     #[cfg(windows)]
-    fn open_wasapi(choice: &DeviceChoice, mode: crate::wasapi::Mode) -> Result<Self, String> {
+    fn open_wasapi(choice: &DeviceChoice, mode: crate::wasapi::Mode) -> Result<Self, EngineError> {
         use crate::wasapi::{Direction, Mode};
         let host = host_by_name(choice.host.as_deref())?;
         let device = match &choice.output {
             None => host
                 .default_output_device()
-                .ok_or("Kein Audio-Ausgabegerät gefunden")?,
+                .ok_or(EngineError::NoDevice { input: false })?,
             Some(name) => host
                 .output_devices()
-                .map_err(|e| format!("Ausgabegeräte: {e}"))?
+                .map_err(|e| EngineError::DeviceList {
+                    input: false,
+                    detail: e.to_string(),
+                })?
                 .find(|d| device_name(d) == *name)
-                .ok_or_else(|| format!("Ausgabegerät „{name}“ nicht gefunden"))?,
+                .ok_or_else(|| EngineError::DeviceNotFound {
+                    input: false,
+                    name: name.clone(),
+                })?,
         };
         let name = device_name(&device);
         let id = device
             .id()
-            .map_err(|e| format!("Gerät „{name}“: {e}"))?
+            .map_err(|e| EngineError::Device {
+                input: false,
+                name: name.clone(),
+                detail: e.to_string(),
+            })?
             .id()
             .to_owned();
         let rate = choice.sample_rate.unwrap_or(48_000);
@@ -276,14 +288,14 @@ impl PreparedOutput {
                         block_frames: Some(f.period_frames),
                         sample_format: f.sample.name().to_owned(),
                         latency_frames: Some(f.latency_frames),
-                        note: (!notes.is_empty()).then(|| notes.join("; ")),
+                        fallback: notes,
                     };
                     return Ok(Self {
                         backend: Backend::Wasapi(prepared),
                         info,
                     });
                 }
-                Err(e) => notes.push(format!("{}: {e}", m.host_name())),
+                Err(e) => notes.push((m.host_name().to_owned(), e)),
             }
         }
         // Letzte Stufe: gemeinsamer Modus über cpal, gleiches Gerät.
@@ -292,28 +304,38 @@ impl PreparedOutput {
             output: Some(name),
             ..choice.clone()
         })?;
-        shared.info.note = Some(notes.join("; "));
+        shared.info.fallback = notes;
         Ok(shared)
     }
 
-    fn open_cpal(choice: &DeviceChoice) -> Result<Self, String> {
+    fn open_cpal(choice: &DeviceChoice) -> Result<Self, EngineError> {
         let host = host_by_name(choice.host.as_deref())?;
         let preferred_rate = choice.sample_rate.unwrap_or(48_000);
         let device = match &choice.output {
             None => host
                 .default_output_device()
-                .ok_or("Kein Audio-Ausgabegerät gefunden")?,
+                .ok_or(EngineError::NoDevice { input: false })?,
             Some(name) => host
                 .output_devices()
-                .map_err(|e| format!("Ausgabegeräte: {e}"))?
+                .map_err(|e| EngineError::DeviceList {
+                    input: false,
+                    detail: e.to_string(),
+                })?
                 .find(|d| device_name(d) == *name)
-                .ok_or_else(|| format!("Ausgabegerät „{name}“ nicht gefunden"))?,
+                .ok_or_else(|| EngineError::DeviceNotFound {
+                    input: false,
+                    name: name.clone(),
+                })?,
         };
         let device_name = device_name(&device);
 
         let default = device
             .default_output_config()
-            .map_err(|e| format!("Gerät „{device_name}“: {e}"))?;
+            .map_err(|e| EngineError::Device {
+                input: false,
+                name: device_name.clone(),
+                detail: e.to_string(),
+            })?;
         let supported = device
             .supported_output_configs()
             .ok()
@@ -347,7 +369,7 @@ impl PreparedOutput {
             // cpal nennt die Latenz erst im laufenden Callback; im gemeinsamen Modus kommt
             // der Windows-Mixer dazu. Lieber keine Zahl als eine zu kleine.
             latency_frames: None,
-            note: None,
+            fallback: Vec::new(),
         };
         Ok(Self {
             backend: Backend::Cpal {
@@ -362,7 +384,7 @@ impl PreparedOutput {
     /// Startet den Stream; `core` muss mit `info.sample_rate` laufen. Der Kern geht erst in
     /// den Audio-Thread, wenn der Stream läuft; scheitert der Start, kommt er mit dem Fehler
     /// zurück und wird nicht zerstört (Plugins, deren Fenster die Oberfläche hält).
-    pub fn start(self, core: EngineCore) -> Result<AudioOutput, Box<(EngineCore, String)>> {
+    pub fn start(self, core: EngineCore) -> Result<AudioOutput, Box<(EngineCore, EngineError)>> {
         let Self { backend, info } = self;
         let shared = Arc::new(StreamShared::default());
         let (back_tx, handback) = rtrb::RingBuffer::new(1);
@@ -388,14 +410,20 @@ impl PreparedOutput {
                     SampleFormat::I32 => build::<i32>(&device, &config, renderer),
                     SampleFormat::U16 => build::<u16>(&device, &config, renderer),
                     SampleFormat::U8 => build::<u8>(&device, &config, renderer),
-                    other => Err(format!("Sampleformat {other} wird nicht unterstützt")),
+                    other => Err(EngineError::SampleFormat(other.to_string())),
                 };
                 let stream = match stream {
                     Ok(s) => s,
                     Err(e) => return Err(Box::new((core, e))),
                 };
                 if let Err(e) = stream.play() {
-                    return Err(Box::new((core, format!("Stream-Start: {e}"))));
+                    return Err(Box::new((
+                        core,
+                        EngineError::StreamStart {
+                            input: false,
+                            detail: e.to_string(),
+                        },
+                    )));
                 }
                 RunningStream::Cpal(stream)
             }
@@ -403,16 +431,13 @@ impl PreparedOutput {
             Backend::Wasapi(prepared) => {
                 match prepared.start(crate::wasapi::Job::Render(Box::new(renderer))) {
                     Ok(running) => RunningStream::Wasapi(running),
-                    Err(e) => return Err(Box::new((core, e))),
+                    Err(e) => return Err(Box::new((core, EngineError::Wasapi(e)))),
                 }
             }
         };
         // Platz für genau einen Kern, der Ring ist leer: geht immer.
         if let Err(rtrb::PushError::Full(core)) = inbound.push(core) {
-            return Err(Box::new((
-                core,
-                "Audio-Stream: Übergabe des Kerns fehlgeschlagen".into(),
-            )));
+            return Err(Box::new((core, EngineError::Handover)));
         }
         Ok(AudioOutput {
             stream,
@@ -532,7 +557,7 @@ fn build<T>(
     device: &Device,
     config: &StreamConfig,
     mut renderer: Renderer,
-) -> Result<Stream, String>
+) -> Result<Stream, EngineError>
 where
     T: SizedSample + FromSample<f32>,
 {
@@ -554,7 +579,10 @@ where
             },
             None,
         )
-        .map_err(|e| format!("Stream-Aufbau: {e}"))
+        .map_err(|e| EngineError::StreamBuild {
+            input: false,
+            detail: e.to_string(),
+        })
 }
 
 #[cfg(test)]
@@ -627,13 +655,13 @@ mod tests {
             .unwrap();
             let info = prepared.info.clone();
             eprintln!(
-                "{}: {} Hz, Block {:?}, Latenz {:?} ms, {}, Hinweis {:?}",
+                "{}: {} Hz, Block {:?}, Latenz {:?} ms, {}, Rückfall {:?}",
                 info.host,
                 info.sample_rate,
                 info.block_frames,
                 info.latency_ms(),
                 info.sample_format,
-                info.note
+                info.fallback
             );
             let (core, _ctl) =
                 crate::engine(info.sample_rate, studiocraft_project::TempoMap::default());
@@ -658,7 +686,7 @@ mod tests {
             block_frames: Some(128),
             sample_format: "f32".into(),
             latency_frames: Some(144),
-            note: None,
+            fallback: Vec::new(),
         };
         assert_eq!(info.latency_ms(), Some(3.0));
         info.latency_frames = None;

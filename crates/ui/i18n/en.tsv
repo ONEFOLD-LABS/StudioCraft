@@ -963,3 +963,62 @@ Eingang {ports}	Input {ports}
 Ausgang {ports}	Output {ports}
 Abgebrochen: zu viele Schritte – der Verlauf für das Modell ist zu groß geworden. Schreib weiter, um neu anzusetzen.	Stopped: too many steps – the history for the model has grown too large. Write again to start afresh.
 Gespeichert, aber ohne diese Clips (sie bleiben nur im Speicher): {clips}	Saved, but without these clips (they are only in memory): {clips}
+Audio-Host „{name}“ gibt es in diesem Build nicht (verfügbar: {liste})	Audio host “{name}” is not part of this build (available: {liste})
+Audio-Host „{name}“: {grund}	Audio host “{name}”: {grund}
+Kein Audio-Eingang gefunden	No audio input found
+Kein Audio-Ausgabegerät gefunden	No audio output device found
+Eingabegeräte: {grund}	Input devices: {grund}
+Ausgabegeräte: {grund}	Output devices: {grund}
+Eingabegerät „{name}“ nicht gefunden	Input device “{name}” not found
+Ausgabegerät „{name}“ nicht gefunden	Output device “{name}” not found
+Eingang „{name}“: {grund}	Input “{name}”: {grund}
+Gerät „{name}“: {grund}	Device “{name}”: {grund}
+Eingang „{name}“ unterstützt {rate} Hz nicht	Input “{name}” does not support {rate} Hz
+Sampleformat {format} wird nicht unterstützt	Sample format {format} is not supported
+Eingang öffnen: {grund}	Opening the input: {grund}
+Stream-Aufbau: {grund}	Setting up the stream: {grund}
+Eingang starten: {grund}	Starting the input: {grund}
+Stream-Start: {grund}	Starting the stream: {grund}
+Das Audiogerät antwortet nicht; der Wechsel gilt nach einem Neustart	The audio device does not respond; the change takes effect after a restart
+Audio-Stream: Übergabe des Kerns fehlgeschlagen	Audio stream: handing over the engine failed
+WASAPI: {grund}	WASAPI: {grund}
+Recorder läuft nicht	The recorder is not running
+Recorder antwortet nicht	The recorder does not respond
+Es lief keine Aufnahme	No recording was running
+keine Datei	no file
+{datei}: passt nicht zur ersten Datei	{datei}: does not match the first file
+Der Bereich ist zu lang für eine Exportdatei: höchstens {h} h {min} min bei {rate} Hz. Locatoren enger setzen oder in Teilen exportieren.	The range is too long for an export file: at most {h} h {min} min at {rate} Hz. Set the locators closer together or export in parts.
+Zu lang für eine Audiodatei: {mb} MB, höchstens 4096 MB	Too long for an audio file: {mb} MB, at most 4096 MB
+MIDI wird auf diesem System nicht unterstützt	MIDI is not supported on this system
+MIDI-Ausgang: {grund}	MIDI output: {grund}
+MIDI: {grund}	MIDI: {grund}
+das Gerät wird von einer anderen Anwendung exklusiv benutzt	another application is using the device exclusively
+der exklusive Modus ist in den Windows-Einstellungen des Geräts nicht erlaubt	exclusive mode is not allowed in the device's Windows settings
+das Gerät unterstützt dieses Format nicht	the device does not support this format
+das Gerät ist nicht mehr verfügbar	the device is no longer available
+Gerät nennt kein Format	the device names no format
+kein passendes Format für den exklusiven Modus ({kanaele} Kanäle, {rate} Hz)	no suitable format for exclusive mode ({kanaele} channels, {rate} Hz)
+das Mix-Format des Geräts wird nicht unterstützt	the device's mix format is not supported
+IAudioClient3 (ab Windows 10): {grund}	IAudioClient3 (Windows 10 and later): {grund}
+Stream und Richtung passen nicht zusammen	stream and direction do not match
+Stream läuft schon	the stream is already running
+Audio-Thread ist beendet	the audio thread has ended
+Gerät antwortet nicht beim Start	the device does not respond when starting
+Gerät antwortet nicht	the device does not respond
+kein Ausgabedienst	no render service
+Audio-Thread: {grund}	audio thread: {grund}
+Geräteliste: {grund}	device list: {grund}
+Gerät: {grund}	device: {grund}
+WAV-Datei nicht lesbar: {grund}	WAV file not readable: {grund}
+{n} Kanäle werden nicht unterstützt	{n} channels are not supported
+Datei nicht lesbar: {grund}	File not readable: {grund}
+Audioformat nicht lesbar: {grund}	Audio format not readable: {grund}
+Abtastrate {r} Hz wird nicht unterstützt	Sample rate {r} Hz is not supported
+{b} Bit werden nicht unterstützt	{b} bit is not supported
+„{geraet}“ läuft nicht mit {rate} Hz; die Wahl gilt nach einem Neustart	“{geraet}” does not run at {rate} Hz; the choice takes effect after a restart
+Ohne Audio gestartet; die Wahl gilt nach einem Neustart	Started without audio; the choice takes effect after a restart
+ (neue Abtastrate nach Neustart)	 (new sample rate after a restart)
+Gerätewechsel fehlgeschlagen: {grund}	Switching the device failed: {grund}
+Kein Audio: {grund}	No audio: {grund}
+ · Rückfall ({gruende})	 · fallback ({gruende})
+{grund}; Standardgerät verwendet	{grund}; using the default device

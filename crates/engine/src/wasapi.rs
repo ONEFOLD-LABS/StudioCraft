@@ -161,6 +161,8 @@ mod imp {
     use std::thread::JoinHandle;
     use std::time::Duration;
 
+    use crate::WasapiProblem;
+
     use windows::Win32::Foundation::{CloseHandle, HANDLE, S_OK, WAIT_OBJECT_0};
     use windows::Win32::Media::Audio::{
         AUDCLNT_BUFFERFLAGS_SILENT, AUDCLNT_E_BUFFER_SIZE_NOT_ALIGNED, AUDCLNT_E_DEVICE_IN_USE,
@@ -216,7 +218,7 @@ mod imp {
         pub format: StreamFormat,
         direction: Direction,
         go: Option<mpsc::Sender<Job>>,
-        started: mpsc::Receiver<Result<(), String>>,
+        started: mpsc::Receiver<Result<(), WasapiProblem>>,
         stop: Arc<AtomicBool>,
         thread: Option<JoinHandle<()>>,
     }
@@ -249,21 +251,20 @@ mod imp {
 
     impl Prepared {
         /// Startet den Stream mit `job` (Renderer für die Ausgabe, Senke für den Eingang).
-        pub(crate) fn start(mut self, job: Job) -> Result<Running, String> {
+        pub(crate) fn start(mut self, job: Job) -> Result<Running, WasapiProblem> {
             let fits = matches!(
                 (&job, self.direction),
                 (Job::Render(_), Direction::Render) | (Job::Capture(_), Direction::Capture)
             );
             if !fits {
-                return Err("WASAPI: Stream und Richtung passen nicht zusammen".into());
+                return Err(WasapiProblem::WrongDirection);
             }
-            let go = self.go.take().ok_or("WASAPI: Stream läuft schon")?;
-            go.send(job)
-                .map_err(|_| "WASAPI: Audio-Thread ist beendet".to_string())?;
+            let go = self.go.take().ok_or(WasapiProblem::AlreadyRunning)?;
+            go.send(job).map_err(|_| WasapiProblem::ThreadGone)?;
             let result = self
                 .started
                 .recv_timeout(SETUP_TIMEOUT)
-                .map_err(|_| "WASAPI: Gerät antwortet nicht beim Start".to_string())
+                .map_err(|_| WasapiProblem::NoStartAnswer)
                 .and_then(|r| r);
             match result {
                 Ok(()) => Ok(Running {
@@ -283,7 +284,7 @@ mod imp {
         mode: Mode,
         rate: u32,
         block: u32,
-    ) -> Result<Prepared, String> {
+    ) -> Result<Prepared, WasapiProblem> {
         let id: Vec<u16> = endpoint_id.encode_utf16().chain(Some(0)).collect();
         let (ready_tx, ready_rx) = mpsc::channel();
         let (go_tx, go_rx) = mpsc::channel();
@@ -304,7 +305,7 @@ mod imp {
                     &stop_thread,
                 );
             })
-            .map_err(|e| format!("WASAPI: Audio-Thread: {e}"))?;
+            .map_err(|e| WasapiProblem::Thread(e.to_string()))?;
         let format = match ready_rx.recv_timeout(SETUP_TIMEOUT) {
             Ok(Ok(f)) => f,
             Ok(Err(e)) => {
@@ -312,7 +313,7 @@ mod imp {
                 return Err(e);
             }
             // Der Thread hängt im Treiber: nicht warten, er endet mit dem fehlenden Sender.
-            Err(_) => return Err("Gerät antwortet nicht".into()),
+            Err(_) => return Err(WasapiProblem::NoAnswer),
         };
         Ok(Prepared {
             format,
@@ -330,9 +331,9 @@ mod imp {
         direction: Direction,
         mode: Mode,
         (rate, block): (u32, u32),
-        ready: mpsc::Sender<Result<StreamFormat, String>>,
+        ready: mpsc::Sender<Result<StreamFormat, WasapiProblem>>,
         go: mpsc::Receiver<Job>,
-        started: mpsc::Sender<Result<(), String>>,
+        started: mpsc::Sender<Result<(), WasapiProblem>>,
         stop: &AtomicBool,
     ) {
         // SAFETY: COM für diesen Thread (Multithreaded Apartment); jedes erfolgreiche
@@ -340,7 +341,7 @@ mod imp {
         // COM-Objekte dieses Threads freigegeben sind (sie leben nur in `run`).
         let com = unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) };
         if com.is_err() {
-            let _ = ready.send(Err(format!("COM: {com}")));
+            let _ = ready.send(Err(WasapiProblem::Com(com.to_string())));
             return;
         }
         run(id, direction, mode, (rate, block), ready, go, started, stop);
@@ -449,19 +450,19 @@ mod imp {
         }
     }
 
-    /// Lesbarer Grund für die häufigen WASAPI-Fehler.
-    fn describe(e: &windows::core::Error) -> String {
+    /// Der Grund für die häufigen WASAPI-Fehler; andere Meldungen von Windows, wie sie sind.
+    fn describe(e: &windows::core::Error) -> WasapiProblem {
         let code = e.code();
         if code == AUDCLNT_E_DEVICE_IN_USE {
-            "das Gerät wird von einer anderen Anwendung exklusiv benutzt".into()
+            WasapiProblem::InUse
         } else if code == AUDCLNT_E_EXCLUSIVE_MODE_NOT_ALLOWED {
-            "der exklusive Modus ist in den Windows-Einstellungen des Geräts nicht erlaubt".into()
+            WasapiProblem::ExclusiveNotAllowed
         } else if code == AUDCLNT_E_UNSUPPORTED_FORMAT {
-            "das Gerät unterstützt dieses Format nicht".into()
+            WasapiProblem::FormatUnsupported
         } else if code == AUDCLNT_E_DEVICE_INVALIDATED {
-            "das Gerät ist nicht mehr verfügbar".into()
+            WasapiProblem::Gone
         } else {
-            format!("{e}")
+            WasapiProblem::Os(e.to_string())
         }
     }
 
@@ -475,24 +476,24 @@ mod imp {
         capture: Option<IAudioCaptureClient>,
     }
 
-    fn open_device(id: &[u16]) -> Result<IMMDevice, String> {
+    fn open_device(id: &[u16]) -> Result<IMMDevice, WasapiProblem> {
         // SAFETY: COM ist in diesem Thread eingerichtet; `id` ist nullterminiert und lebt
         // über den Aufruf hinaus.
         unsafe {
             let enumerator: IMMDeviceEnumerator =
                 CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL)
-                    .map_err(|e| format!("Geräteliste: {}", describe(&e)))?;
+                    .map_err(|e| WasapiProblem::DeviceList(describe(&e).to_string()))?;
             enumerator
                 .GetDevice(PCWSTR(id.as_ptr()))
-                .map_err(|e| format!("Gerät: {}", describe(&e)))
+                .map_err(|e| WasapiProblem::Device(describe(&e).to_string()))
         }
     }
 
-    fn mix_format(client: &IAudioClient) -> Result<MixFormat, String> {
+    fn mix_format(client: &IAudioClient) -> Result<MixFormat, WasapiProblem> {
         // SAFETY: gültiger Client; das Ergebnis gehört uns und wird von MixFormat freigegeben.
         let p = unsafe { client.GetMixFormat() }.map_err(|e| describe(&e))?;
         if p.is_null() {
-            return Err("Gerät nennt kein Format".into());
+            return Err(WasapiProblem::NoFormat);
         }
         Ok(MixFormat(p))
     }
@@ -503,7 +504,7 @@ mod imp {
         direction: Direction,
         rate: u32,
         block: u32,
-    ) -> Result<(IAudioClient, StreamFormat), String> {
+    ) -> Result<(IAudioClient, StreamFormat), WasapiProblem> {
         // SAFETY: COM-Aufrufe auf gültigen Objekten dieses Threads; Formatzeiger zeigen auf
         // lokale Strukturen, die während der Aufrufe leben.
         unsafe {
@@ -532,9 +533,7 @@ mod imp {
                 })
             });
             let Some((fmt, kind, rate)) = chosen else {
-                return Err(format!(
-                    "kein passendes Format für den exklusiven Modus ({channels} Kanäle, {rate} Hz)"
-                ));
+                return Err(WasapiProblem::NoExclusiveFormat { channels, rate });
             };
             let p = (&raw const fmt).cast::<WAVEFORMATEX>();
             let mut min_hns = 0i64;
@@ -594,18 +593,16 @@ mod imp {
     fn setup_low_latency(
         device: &IMMDevice,
         block: u32,
-    ) -> Result<(IAudioClient, StreamFormat), String> {
+    ) -> Result<(IAudioClient, StreamFormat), WasapiProblem> {
         // SAFETY: COM-Aufrufe auf gültigen Objekten dieses Threads; der Formatzeiger aus
         // GetMixFormat lebt bis zum Ende dieses Blocks (MixFormat).
         unsafe {
             let client3: IAudioClient3 = device
                 .Activate(CLSCTX_ALL, None)
-                .map_err(|e| format!("IAudioClient3 (ab Windows 10): {}", describe(&e)))?;
+                .map_err(|e| WasapiProblem::NoLowLatency(describe(&e).to_string()))?;
             let mix = mix_format(&client3)?;
             let info = mix.info();
-            let sample = info
-                .sample
-                .ok_or("das Mix-Format des Geräts wird nicht unterstützt")?;
+            let sample = info.sample.ok_or(WasapiProblem::MixFormatUnsupported)?;
             let (mut default, mut fundamental, mut min, mut max) = (0u32, 0u32, 0u32, 0u32);
             client3
                 .GetSharedModeEnginePeriod(
@@ -642,7 +639,7 @@ mod imp {
         mode: Mode,
         rate: u32,
         block: u32,
-    ) -> Result<Setup, String> {
+    ) -> Result<Setup, WasapiProblem> {
         let device = open_device(id)?;
         let (client, mut format) = match mode {
             Mode::Exclusive => setup_exclusive(&device, direction, rate, block)?,
@@ -692,9 +689,9 @@ mod imp {
         direction: Direction,
         mode: Mode,
         (rate, block): (u32, u32),
-        ready: mpsc::Sender<Result<StreamFormat, String>>,
+        ready: mpsc::Sender<Result<StreamFormat, WasapiProblem>>,
         go: mpsc::Receiver<Job>,
-        started: mpsc::Sender<Result<(), String>>,
+        started: mpsc::Sender<Result<(), WasapiProblem>>,
         stop: &AtomicBool,
     ) {
         let setup = match setup(id, direction, mode, rate, block) {
@@ -743,9 +740,9 @@ mod imp {
     }
 
     /// Füllt den ganzen Puffer mit Stille und startet (vermeidet ein Knacken zu Beginn).
-    fn start_render(setup: &Setup) -> Result<(), String> {
+    fn start_render(setup: &Setup) -> Result<(), WasapiProblem> {
         let Some(render) = &setup.render else {
-            return Err("WASAPI: kein Ausgabedienst".into());
+            return Err(WasapiProblem::NoRenderService);
         };
         let frames = setup.format.buffer_frames;
         // SAFETY: GetBuffer/ReleaseBuffer paarweise auf dem eingerichteten Render-Client;
@@ -759,7 +756,7 @@ mod imp {
         }
     }
 
-    fn start_capture(setup: &Setup) -> Result<(), String> {
+    fn start_capture(setup: &Setup) -> Result<(), WasapiProblem> {
         // SAFETY: Start auf dem eingerichteten Client dieses Threads.
         unsafe { setup.client.Start() }.map_err(|e| describe(&e))
     }

@@ -22,6 +22,7 @@ pub mod clock;
 pub mod core;
 pub mod delay;
 pub mod eq;
+pub mod error;
 pub mod export;
 pub mod input;
 pub mod inserts;
@@ -41,6 +42,7 @@ pub mod wasapi;
 
 pub use clip::{AudioClip, ClipError};
 pub use core::{Command, EngineControl, EngineCore, EngineStatus, engine};
+pub use error::{EngineError, WasapiProblem};
 pub use input::{AudioInput, InputInfo, PreparedInput, Recorder, Recording};
 pub use inserts::{Insert, InsertChain};
 pub use meters::{InputLevels, MAX_INPUT_CHANNELS, MAX_METERED_TRACKS, Meters};

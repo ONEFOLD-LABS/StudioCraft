@@ -246,6 +246,7 @@ impl ProjectWindow {
             ) {
                 Ok(clip) => Some(self.add_pool_clip(&name, None, clip)),
                 Err(e) => {
+                    let e = crate::engine_errors::clip_error_text(&e);
                     notes.push(trf("{name}: {fehler}", &[("name", &name), ("fehler", &e)]));
                     None
                 }
@@ -257,7 +258,8 @@ impl ProjectWindow {
             let loaded = std::fs::read(&path)
                 .map_err(|e| e.to_string())
                 .and_then(|b| {
-                    AudioClip::from_bytes_channel(&b, ext, channel).map_err(|e| e.to_string())
+                    AudioClip::from_bytes_channel(&b, ext, channel)
+                        .map_err(|e| crate::engine_errors::clip_error_text(&e))
                 });
             return match loaded {
                 // Ein einzelner Kanal einer Mehrkanaldatei wird beim Speichern als eigene Datei

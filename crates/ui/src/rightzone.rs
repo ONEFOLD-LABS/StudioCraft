@@ -372,7 +372,13 @@ fn start_preview(w: &mut ProjectWindow, path: &Path) {
         .spawn(move || {
             let r = AudioClip::load(&path)
                 .map(|c| c.resampled(rate).samples)
-                .map_err(|e| format!("{}: {e}", path.display()));
+                .map_err(|e| {
+                    format!(
+                        "{}: {}",
+                        path.display(),
+                        crate::engine_errors::clip_error_text(&e)
+                    )
+                });
             let _ = tx.send(r);
         });
     match spawned {

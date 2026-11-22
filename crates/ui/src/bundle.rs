@@ -22,6 +22,7 @@ use studiocraft_engine::{AudioClip, Song, export};
 use studiocraft_project::file::{self, AUDIO_DIR, EXTENSION};
 use studiocraft_project::{Position, Project};
 
+use crate::engine_errors::TrErr;
 use crate::session::sanitize;
 use crate::{LoadedClip, ProjectWindow, waveform::Peaks};
 
@@ -58,7 +59,7 @@ impl ProjectWindow {
             }
             audio.push((
                 name.clone(),
-                export::wav_f32_bytes(&loaded.samples, clip.sample_rate)?,
+                export::wav_f32_bytes(&loaded.samples, clip.sample_rate).tr_err()?,
             ));
             clip.path = Some(format!("{AUDIO_DIR}/{name}"));
         }
@@ -145,7 +146,8 @@ impl ProjectWindow {
             Some((s, e)) => (s, Some(e)),
             None => (name, None),
         };
-        let clip = AudioClip::from_bytes(bytes, ext).map_err(|e| format!("{name}: {e}"))?;
+        let clip = AudioClip::from_bytes(bytes, ext)
+            .map_err(|e| format!("{name}: {}", crate::engine_errors::clip_error_text(&e)))?;
         self.import_clip(stem, None, clip, None).map(|_| ())
     }
 
@@ -163,7 +165,7 @@ impl ProjectWindow {
         let frames =
             |t: u64| (tempo.seconds(Position(t)) * f64::from(self.sample_rate)).round() as u64;
         let mix = export::mix_range(&song, frames(a), frames(b));
-        let (bytes, peak) = export::encode_audio(&mix, self.sample_rate, ext)?;
+        let (bytes, peak) = export::encode_audio(&mix, self.sample_rate, ext).tr_err()?;
         Ok((
             format!("{}.{ext}", sanitize(&self.project_stem())),
             bytes,

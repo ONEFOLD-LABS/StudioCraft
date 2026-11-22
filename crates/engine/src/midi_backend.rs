@@ -2,6 +2,9 @@
 //! den übrigen Systemen (z. B. FreeBSD) gibt es hier gleichnamige Platzhalter, deren `new`
 //! einen Fehler meldet. MIDI fehlt dort dann, alles andere läuft.
 
+/// Was die Platzhalter melden; [`crate::midi`] macht daraus [`crate::EngineError::MidiUnsupported`].
+pub(crate) const UNSUPPORTED: &str = "MIDI wird auf diesem System nicht unterstützt";
+
 #[cfg(any(
     target_os = "linux",
     target_os = "windows",
@@ -28,7 +31,7 @@ mod unsupported {
     use std::convert::Infallible;
     use std::marker::PhantomData;
 
-    const MESSAGE: &str = "MIDI wird auf diesem System nicht unterstützt";
+    const MESSAGE: &str = super::UNSUPPORTED;
 
     /// Port eines Platzhalters; es gibt nie einen.
     pub struct Port(Infallible);
