@@ -12,6 +12,23 @@ const BLOCK: usize = 4096;
 /// gleiche Grenze hält diesen Puffer klein genug. Gut vier Stunden bei 48 kHz.
 pub const MAX_EXPORT_FRAMES: u64 = (u32::MAX as u64 - 1024) / 6;
 
+/// Größte Datenmenge einer WAV- oder AIFF-Datei in Byte: beide zählen sie in 32 Bit.
+const MAX_FILE_DATA: u64 = u32::MAX as u64 - 1024;
+
+/// Fehler, wenn `samples` Samples zu je `bytes` Byte nicht in eine Datei passen: Sonst liefe
+/// die Größe im Dateikopf über und die Datei wäre unlesbar.
+fn fits_file(samples: usize, bytes: u64) -> Result<(), String> {
+    let size = (samples as u64).saturating_mul(bytes);
+    if size <= MAX_FILE_DATA {
+        Ok(())
+    } else {
+        Err(format!(
+            "Zu lang für eine Audiodatei: {} MB, höchstens 4096 MB",
+            size / (1 << 20)
+        ))
+    }
+}
+
 /// Die Länge von `start..end` in Frames, oder ein Fehler, wenn keine Datei sie fasst.
 fn export_frames(start: u64, end: u64, rate: u32) -> Result<u64, String> {
     let frames = end.saturating_sub(start);
@@ -107,6 +124,8 @@ pub fn render_file(
 /// (`wav`, `flac`, `aif`/`aiff`, je 24 Bit), Werte über 0 dBFS begrenzt. Gibt die Bytes und die
 /// Spitze (linear) zurück. Grundlage für Dateien und für Downloads im Browser.
 pub fn encode_audio(samples: &[f32], rate: u32, ext: &str) -> Result<(Vec<u8>, f32), String> {
+    // 24 Bit je Sample; FLAC entsteht im Speicher und bekommt dieselbe Grenze.
+    fits_file(samples.len(), 3)?;
     let peak = samples.iter().fold(0.0f32, |m, s| m.max(s.abs()));
     let format = match ext.to_ascii_lowercase().as_str() {
         "flac" => Some(craft_audio::EncodeFormat::Flac),
@@ -165,6 +184,7 @@ pub fn mix_range(song: &Song, start: u64, end: u64) -> Vec<f32> {
 
 /// Kodiert verschachteltes Stereo als 32-Bit-Float-WAV (verlustfrei) in Bytes.
 pub fn wav_f32_bytes(samples: &[f32], rate: u32) -> Result<Vec<u8>, String> {
+    fits_file(samples.len(), 4)?;
     let spec = hound::WavSpec {
         channels: 2,
         sample_rate: rate,
@@ -193,6 +213,7 @@ pub fn write_wav_f32_channels(
     rate: u32,
     path: &Path,
 ) -> Result<(), String> {
+    fits_file(samples.len(), 4).map_err(|e| format!("{}: {e}", path.display()))?;
     let spec = hound::WavSpec {
         channels,
         sample_rate: rate,
@@ -307,5 +328,22 @@ mod tests {
         // The limit itself fits a WAV header and holds over four hours at 48 kHz.
         const _: () = assert!(MAX_EXPORT_FRAMES * 6 + 44 <= u32::MAX as u64);
         const _: () = assert!(MAX_EXPORT_FRAMES / 48_000 > 4 * 3600);
+    }
+
+    /// Data that would not fit the 32-bit size of a WAV or AIFF header is refused before
+    /// anything is written, instead of making a file whose header is wrong.
+    #[test]
+    fn writers_refuse_what_no_file_can_hold() {
+        assert!(fits_file(0, 4).is_ok());
+        let most = (MAX_FILE_DATA / 4) as usize;
+        assert!(fits_file(most, 4).is_ok());
+        let err = fits_file(most + 1, 4).unwrap_err();
+        assert!(err.contains("4096 MB"), "{err}");
+        assert!(
+            fits_file(usize::MAX, 4).is_err(),
+            "no overflow in the check"
+        );
+        // 24-bit stereo: the export limit is the same.
+        assert!(fits_file(MAX_EXPORT_FRAMES as usize * 2, 3).is_ok());
     }
 }
