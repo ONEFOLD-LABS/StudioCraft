@@ -83,7 +83,7 @@ Der Release-Workflow installiert deb und rpm testweise unter Debian 13, Ubuntu 2
 
 ## FreeBSD
 
-`packaging/freebsd/package.sh` baut auf FreeBSD ein tar.gz für `/usr/local` und ein natives `pkg` (Abhängigkeiten alsa-lib und alsa-plugins). Ton läuft über ALSA, das alsa-plugins auf OSS (sound(4)) umleitet. MIDI fehlt auf FreeBSD vorerst: midir hat dort kein Backend (`crates/engine/src/midi_backend.rs` meldet das, statt den Build zu brechen). Der Workflow `.github/workflows/freebsd.yml` baut und testet über den gemeinsamen Craft-Workflow in einer FreeBSD-VM und prüft das Paket.
+`packaging/freebsd/package.sh` baut auf FreeBSD ein tar.gz für `/usr/local` und ein natives `pkg` (Abhängigkeiten alsa-lib und alsa-plugins). Ton läuft über ALSA, das alsa-plugins auf OSS (sound(4)) umleitet. MIDI fehlt auf FreeBSD vorerst: midir hat dort kein Backend (`crates/engine/src/midi_backend.rs` meldet das, statt den Build zu brechen). Der Workflow `.github/workflows/freebsd.yml` baut und testet über den gemeinsamen Craft-Workflow in einer FreeBSD-VM und prüft das Paket. Für Releases baut `.github/workflows/release.yml` tar.gz und `pkg` für x86_64 in einer eigenen FreeBSD-VM (nur Release-Build, ohne Tests); aarch64 wird bisher nur gebaut und getestet, nicht paketiert.
 
 ## Web
 

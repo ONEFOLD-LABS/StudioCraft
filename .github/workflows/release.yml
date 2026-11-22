@@ -216,9 +216,41 @@ jobs:
           name: macos-universal
           path: dist/release/*
 
+  # FreeBSD x86_64: tar.gz and pkg from packaging/freebsd/package.sh in a FreeBSD VM (GitHub has
+  # no FreeBSD runners). Only the release build and package.sh's own start of both programs;
+  # freebsd.yml builds and tests both architectures nightly. aarch64 is not packaged yet: it
+  # needs a cross toolchain in the VM (see the shared FreeBSD workflow).
+  freebsd:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+      - name: Build and package in a FreeBSD VM
+        uses: step-security/freebsd-vm@a2f5754275f7b0d5cea7f2762c9960727950f128 # v1.5.9
+        with:
+          release: "15.1"
+          usesh: true
+          cpu: 4
+          mem: 12288
+          # Brings dist/release back to the runner; the build itself stays in the VM.
+          copyback: true
+          prepare: |
+            pkg install -y bash curl pkgconf alsa-lib
+            curl -fsSL https://sh.rustup.rs | sh -s -- -y --profile minimal
+          run: |
+            set -eu
+            . "$HOME/.cargo/env"
+            export CARGO_TARGET_DIR=/var/tmp/target
+            bash packaging/freebsd/package.sh
+      - uses: actions/upload-artifact@v7
+        with:
+          name: freebsd-x86_64
+          path: dist/release/*
+          if-no-files-found: error
+
   publish:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [linux, linux-riscv64, arch, install-test, windows, macos, web]
+    needs: [linux, linux-riscv64, arch, install-test, windows, macos, web, freebsd]
     runs-on: ubuntu-latest
     permissions:
       contents: write
