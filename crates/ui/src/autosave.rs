@@ -16,6 +16,7 @@
 //! keinem Clip vorkommen (Takes, die beim Absturz noch nicht gesichert waren). „Als Takes
 //! einfügen“ legt sie auf neue Spuren; gelöscht wird nichts.
 
+use crate::engine_errors::TrErr;
 use crate::i18n::{tr, trf};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -338,7 +339,7 @@ impl ProjectWindow {
     /// hintereinander auf einer neuen Spur. Mehrkanal-Rohdateien: eine Spur je Kanal, die
     /// Kanäle in eigene Dateien daneben geschrieben.
     fn insert_orphan(&mut self, files: &[PathBuf]) -> Result<(), String> {
-        let rec = studiocraft_engine::input::recording_from_files(files)?;
+        let rec = studiocraft_engine::input::recording_from_files(files).tr_err()?;
         // Je Spur („Bahn“): die Dateien, die sie nacheinander spielt.
         let lanes: Vec<Vec<PathBuf>> = if rec.channels <= 2 {
             vec![files.to_vec()]
@@ -357,13 +358,15 @@ impl ProjectWindow {
                         rec.channels,
                         c as u16,
                         false,
-                    )?;
+                    )
+                    .tr_err()?;
                     let file = crate::session::unique_name(
                         dir,
                         // Dateiname: bleibt unübersetzt (steht im Projekt).
                         &format!("{stem} - Kanal {}.wav", c + 1),
                     );
-                    studiocraft_engine::export::write_wav_f32(&samples, rec.sample_rate, &file)?;
+                    studiocraft_engine::export::write_wav_f32(&samples, rec.sample_rate, &file)
+                        .tr_err()?;
                     lane.push(file);
                 }
             }

@@ -29,6 +29,7 @@ mod colors;
 mod devices;
 mod dialog;
 mod drummap_ui;
+mod engine_errors;
 mod eq_ui;
 mod fades_ui;
 mod file_dialog;
@@ -113,6 +114,7 @@ pub struct LoadedClip {
     pub peaks: Peaks,
 }
 
+pub use engine_errors::{clip_error_text, engine_error_text, wasapi_text};
 pub use inserts::enable_isolated_plugin_scan;
 pub use studiocraft_plugin_host::run_bridge_child as run_plugin_bridge_child;
 pub use studiocraft_plugin_host::run_scan_child as run_plugin_scan_child;
@@ -530,7 +532,7 @@ impl ProjectWindow {
         if let Some(rx) = w.transport.as_mut().and_then(|t| t.midi_out.take()) {
             match studiocraft_engine::midi_out::MidiOutThread::spawn(rx) {
                 Ok(t) => w.midi_out = Some(t),
-                Err(e) => w.message = Some(e),
+                Err(e) => w.message = Some(engine_errors::engine_error_text(&e)),
             }
         }
         w.plugins.preferred = prefs.own_process.into_iter().collect();
@@ -588,7 +590,8 @@ impl ProjectWindow {
         path: &Path,
         target: Option<(usize, u64)>,
     ) -> Result<EventId, String> {
-        let clip = AudioClip::load(path).map_err(|e| format!("{}: {e}", path.display()))?;
+        let clip = AudioClip::load(path)
+            .map_err(|e| format!("{}: {}", path.display(), engine_errors::clip_error_text(&e)))?;
         let name = path
             .file_stem()
             .map_or("Audio".into(), |s| s.to_string_lossy().into_owned());

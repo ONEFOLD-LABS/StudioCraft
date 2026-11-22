@@ -2,7 +2,7 @@
 
 use std::path::Path;
 
-use crate::Song;
+use crate::{EngineError, Song};
 
 /// Blockgröße beim Offline-Rendern.
 const BLOCK: usize = 4096;
@@ -17,30 +17,40 @@ const MAX_FILE_DATA: u64 = u32::MAX as u64 - 1024;
 
 /// Fehler, wenn `samples` Samples zu je `bytes` Byte nicht in eine Datei passen: Sonst liefe
 /// die Größe im Dateikopf über und die Datei wäre unlesbar.
-fn fits_file(samples: usize, bytes: u64) -> Result<(), String> {
+fn fits_file(samples: usize, bytes: u64) -> Result<(), EngineError> {
     let size = (samples as u64).saturating_mul(bytes);
     if size <= MAX_FILE_DATA {
         Ok(())
     } else {
-        Err(format!(
-            "Zu lang für eine Audiodatei: {} MB, höchstens 4096 MB",
-            size / (1 << 20)
-        ))
+        Err(EngineError::TooLarge {
+            mb: size / (1 << 20),
+        })
+    }
+}
+
+/// Der Fehler für einen Bereich, den keine Exportdatei fasst.
+fn range_too_long(rate: u32) -> EngineError {
+    EngineError::RangeTooLong {
+        max_secs: MAX_EXPORT_FRAMES / u64::from(rate.max(1)),
+        rate,
+    }
+}
+
+/// Fehler beim Schreiben von `path`.
+fn file_error(path: &Path, e: impl std::fmt::Display) -> EngineError {
+    EngineError::File {
+        path: path.to_path_buf(),
+        detail: e.to_string(),
     }
 }
 
 /// Die Länge von `start..end` in Frames, oder ein Fehler, wenn keine Datei sie fasst.
-fn export_frames(start: u64, end: u64, rate: u32) -> Result<u64, String> {
+fn export_frames(start: u64, end: u64, rate: u32) -> Result<u64, EngineError> {
     let frames = end.saturating_sub(start);
     if frames <= MAX_EXPORT_FRAMES {
         return Ok(frames);
     }
-    let secs = MAX_EXPORT_FRAMES / u64::from(rate.max(1));
-    Err(format!(
-        "Der Bereich ist zu lang für eine Exportdatei: höchstens {} h {} min bei {rate} Hz. Locatoren enger setzen oder in Teilen exportieren.",
-        secs / 3600,
-        secs % 3600 / 60
-    ))
+    Err(range_too_long(rate))
 }
 
 /// Rendert `start..end` (Frames) der Abspielliste als 24-Bit-WAV.
@@ -51,7 +61,7 @@ pub fn render_wav(
     start: u64,
     end: u64,
     path: &Path,
-) -> Result<f32, String> {
+) -> Result<f32, EngineError> {
     export_frames(start, end, rate)?;
     let spec = hound::WavSpec {
         channels: 2,
@@ -59,7 +69,7 @@ pub fn render_wav(
         bits_per_sample: 24,
         sample_format: hound::SampleFormat::Int,
     };
-    let err = |e: hound::Error| format!("{}: {e}", path.display());
+    let err = |e: hound::Error| file_error(path, e);
     let mut writer = hound::WavWriter::create(path, spec).map_err(err)?;
     let mut buf = vec![0.0f32; BLOCK * 2];
     let mut peak = 0.0f32;
@@ -90,7 +100,7 @@ pub fn render_file(
     start: u64,
     end: u64,
     path: &Path,
-) -> Result<f32, String> {
+) -> Result<f32, EngineError> {
     let ext = path
         .extension()
         .and_then(|e| e.to_str())
@@ -100,8 +110,8 @@ pub fn render_file(
         Some("aif" | "aiff") => craft_audio::EncodeFormat::Aiff,
         _ => return render_wav(song, rate, start, end, path),
     };
-    let frames = usize::try_from(export_frames(start, end, rate)?)
-        .map_err(|_| "Der Bereich ist zu lang für eine Exportdatei.".to_owned())?;
+    let frames =
+        usize::try_from(export_frames(start, end, rate)?).map_err(|_| range_too_long(rate))?;
     let mut inter = vec![0.0f32; frames * 2];
     let mut pos = 0usize;
     while pos < frames {
@@ -115,15 +125,15 @@ pub fn render_file(
     }
     let buf = craft_audio::AudioBuffer::from_interleaved(rate, 2, &inter);
     let bytes = craft_audio::encode(&buf, &craft_audio::EncodeOptions::new(format))
-        .map_err(|e| format!("{}: {e}", path.display()))?;
-    std::fs::write(path, bytes).map_err(|e| format!("{}: {e}", path.display()))?;
+        .map_err(|e| file_error(path, e))?;
+    std::fs::write(path, bytes).map_err(|e| file_error(path, e))?;
     Ok(peak)
 }
 
 /// Kodiert fertiges verschachteltes Stereo wie der Mixdown: Format nach Endung `ext`
 /// (`wav`, `flac`, `aif`/`aiff`, je 24 Bit), Werte über 0 dBFS begrenzt. Gibt die Bytes und die
 /// Spitze (linear) zurück. Grundlage für Dateien und für Downloads im Browser.
-pub fn encode_audio(samples: &[f32], rate: u32, ext: &str) -> Result<(Vec<u8>, f32), String> {
+pub fn encode_audio(samples: &[f32], rate: u32, ext: &str) -> Result<(Vec<u8>, f32), EngineError> {
     // 24 Bit je Sample; FLAC entsteht im Speicher und bekommt dieselbe Grenze.
     fits_file(samples.len(), 3)?;
     let peak = samples.iter().fold(0.0f32, |m, s| m.max(s.abs()));
@@ -140,7 +150,7 @@ pub fn encode_audio(samples: &[f32], rate: u32, ext: &str) -> Result<(Vec<u8>, f
             sample_format: hound::SampleFormat::Int,
         };
         let mut out = std::io::Cursor::new(Vec::new());
-        let err = |e: hound::Error| format!("WAV: {e}");
+        let err = |e: hound::Error| EngineError::Encode(format!("WAV: {e}"));
         let mut writer = hound::WavWriter::new(&mut out, spec).map_err(err)?;
         const MAX: f32 = 8_388_607.0;
         for &s in samples {
@@ -154,18 +164,17 @@ pub fn encode_audio(samples: &[f32], rate: u32, ext: &str) -> Result<(Vec<u8>, f
     let clamped: Vec<f32> = samples.iter().map(|s| s.clamp(-1.0, 1.0)).collect();
     let buf = craft_audio::AudioBuffer::from_interleaved(rate, 2, &clamped);
     let bytes = craft_audio::encode(&buf, &craft_audio::EncodeOptions::new(format))
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| EngineError::Encode(e.to_string()))?;
     Ok((bytes, peak))
 }
 
 /// Schreibt fertiges verschachteltes Stereo wie der Mixdown: Format nach Dateiendung
 /// (`.wav`, `.flac`, `.aif`/`.aiff`, je 24 Bit), Werte über 0 dBFS begrenzt. Gibt die Spitze
 /// (linear) zurück.
-pub fn write_audio(samples: &[f32], rate: u32, path: &Path) -> Result<f32, String> {
+pub fn write_audio(samples: &[f32], rate: u32, path: &Path) -> Result<f32, EngineError> {
     let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("wav");
-    let (bytes, peak) =
-        encode_audio(samples, rate, ext).map_err(|e| format!("{}: {e}", path.display()))?;
-    std::fs::write(path, bytes).map_err(|e| format!("{}: {e}", path.display()))?;
+    let (bytes, peak) = encode_audio(samples, rate, ext)?;
+    std::fs::write(path, bytes).map_err(|e| file_error(path, e))?;
     Ok(peak)
 }
 
@@ -183,7 +192,7 @@ pub fn mix_range(song: &Song, start: u64, end: u64) -> Vec<f32> {
 }
 
 /// Kodiert verschachteltes Stereo als 32-Bit-Float-WAV (verlustfrei) in Bytes.
-pub fn wav_f32_bytes(samples: &[f32], rate: u32) -> Result<Vec<u8>, String> {
+pub fn wav_f32_bytes(samples: &[f32], rate: u32) -> Result<Vec<u8>, EngineError> {
     fits_file(samples.len(), 4)?;
     let spec = hound::WavSpec {
         channels: 2,
@@ -192,7 +201,7 @@ pub fn wav_f32_bytes(samples: &[f32], rate: u32) -> Result<Vec<u8>, String> {
         sample_format: hound::SampleFormat::Float,
     };
     let mut out = std::io::Cursor::new(Vec::new());
-    let err = |e: hound::Error| format!("WAV: {e}");
+    let err = |e: hound::Error| EngineError::Encode(format!("WAV: {e}"));
     let mut writer = hound::WavWriter::new(&mut out, spec).map_err(err)?;
     for &s in samples {
         writer.write_sample(s).map_err(err)?;
@@ -202,7 +211,7 @@ pub fn wav_f32_bytes(samples: &[f32], rate: u32) -> Result<Vec<u8>, String> {
 }
 
 /// Speichert verschachteltes Stereo als 32-Bit-Float-WAV (verlustfrei).
-pub fn write_wav_f32(samples: &[f32], rate: u32, path: &Path) -> Result<(), String> {
+pub fn write_wav_f32(samples: &[f32], rate: u32, path: &Path) -> Result<(), EngineError> {
     write_wav_f32_channels(samples, 2, rate, path)
 }
 
@@ -212,15 +221,15 @@ pub fn write_wav_f32_channels(
     channels: u16,
     rate: u32,
     path: &Path,
-) -> Result<(), String> {
-    fits_file(samples.len(), 4).map_err(|e| format!("{}: {e}", path.display()))?;
+) -> Result<(), EngineError> {
+    fits_file(samples.len(), 4)?;
     let spec = hound::WavSpec {
         channels,
         sample_rate: rate,
         bits_per_sample: 32,
         sample_format: hound::SampleFormat::Float,
     };
-    let err = |e: hound::Error| format!("{}: {e}", path.display());
+    let err = |e: hound::Error| file_error(path, e);
     let mut writer = hound::WavWriter::create(path, spec).map_err(err)?;
     for &s in samples {
         writer.write_sample(s).map_err(err)?;
@@ -317,11 +326,13 @@ mod tests {
             let _ = std::fs::remove_file(&path);
             let err = render_file(&song, 48_000, 0, MAX_EXPORT_FRAMES + 1, &path)
                 .err()
+                .map(|e| e.to_string())
                 .unwrap_or_default();
             assert!(err.contains("zu lang"), "{ext}: {err}");
             assert!(!path.exists(), "{ext}: nothing written");
             let err = render_file(&song, 48_000, 10, u64::MAX, &path)
                 .err()
+                .map(|e| e.to_string())
                 .unwrap_or_default();
             assert!(err.contains("zu lang"), "{ext}: {err}");
         }
@@ -337,7 +348,7 @@ mod tests {
         assert!(fits_file(0, 4).is_ok());
         let most = (MAX_FILE_DATA / 4) as usize;
         assert!(fits_file(most, 4).is_ok());
-        let err = fits_file(most + 1, 4).unwrap_err();
+        let err = fits_file(most + 1, 4).unwrap_err().to_string();
         assert!(err.contains("4096 MB"), "{err}");
         assert!(
             fits_file(usize::MAX, 4).is_err(),

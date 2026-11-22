@@ -85,7 +85,7 @@ impl ProjectWindow {
             Err(e) => {
                 self.device_dialog.outputs.clear();
                 self.device_dialog.inputs.clear();
-                self.device_dialog.message = Some(e);
+                self.device_dialog.message = Some(crate::engine_errors::engine_error_text(&e));
             }
         }
     }

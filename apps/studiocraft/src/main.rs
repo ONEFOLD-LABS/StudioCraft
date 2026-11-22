@@ -28,7 +28,8 @@ use studiocraft_engine::{
     AudioOutput, DeviceChoice, EngineCore, OutputInfo, PreparedOutput, engine,
 };
 use studiocraft_project::{Project, file};
-use studiocraft_ui::ProjectWindow;
+use studiocraft_ui::i18n::{tr, trf};
+use studiocraft_ui::{ProjectWindow, engine_error_text, wasapi_text};
 
 const USAGE: &str = "\
 Aufruf: studiocraft [projekt.studiocraft | datei.wav …] [--tracks <n>] [--audio-host <name>]
@@ -131,8 +132,16 @@ fn status_line(info: &OutputInfo) -> String {
         line.push_str(&format!(" · Latenz {ms:.1} ms"));
     }
     // Das Gerät lehnte den gewählten Modus ab: sagen, warum ein anderer läuft.
-    if let Some(note) = &info.note {
-        line.push_str(&format!(" · Rückfall ({note})"));
+    if !info.fallback.is_empty() {
+        let why: Vec<String> = info
+            .fallback
+            .iter()
+            .map(|(host, p)| format!("{host}: {}", wasapi_text(p)))
+            .collect();
+        line.push_str(&trf(
+            " · Rückfall ({gruende})",
+            &[("gruende", &why.join("; "))],
+        ));
     }
     line
 }
@@ -165,13 +174,13 @@ impl App {
         };
         let prepared = match PreparedOutput::open_with(&want) {
             Ok(p) => p,
-            Err(e) => return self.window.audio_switched(Err(e)),
+            Err(e) => return self.window.audio_switched(Err(engine_error_text(&e))),
         };
         let info = prepared.info.clone();
         if info.sample_rate != rate {
-            return self.window.audio_switched(Err(format!(
-                "„{}“ läuft nicht mit {rate} Hz; die Wahl gilt nach einem Neustart",
-                info.device
+            return self.window.audio_switched(Err(trf(
+                "„{geraet}“ läuft nicht mit {rate} Hz; die Wahl gilt nach einem Neustart",
+                &[("geraet", &info.device), ("rate", &rate)],
             )));
         }
         let core = match (self.parked.take(), self.audio.take()) {
@@ -184,13 +193,14 @@ impl App {
                 Err(b) => {
                     let (out, e) = *b;
                     self.audio = Some(out);
-                    return self.window.audio_switched(Err(e));
+                    return self.window.audio_switched(Err(engine_error_text(&e)));
                 }
             },
             (None, None) => {
-                return self.window.audio_switched(Err(
-                    "Ohne Audio gestartet; die Wahl gilt nach einem Neustart".into(),
-                ));
+                return self.window.audio_switched(Err(tr(
+                    "Ohne Audio gestartet; die Wahl gilt nach einem Neustart",
+                )
+                .into()));
             }
         };
         match prepared.start(core) {
@@ -199,7 +209,7 @@ impl App {
                 self.lost_reported = false;
                 let mut status = status_line(&info);
                 if choice.sample_rate.is_some_and(|r| r != rate) {
-                    status.push_str(" (neue Abtastrate nach Neustart)");
+                    status.push_str(tr(" (neue Abtastrate nach Neustart)"));
                 }
                 self.window.set_output_channels(info.channels);
                 self.window.audio_switched(Ok(status));
@@ -207,8 +217,10 @@ impl App {
             Err(b) => {
                 let (core, e) = *b;
                 self.parked = Some(core);
-                self.window
-                    .audio_switched(Err(format!("Gerätewechsel fehlgeschlagen: {e}")));
+                self.window.audio_switched(Err(trf(
+                    "Gerätewechsel fehlgeschlagen: {grund}",
+                    &[("grund", &engine_error_text(&e))],
+                )));
             }
         }
     }
@@ -309,17 +321,31 @@ fn main() -> ExitCode {
                     (Some(ctl), Some(out), status_line(&info))
                 }
                 // Beim Start gibt es noch keine Plugins: der Kern darf hier gehen.
-                Err(b) => (None, None, format!("Kein Audio: {}", b.1)),
+                Err(b) => (
+                    None,
+                    None,
+                    trf(
+                        "Kein Audio: {grund}",
+                        &[("grund", &engine_error_text(&b.1))],
+                    ),
+                ),
             }
         }
-        Err(e) => (None, None, format!("Kein Audio: {e}")),
+        Err(e) => (
+            None,
+            None,
+            trf("Kein Audio: {grund}", &[("grund", &engine_error_text(&e))]),
+        ),
     };
 
     let mut window = ProjectWindow::new(project, transport, status);
     window.set_audio_choice(choice);
     window.set_output_channels(out_channels);
     if let Some(n) = note {
-        window.audio_switched(Err(format!("{n}; Standardgerät verwendet")));
+        window.audio_switched(Err(trf(
+            "{grund}; Standardgerät verwendet",
+            &[("grund", &engine_error_text(&n))],
+        )));
     }
     window.open_midi_inputs();
     // Automatische Sicherung; nach einem Absturz bietet ein Dialog die neueste Sicherung an.

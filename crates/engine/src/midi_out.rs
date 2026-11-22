@@ -56,14 +56,17 @@ pub fn output_ports() -> Vec<String> {
 
 impl MidiOutThread {
     /// Startet den Thread, der `rx` (vom Audio-Thread) abarbeitet.
-    pub fn spawn(rx: rtrb::Consumer<OutMsg>) -> Result<Self, String> {
+    pub fn spawn(rx: rtrb::Consumer<OutMsg>) -> Result<Self, crate::EngineError> {
         let (cmd, cmd_rx) = mpsc::channel();
         let stop = Arc::new(AtomicBool::new(false));
         let flag = stop.clone();
         let handle = std::thread::Builder::new()
             .name("midi-out".into())
             .spawn(move || run(rx, cmd_rx, flag))
-            .map_err(|e| format!("MIDI-Ausgang: {e}"))?;
+            .map_err(|e| crate::EngineError::Midi {
+                output: true,
+                detail: e.to_string(),
+            })?;
         Ok(Self {
             cmd,
             stop,

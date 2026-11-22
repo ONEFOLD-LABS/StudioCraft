@@ -7,6 +7,15 @@
 //! des Geräts). Welche Kanäle auf welche Spur gehen, entscheidet die
 //! Oberfläche nach dem Stopp.
 
+use crate::EngineError;
+
+/// Fehler beim Lesen oder Schreiben von `path`.
+fn file_error(path: &Path, e: impl std::fmt::Display) -> EngineError {
+    EngineError::File {
+        path: path.to_path_buf(),
+        detail: e.to_string(),
+    }
+}
 use std::{
     path::{Path, PathBuf},
     sync::{
@@ -85,8 +94,8 @@ const FLUSH_EVERY: Duration = if cfg!(test) {
 };
 
 enum Control {
-    Start(PathBuf, mpsc::Sender<Result<(), String>>),
-    Stop(mpsc::Sender<Result<Recording, String>>),
+    Start(PathBuf, mpsc::Sender<Result<(), EngineError>>),
+    Stop(mpsc::Sender<Result<Recording, EngineError>>),
     Quit,
 }
 
@@ -132,7 +141,7 @@ enum InputStream {
 
 impl PreparedInput {
     /// Standard-Eingangsgerät des Hosts mit genau `rate` (muss zur Ausgabe passen).
-    pub fn open(host_name: Option<&str>, rate: u32) -> Result<Self, String> {
+    pub fn open(host_name: Option<&str>, rate: u32) -> Result<Self, EngineError> {
         Self::open_device(host_name, None, rate)
     }
 
@@ -141,7 +150,7 @@ impl PreparedInput {
         host_name: Option<&str>,
         device: Option<&str>,
         rate: u32,
-    ) -> Result<Self, String> {
+    ) -> Result<Self, EngineError> {
         #[cfg(windows)]
         if let Some(mode) = host_name.and_then(crate::wasapi::Mode::from_host) {
             return Self::open_wasapi(mode, device, rate);
@@ -156,23 +165,33 @@ impl PreparedInput {
         mode: crate::wasapi::Mode,
         device: Option<&str>,
         rate: u32,
-    ) -> Result<Self, String> {
+    ) -> Result<Self, EngineError> {
         use crate::wasapi::{Direction, Mode};
         let host = crate::output::host_by_name(Some(mode.host_name()))?;
         let dev = match device {
             None => host
                 .default_input_device()
-                .ok_or("Kein Audio-Eingang gefunden")?,
+                .ok_or(EngineError::NoDevice { input: true })?,
             Some(wanted) => host
                 .input_devices()
-                .map_err(|e| format!("Eingabegeräte: {e}"))?
+                .map_err(|e| EngineError::DeviceList {
+                    input: true,
+                    detail: e.to_string(),
+                })?
                 .find(|d| crate::output::device_name(d) == wanted)
-                .ok_or_else(|| format!("Eingabegerät „{wanted}“ nicht gefunden"))?,
+                .ok_or_else(|| EngineError::DeviceNotFound {
+                    input: true,
+                    name: wanted.to_owned(),
+                })?,
         };
         let name = crate::output::device_name(&dev);
         let id = dev
             .id()
-            .map_err(|e| format!("Eingang „{name}“: {e}"))?
+            .map_err(|e| EngineError::Device {
+                input: true,
+                name: name.clone(),
+                detail: e.to_string(),
+            })?
             .id()
             .to_owned();
         let mut modes = vec![mode];
@@ -204,22 +223,36 @@ impl PreparedInput {
         Self::open_cpal(Some("WASAPI"), Some(&name), rate)
     }
 
-    fn open_cpal(host_name: Option<&str>, device: Option<&str>, rate: u32) -> Result<Self, String> {
+    fn open_cpal(
+        host_name: Option<&str>,
+        device: Option<&str>,
+        rate: u32,
+    ) -> Result<Self, EngineError> {
         let host = crate::output::host_by_name(host_name)?;
         let device = match device {
             None => host
                 .default_input_device()
-                .ok_or("Kein Audio-Eingang gefunden")?,
+                .ok_or(EngineError::NoDevice { input: true })?,
             Some(wanted) => host
                 .input_devices()
-                .map_err(|e| format!("Eingabegeräte: {e}"))?
+                .map_err(|e| EngineError::DeviceList {
+                    input: true,
+                    detail: e.to_string(),
+                })?
                 .find(|d| crate::output::device_name(d) == wanted)
-                .ok_or_else(|| format!("Eingabegerät „{wanted}“ nicht gefunden"))?,
+                .ok_or_else(|| EngineError::DeviceNotFound {
+                    input: true,
+                    name: wanted.to_owned(),
+                })?,
         };
         let name = crate::output::device_name(&device);
         let default = device
             .default_input_config()
-            .map_err(|e| format!("Eingang „{name}“: {e}"))?;
+            .map_err(|e| EngineError::Device {
+                input: true,
+                name: name.clone(),
+                detail: e.to_string(),
+            })?;
         let supported = device
             .supported_input_configs()
             .ok()
@@ -231,7 +264,10 @@ impl PreparedInput {
                 .and_then(|c| c.try_with_sample_rate(rate))
             })
             .or_else(|| (default.sample_rate() == rate).then_some(default))
-            .ok_or_else(|| format!("Eingang „{name}“ unterstützt {rate} Hz nicht"))?;
+            .ok_or_else(|| EngineError::RateUnsupported {
+                name: name.clone(),
+                rate,
+            })?;
         let format = supported.sample_format();
         let config: StreamConfig = supported.into();
         let info = InputInfo {
@@ -252,7 +288,7 @@ impl PreparedInput {
 
     /// Startet Eingang und Recorder-Thread. Der dritte Teil speist das Mithören und gehört
     /// per [`crate::Command::SetMonitorInput`] in die Engine.
-    pub fn start(self) -> Result<(AudioInput, Recorder, MonitorInput), String> {
+    pub fn start(self) -> Result<(AudioInput, Recorder, MonitorInput), EngineError> {
         let Self { backend, info } = self;
         let capacity = info.sample_rate as usize * usize::from(info.channels) * RING_SECONDS;
         let (producer, consumer) = rtrb::RingBuffer::new(capacity);
@@ -282,9 +318,12 @@ impl PreparedInput {
                     SampleFormat::I32 => build::<i32>(&device, &config, sink),
                     SampleFormat::U16 => build::<u16>(&device, &config, sink),
                     SampleFormat::F64 => build::<f64>(&device, &config, sink),
-                    other => Err(format!("Sampleformat {other} wird nicht unterstützt")),
+                    other => Err(EngineError::SampleFormat(other.to_string())),
                 }?;
-                stream.play().map_err(|e| format!("Eingang starten: {e}"))?;
+                stream.play().map_err(|e| EngineError::StreamStart {
+                    input: true,
+                    detail: e.to_string(),
+                })?;
                 InputStream::Cpal(stream)
             }
             #[cfg(windows)]
@@ -374,7 +413,11 @@ impl InputSink {
     }
 }
 
-fn build<T>(device: &Device, config: &StreamConfig, mut sink: InputSink) -> Result<Stream, String>
+fn build<T>(
+    device: &Device,
+    config: &StreamConfig,
+    mut sink: InputSink,
+) -> Result<Stream, EngineError>
 where
     T: SizedSample,
     f32: FromSample<T>,
@@ -390,7 +433,10 @@ where
             |err| eprintln!("Audio-Eingang: {err}"),
             None,
         )
-        .map_err(|e| format!("Eingang öffnen: {e}"))
+        .map_err(|e| EngineError::StreamBuild {
+            input: true,
+            detail: e.to_string(),
+        })
 }
 
 impl Recorder {
@@ -454,23 +500,23 @@ impl Recorder {
 
     /// Beginnt eine Aufnahme nach `path`. Was vorher im Puffer lag, wird verworfen. Fehler,
     /// wenn die Datei sich nicht anlegen lässt: dann läuft keine Aufnahme.
-    pub fn start(&self, path: &Path) -> Result<(), String> {
+    pub fn start(&self, path: &Path) -> Result<(), EngineError> {
         let (tx, rx) = mpsc::channel();
         self.control
             .send(Control::Start(path.to_path_buf(), tx))
-            .map_err(|_| "Recorder läuft nicht".to_string())?;
+            .map_err(|_| EngineError::RecorderNotRunning)?;
         rx.recv_timeout(Duration::from_secs(5))
-            .map_err(|_| "Recorder antwortet nicht".to_string())?
+            .map_err(|_| EngineError::RecorderNoAnswer)?
     }
 
     /// Beendet die Aufnahme und wartet, bis die Datei vollständig geschrieben ist.
-    pub fn stop(&self) -> Result<Recording, String> {
+    pub fn stop(&self) -> Result<Recording, EngineError> {
         let (tx, rx) = mpsc::channel();
         self.control
             .send(Control::Stop(tx))
-            .map_err(|_| "Recorder läuft nicht".to_string())?;
+            .map_err(|_| EngineError::RecorderNotRunning)?;
         rx.recv_timeout(Duration::from_secs(10))
-            .map_err(|_| "Recorder antwortet nicht".to_string())?
+            .map_err(|_| EngineError::RecorderNoAnswer)?
     }
 }
 
@@ -508,12 +554,11 @@ impl Active {
     }
 
     /// Schließt die aktuelle Datei ab und schreibt in der nächsten weiter (`Name-002.wav` …).
-    fn next_file(&mut self, spec: hound::WavSpec) -> Result<(), String> {
+    fn next_file(&mut self, spec: hound::WavSpec) -> Result<(), EngineError> {
         let first = self.done.first().unwrap_or(&self.path).clone();
         let n = u32::try_from(self.done.len() + 2).unwrap_or(u32::MAX);
         let next = continuation_path(&first, n);
-        let writer = hound::WavWriter::create(&next, spec)
-            .map_err(|e| format!("{}: {e}", next.display()))?;
+        let writer = hound::WavWriter::create(&next, spec).map_err(|e| file_error(&next, e))?;
         let old = std::mem::replace(&mut self.writer, writer);
         let old_path = std::mem::replace(&mut self.path, next);
         self.in_file = 0;
@@ -523,7 +568,7 @@ impl Active {
         // mit der Warnung für Teil-Takes.
         let finished = old.finalize();
         self.done.push(old_path.clone());
-        finished.map_err(|e| format!("{}: {e}", old_path.display()))
+        finished.map_err(|e| file_error(&old_path, e))
     }
 }
 
@@ -531,10 +576,10 @@ impl Active {
 /// in der Datei steht, wird der Take (AGENTS.md: ein Absturz darf keine Takes kosten).
 fn finish(
     a: Active,
-    failed: Option<String>,
+    failed: Option<EngineError>,
     channels: u16,
     rate: u32,
-) -> Result<Recording, String> {
+) -> Result<Recording, EngineError> {
     let Active {
         writer,
         path,
@@ -542,9 +587,7 @@ fn finish(
         mut done,
         ..
     } = a;
-    let finalized = writer
-        .finalize()
-        .map_err(|e| format!("{}: {e}", path.display()));
+    let finalized = writer.finalize().map_err(|e| file_error(&path, e));
     let problem = failed.or(finalized.err());
     // Die Länge steht in den Dateien selbst; eine leere letzte Folgedatei zählt nicht.
     let last = hound::WavReader::open(&path).map(|r| u64::from(r.duration()));
@@ -554,7 +597,7 @@ fn finish(
         }
         Ok(_) => done.push(path.clone()),
         Err(e) if done.is_empty() => {
-            return Err(problem.unwrap_or_else(|| format!("{}: {e}", path.display())));
+            return Err(problem.unwrap_or_else(|| file_error(&path, e)));
         }
         Err(_) => {}
     }
@@ -562,8 +605,10 @@ fn finish(
         .iter()
         .map(|p| hound::WavReader::open(p).map_or(0, |r| u64::from(r.duration())))
         .sum();
-    if frames == 0 && problem.is_some() {
-        return Err(problem.unwrap_or_default());
+    if frames == 0
+        && let Some(problem) = problem
+    {
+        return Err(problem);
     }
     let mut files = done.into_iter();
     let first = files.next().unwrap_or(path);
@@ -574,7 +619,8 @@ fn finish(
         channels,
         sample_rate: rate,
         first_captured_at,
-        problem,
+        // Datei und Meldung des Systems: so, wie sie sind.
+        problem: problem.map(|e| e.to_string()),
     })
 }
 
@@ -592,7 +638,7 @@ fn recorder_loop(
     // Wie viele Samples insgesamt aus dem Puffer geholt wurden (für die Zeitzuordnung).
     let mut consumed = 0u64;
     let mut active: Option<Active> = None;
-    let mut failed: Option<String> = None;
+    let mut failed: Option<EngineError> = None;
     let spec = hound::WavSpec {
         channels,
         sample_rate: rate,
@@ -615,7 +661,7 @@ fn recorder_loop(
                         break;
                     }
                     if let Err(e) = a.writer.write_sample(s) {
-                        failed = Some(format!("{}: {e}", a.path.display()));
+                        failed = Some(file_error(&a.path, e));
                         break;
                     }
                     a.in_file += 1;
@@ -627,7 +673,7 @@ fn recorder_loop(
                 {
                     a.last_flush = std::time::Instant::now();
                     if let Err(e) = a.writer.flush() {
-                        failed = Some(format!("{}: {e}", a.path.display()));
+                        failed = Some(file_error(&a.path, e));
                     }
                 }
             }
@@ -657,7 +703,7 @@ fn recorder_loop(
                         })
                     }
                     Err(e) => {
-                        let _ = reply.send(Err(format!("{}: {e}", path.display())));
+                        let _ = reply.send(Err(file_error(&path, e)));
                         None
                     }
                 };
@@ -665,7 +711,7 @@ fn recorder_loop(
             Ok(Control::Stop(reply)) => {
                 let result = match active.take() {
                     Some(a) => finish(a, failed.take(), channels, rate),
-                    None => Err("Es lief keine Aufnahme".into()),
+                    None => Err(EngineError::NothingRecorded),
                 };
                 let _ = reply.send(result);
             }
@@ -683,23 +729,23 @@ fn recorder_loop(
 /// Liest Aufnahme-Dateien (WAV) als eine [`Recording`]: die erste und ihre Folgedateien in
 /// Reihenfolge (siehe [`continuation_path`]), etwa eine Aufnahme, die nach einem Absturz liegen
 /// blieb. Kanäle und Rate aus der ersten Datei; alle müssen dazu passen.
-pub fn recording_from_files(files: &[PathBuf]) -> Result<Recording, String> {
-    let (first, more) = files.split_first().ok_or("keine Datei")?;
+pub fn recording_from_files(files: &[PathBuf]) -> Result<Recording, EngineError> {
+    let (first, more) = files.split_first().ok_or(EngineError::NoFile)?;
     let mut frames = 0u64;
     let mut spec: Option<hound::WavSpec> = None;
     for path in files {
-        let r = hound::WavReader::open(path).map_err(|e| format!("{}: {e}", path.display()))?;
+        let r = hound::WavReader::open(path).map_err(|e| file_error(path, e))?;
         let s = r.spec();
         match spec {
             None => spec = Some(s),
             Some(f) if (f.channels, f.sample_rate) != (s.channels, s.sample_rate) => {
-                return Err(format!("{}: passt nicht zur ersten Datei", path.display()));
+                return Err(EngineError::FileMismatch(path.clone()));
             }
             Some(_) => {}
         }
         frames = frames.saturating_add(u64::from(r.duration()));
     }
-    let spec = spec.ok_or("keine Datei")?;
+    let spec = spec.ok_or(EngineError::NoFile)?;
     Ok(Recording {
         path: first.clone(),
         more: more.to_vec(),
@@ -713,7 +759,11 @@ pub fn recording_from_files(files: &[PathBuf]) -> Result<Recording, String> {
 
 /// Liest eine Aufnahme und baut daraus Stereo für eine Spur: `first` ist der
 /// erste Eingangskanal, `stereo` nimmt `first` und `first + 1`, sonst Mono auf beide Seiten.
-pub fn extract_channels(rec: &Recording, first: u16, stereo: bool) -> Result<Vec<f32>, String> {
+pub fn extract_channels(
+    rec: &Recording,
+    first: u16,
+    stereo: bool,
+) -> Result<Vec<f32>, EngineError> {
     let mut out = Vec::new();
     for path in rec.files() {
         out.extend(extract_file_channels(path, rec.channels, first, stereo)?);
@@ -727,13 +777,13 @@ pub fn extract_file_channels(
     channels: u16,
     first: u16,
     stereo: bool,
-) -> Result<Vec<f32>, String> {
-    let reader = hound::WavReader::open(path).map_err(|e| format!("{}: {e}", path.display()))?;
+) -> Result<Vec<f32>, EngineError> {
+    let reader = hound::WavReader::open(path).map_err(|e| file_error(path, e))?;
     let ch = usize::from(channels.max(1));
     let all: Vec<f32> = reader
         .into_samples::<f32>()
         .collect::<Result<_, _>>()
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| file_error(path, e))?;
     let l = usize::from(first).min(ch - 1);
     let r = if stereo { (l + 1).min(ch - 1) } else { l };
     Ok(all.chunks_exact(ch).flat_map(|f| [f[l], f[r]]).collect())
@@ -823,7 +873,10 @@ mod tests {
     #[test]
     fn a_file_that_cannot_be_created_fails_the_start() {
         let (_tx, rec, dir) = recorder(2);
-        let err = rec.start(&dir.join("fehlt").join("take.wav")).unwrap_err();
+        let err = rec
+            .start(&dir.join("fehlt").join("take.wav"))
+            .unwrap_err()
+            .to_string();
         assert!(err.contains("take.wav"), "{err}");
         assert!(rec.stop().is_err(), "keine Aufnahme gestartet");
         // Danach geht eine Aufnahme wie gewohnt.
@@ -869,7 +922,13 @@ mod tests {
             first_captured_at: Some(7),
             ..Active::new(writer, path.clone())
         };
-        let r = finish(a, Some("Platte voll".into()), 2, 48_000).unwrap();
+        let r = finish(
+            a,
+            Some(EngineError::Encode("Platte voll".into())),
+            2,
+            48_000,
+        )
+        .unwrap();
         assert_eq!((r.frames, r.first_captured_at), (1000, Some(7)));
         assert_eq!(r.problem.as_deref(), Some("Platte voll"));
         let back = extract_channels(&r, 1, false).unwrap();
@@ -1027,7 +1086,7 @@ mod tests {
             done: vec![first.clone()],
             ..Active::new(writer, full.clone())
         };
-        let err = a.next_file(spec).unwrap_err();
+        let err = a.next_file(spec).unwrap_err().to_string();
         assert!(err.contains("/dev/full"), "{err}");
         assert_eq!(
             a.done,

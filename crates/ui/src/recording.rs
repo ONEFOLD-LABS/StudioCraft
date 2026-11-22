@@ -11,6 +11,7 @@
 //! - **Über bestehenden Events:** der neue Take liegt obenauf und klingt dort;
 //!   die alten bleiben darunter erhalten.
 
+use crate::engine_errors::TrErr;
 use crate::i18n::tr;
 use std::path::{Path, PathBuf};
 
@@ -97,8 +98,9 @@ impl ProjectWindow {
             self.audio_host.as_deref(),
             self.audio_choice.input.as_deref(),
             self.sample_rate,
-        )?;
-        let (input, recorder, monitor) = prepared.start()?;
+        )
+        .tr_err()?;
+        let (input, recorder, monitor) = prepared.start().tr_err()?;
         if let Some(t) = &mut self.transport {
             // Nur einmal pro Sitzung; ist die Queue gerade voll, bleibt Monitor stumm.
             t.send(Command::SetMonitorInput(Box::new(monitor)));
@@ -186,7 +188,7 @@ impl ProjectWindow {
                 self.midi_status = format!("MIDI: {}", m.ports.join(", "));
                 self.midi_inputs = Some(m);
             }
-            Err(e) => self.midi_status = e,
+            Err(e) => self.midi_status = crate::engine_errors::engine_error_text(&e),
         }
     }
 
@@ -317,6 +319,7 @@ impl ProjectWindow {
                 // Lässt sich die Datei nicht anlegen: Fehler vor dem Start, keine stille
                 // Aufnahme ins Leere.
                 if let Err(e) = r.start(&path) {
+                    let e = crate::engine_errors::engine_error_text(&e);
                     self.message = Some(crate::i18n::trf(
                         "Aufnahme nicht möglich: {e}",
                         &[("e", &e)],
@@ -417,7 +420,7 @@ impl ProjectWindow {
         };
         let overruns =
             rec.overruns.load(std::sync::atomic::Ordering::Relaxed) - self.overruns_at_start;
-        let result = rec.stop();
+        let result = rec.stop().tr_err();
         let rate = self.sample_rate;
         // Unterbrochene Aufnahme (z. B. Platte voll): der Teil bis dahin wird trotzdem ein Take.
         let mut problem: Option<(String, u64)> = None;
@@ -637,7 +640,8 @@ impl ProjectWindow {
             let mut at = 0u64;
             for (i, path) in files.iter().enumerate() {
                 let samples =
-                    input::extract_file_channels(path, rec.channels, inp.first, inp.stereo)?;
+                    input::extract_file_channels(path, rec.channels, inp.first, inp.stereo)
+                        .tr_err()?;
                 let length = samples.len() as u64 / 2;
                 let suffix = if i == 0 {
                     String::new()
@@ -645,7 +649,7 @@ impl ProjectWindow {
                     format!("-{:03}", i + 1)
                 };
                 let file = unique_name(&dir, &format!("{stem} - {track_name}{suffix}.wav"));
-                export::write_wav_f32(&samples, rec.sample_rate, &file)?;
+                export::write_wav_f32(&samples, rec.sample_rate, &file).tr_err()?;
                 let clip = AudioClip {
                     sample_rate: rec.sample_rate,
                     samples: samples.into(),

@@ -23,6 +23,7 @@ use studiocraft_project::{
     file::{self, AUDIO_DIR, EXTENSION},
 };
 
+use crate::engine_errors::TrErr;
 use crate::{LoadedClip, ProjectWindow, waveform::Peaks};
 
 impl ProjectWindow {
@@ -111,6 +112,7 @@ impl ProjectWindow {
                             export::write_wav_f32(&loaded.samples, clip.sample_rate, &target)
                         {
                             let _ = std::fs::remove_file(&target);
+                            let e = crate::engine_errors::engine_error_text(&e);
                             unsaved.push(format!("{} ({e})", clip.name));
                             continue;
                         }
@@ -243,7 +245,8 @@ impl ProjectWindow {
         let tempo = &self.project.tempo;
         let frames =
             |t: u64| (tempo.seconds(Position(t)) * f64::from(self.sample_rate)).round() as u64;
-        let peak = export::render_file(&song, self.sample_rate, frames(a), frames(b), path)?;
+        let peak =
+            export::render_file(&song, self.sample_rate, frames(a), frames(b), path).tr_err()?;
         self.message = (peak > 1.0).then(|| {
             crate::i18n::trf(
                 "Export übersteuert (Spitze {db} dBFS) – Ausgang leiser stellen",

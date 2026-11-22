@@ -74,9 +74,18 @@ pub struct MidiInputs {
 
 impl MidiInputs {
     /// Öffnet alle vorhandenen Eingänge und leitet Nachrichten an `sender`.
-    pub fn open_all(sender: &MidiSender) -> Result<Self, String> {
-        let probe =
-            crate::midi_backend::MidiInput::new("StudioCraft").map_err(|e| format!("MIDI: {e}"))?;
+    pub fn open_all(sender: &MidiSender) -> Result<Self, crate::EngineError> {
+        let probe = crate::midi_backend::MidiInput::new("StudioCraft").map_err(|e| {
+            let detail = e.to_string();
+            if detail == crate::midi_backend::UNSUPPORTED {
+                crate::EngineError::MidiUnsupported
+            } else {
+                crate::EngineError::Midi {
+                    output: false,
+                    detail,
+                }
+            }
+        })?;
         let ports = probe.ports();
         let mut connections = Vec::new();
         let mut names = Vec::new();

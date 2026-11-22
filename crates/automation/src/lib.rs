@@ -11,6 +11,10 @@
 //! process, before a call runs or is sent ([`confine`]).
 //!
 //! Tool texts and results are English: they are read by agents, not shown in the UI.
+//! Error messages that come from the project window (engine and file errors included, see
+//! `studiocraft_ui::engine_error_text`) are in the window's language: German in the headless
+//! server, which sets no language, and the app's interface language over the control channel,
+//! as every other message of the window already was.
 // No unwrap/expect/panic outside tests (AGENTS.md "Robustness").
 #![cfg_attr(
     not(test),

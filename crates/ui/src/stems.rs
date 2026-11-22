@@ -5,6 +5,7 @@
 //! gleich lang sind. Mit Kanalbearbeitung: Inserts, EQ, Fader und Panorama des Kanals; ohne:
 //! nur was hineinläuft (Instrumente spielen immer).
 
+use crate::engine_errors::TrErr;
 use crate::i18n::tr;
 use std::path::{Path, PathBuf};
 
@@ -172,7 +173,7 @@ impl ProjectWindow {
                 nr + 1,
                 format.extension(),
             ));
-            export::write_audio(&audio, self.sample_rate, &path)?;
+            export::write_audio(&audio, self.sample_rate, &path).tr_err()?;
             written.push(path);
         }
         Ok(written)
