@@ -491,6 +491,9 @@ impl ProjectWindow {
                     Err(e) => Err(e),
                 };
                 match saved {
+                    // Nicht alles ließ sich speichern (die Meldung nennt es): nicht schließen
+                    // oder ersetzen, sonst ginge, was nur im Speicher ist, doch verloren.
+                    Ok(true) if self.is_modified() => {}
                     Ok(true) => self.run(ui, action),
                     Ok(false) => {}
                     Err(e) => self.message = Some(e),

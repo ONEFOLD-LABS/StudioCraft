@@ -210,7 +210,14 @@ impl Exec<'_> {
             ));
         }
         self.window.save_as(&target)?;
-        Ok(json!({"saved": target.display().to_string()}))
+        let mut reply = json!({"saved": target.display().to_string()});
+        // Saved, but not everything: say what is only in memory.
+        if self.window.is_modified()
+            && let (Some(o), Some(m)) = (reply.as_object_mut(), self.window.message())
+        {
+            o.insert("warning".into(), json!(m));
+        }
+        Ok(reply)
     }
 
     fn import_audio(&mut self, a: &Value) -> Result<Value, String> {

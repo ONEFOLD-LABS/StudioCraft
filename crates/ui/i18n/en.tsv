@@ -962,3 +962,4 @@ Triangel offen	Open Triangle
 Eingang {ports}	Input {ports}
 Ausgang {ports}	Output {ports}
 Abgebrochen: zu viele Schritte – der Verlauf für das Modell ist zu groß geworden. Schreib weiter, um neu anzusetzen.	Stopped: too many steps – the history for the model has grown too large. Write again to start afresh.
+Gespeichert, aber ohne diese Clips (sie bleiben nur im Speicher): {clips}	Saved, but without these clips (they are only in memory): {clips}

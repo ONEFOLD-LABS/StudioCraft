@@ -86,6 +86,9 @@ impl ProjectWindow {
 
         // Audio in den Projektordner holen und Pfade relativ machen.
         let mut stored = self.project.clone();
+        // Clips, deren Samples sich nicht schreiben ließen: Das Projekt wird trotzdem
+        // gespeichert, sie bleiben im Speicher und das Projekt als geändert markiert.
+        let mut unsaved: Vec<String> = Vec::new();
         for (id, clip) in stored.pool.iter_mut().enumerate() {
             let source = clip.path.as_ref().map(PathBuf::from);
             let inside = source
@@ -104,7 +107,13 @@ impl ProjectWindow {
                     // Keine Datei (z. B. synthetisch erzeugt): Samples als WAV ablegen.
                     (Some(loaded), _) => {
                         let target = unique_name(&audio, &format!("{}.wav", sanitize(&clip.name)));
-                        export::write_wav_f32(&loaded.samples, clip.sample_rate, &target)?;
+                        if let Err(e) =
+                            export::write_wav_f32(&loaded.samples, clip.sample_rate, &target)
+                        {
+                            let _ = std::fs::remove_file(&target);
+                            unsaved.push(format!("{} ({e})", clip.name));
+                            continue;
+                        }
                         PathBuf::from(AUDIO_DIR).join(target.file_name().unwrap_or_default())
                     }
                     // Datei fehlt und nichts geladen (beim Öffnen gemeldet): den Verweis
@@ -138,6 +147,15 @@ impl ProjectWindow {
         self.saved = Some(self.project.clone());
         self.plugins.changed = false;
         self.message = None;
+        if !unsaved.is_empty() {
+            // Nie alles verloren, nie still: gespeichert ist der Rest, der Clip bleibt im
+            // Speicher, und „geändert“ erinnert daran.
+            self.saved = None;
+            self.message = Some(crate::i18n::trf(
+                "Gespeichert, aber ohne diese Clips (sie bleiben nur im Speicher): {clips}",
+                &[("clips", &unsaved.join(", "))],
+            ));
+        }
         Ok(())
     }
 
@@ -305,6 +323,50 @@ fn next_version(path: &Path) -> Option<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A clip without a file whose samples cannot be written (beyond 4 GiB, or as here an odd
+    /// stereo sample count that hound refuses to finish) does not stop the save: the project
+    /// and the other clips are saved, the message names the clip, it stays in memory and the
+    /// project stays changed.
+    #[test]
+    fn a_clip_that_cannot_be_written_does_not_stop_the_save() {
+        let dir = std::env::temp_dir().join(format!("sc-save-part-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut w = ProjectWindow::new(Project::default(), None, String::new());
+        let clip = |w: &mut ProjectWindow, name: &str, samples: Vec<f32>| {
+            let id = w.project.add_clip(studiocraft_project::PoolClip {
+                name: name.into(),
+                path: None,
+                sample_rate: 48_000,
+                frames: samples.len() as u64 / 2,
+            });
+            let peaks = crate::Peaks::new(&samples);
+            w.clips.insert(
+                id,
+                crate::LoadedClip {
+                    samples: samples.into(),
+                    peaks,
+                },
+            );
+            id
+        };
+        let good = clip(&mut w, "Gut", vec![0.1, 0.2, 0.3, 0.4]);
+        let bad = clip(&mut w, "Kaputt", vec![0.1, 0.2, 0.3]);
+        let path = dir.join("Song.studiocraft");
+        assert!(w.save_as(&path).is_ok(), "the project is saved");
+        let back = file::from_json(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert!(
+            back.pool[good as usize].path.is_some(),
+            "the other clip is saved"
+        );
+        assert!(back.pool[bad as usize].path.is_none());
+        let message = w.message().unwrap_or_default().to_owned();
+        assert!(message.contains("Kaputt"), "{message}");
+        assert!(w.clips.contains_key(&bad), "the clip stays in memory");
+        assert!(w.is_modified(), "the project stays changed");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn version_names() {
