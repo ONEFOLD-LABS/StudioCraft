@@ -23,8 +23,10 @@ struct HostWindow;
 
 #[cfg(not(all(unix, not(target_os = "macos"))))]
 impl HostWindow {
-    fn new(_: &str, _: u32, _: u32) -> Result<Self, String> {
-        Err("LV2-Fenster gibt es bisher nur unter X11".into())
+    fn new(_: &str, _: u32, _: u32) -> Result<Self, crate::error::PluginError> {
+        Err(crate::error::PluginError::Window(
+            crate::error::WindowProblem::Lv2OnlyX11,
+        ))
     }
     fn id(&self) -> u32 {
         0
@@ -133,17 +135,18 @@ pub(crate) struct UiInfo {
 
 /// UI-Bibliotheken bleiben bis zum Programmende geladen: Entladen, während Toolkit-Threads
 /// oder -Rückrufe der Bibliothek noch leben, stürzt ab.
-fn load_library(path: &Path) -> Result<&'static libloading::Library, String> {
+fn load_library(path: &Path) -> Result<&'static libloading::Library, crate::error::PluginError> {
     static LIBS: OnceLock<Mutex<HashMap<PathBuf, &'static libloading::Library>>> = OnceLock::new();
     let mut libs = LIBS
         .get_or_init(Default::default)
         .lock()
-        .map_err(|_| "UI-Bibliotheken gesperrt".to_string())?;
+        .map_err(|_| crate::error::PluginError::Locked(crate::error::Lock::UiLibraries))?;
     if let Some(lib) = libs.get(path) {
         return Ok(lib);
     }
     // SAFETY: Laden fremden Codes ist der Zweck; Initialisierer der Bibliothek laufen hier.
-    let lib = unsafe { libloading::Library::new(path) }.map_err(|e| e.to_string())?;
+    let lib = unsafe { libloading::Library::new(path) }
+        .map_err(|e| crate::error::PluginError::Library(e.to_string()))?;
     let lib: &'static libloading::Library = Box::leak(Box::new(lib));
     libs.insert(path.to_path_buf(), lib);
     Ok(lib)
@@ -173,12 +176,13 @@ impl Lv2Gui {
         plugin_handle: *mut c_void,
         extension_data: Option<unsafe extern "C" fn(*const c_char) -> *const c_void>,
         base_features: &[*const super::lv2::Lv2Feature],
-    ) -> Result<Self, String> {
+    ) -> Result<Self, crate::error::PluginError> {
         let lib = load_library(&info.binary)?;
         // SAFETY: `lv2ui_descriptor` ist laut LV2 eine Funktion (Index) → Beschreibung.
-        let get: libloading::Symbol<unsafe extern "C" fn(u32) -> *const UiDescriptor> =
-            unsafe { lib.get(b"lv2ui_descriptor\0") }
-                .map_err(|_| "keine LV2-Oberfläche in der Bibliothek".to_string())?;
+        let get: libloading::Symbol<unsafe extern "C" fn(u32) -> *const UiDescriptor> = unsafe {
+            lib.get(b"lv2ui_descriptor\0")
+        }
+        .map_err(|_| crate::error::PluginError::Window(crate::error::WindowProblem::Lv2NoUi))?;
         let mut desc = ptr::null();
         for i in 0..256 {
             // SAFETY: Aufruf laut Vertrag; null beendet die Liste.
@@ -193,7 +197,9 @@ impl Lv2Gui {
             }
         }
         if desc.is_null() {
-            return Err("Oberfläche nicht in der Bibliothek gefunden".into());
+            return Err(crate::error::PluginError::Window(
+                crate::error::WindowProblem::Lv2UiNotInLibrary,
+            ));
         }
         let window = HostWindow::new(title, 640, 480)?;
         let mut controller = Box::<Controller>::default();
@@ -223,12 +229,14 @@ impl Lv2Gui {
             .chain(features.iter().map(|f| f as *const super::lv2::Lv2Feature))
             .chain(std::iter::once(ptr::null()))
             .collect();
-        let uri = CString::new(plugin_uri).map_err(|e| e.to_string())?;
+        let uri = CString::new(plugin_uri)
+            .map_err(|e| crate::error::PluginError::Library(e.to_string()))?;
         let mut bundle = info.bundle.to_string_lossy().into_owned();
         if !bundle.ends_with('/') {
             bundle.push('/');
         }
-        let bundle = CString::new(bundle).map_err(|e| e.to_string())?;
+        let bundle =
+            CString::new(bundle).map_err(|e| crate::error::PluginError::Library(e.to_string()))?;
         let mut widget: *mut c_void = ptr::null_mut();
         // SAFETY: Beschreibung gültig; alle Zeiger leben mindestens so lange wie die Oberfläche
         // (Felder dieser Struktur); Hauptthread.
@@ -248,7 +256,9 @@ impl Lv2Gui {
         };
         if ui.is_null() {
             window.close();
-            return Err("Plugin-Oberfläche ließ sich nicht erzeugen".into());
+            return Err(crate::error::PluginError::Window(
+                crate::error::WindowProblem::Lv2UiCreate,
+            ));
         }
         // SAFETY: Beschreibung gültig; extension_data ist ein reiner Abruf.
         let idle = unsafe {

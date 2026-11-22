@@ -658,7 +658,9 @@ pub fn run_bridge_child_with(
 
 /// The usual loader: the plugin from its file, in its format.
 fn load_plugin(a: &BridgeArgs) -> Result<Hosted, String> {
-    let instance = crate::PluginInstance::new(&a.info, a.sample_rate, a.max_frames)?;
+    let instance = crate::PluginInstance::new(&a.info, a.sample_rate, a.max_frames)
+        // As JSON, so the app can show it in its language.
+        .map_err(|e| e.to_wire())?;
     let params = instance.params().to_vec();
     let handle = instance.handle();
     Ok((params, Box::new(instance), Box::new(handle)))

@@ -24,7 +24,11 @@ pub enum PluginInstance {
 impl PluginInstance {
     /// Erzeugt, initialisiert und aktiviert das Plugin im Format aus `info`. Nur im
     /// Hauptthread.
-    pub fn new(info: &PluginInfo, sample_rate: u32, max_frames: u32) -> Result<Self, String> {
+    pub fn new(
+        info: &PluginInfo,
+        sample_rate: u32,
+        max_frames: u32,
+    ) -> Result<Self, crate::error::PluginError> {
         match info.format {
             PluginFormat::Clap => ClapInstance::new(info, sample_rate, max_frames).map(Self::Clap),
             PluginFormat::Lv2 => Lv2Instance::new(info, sample_rate, max_frames).map(Self::Lv2),
@@ -40,8 +44,10 @@ impl PluginInstance {
         sample_rate: u32,
         max_frames: u32,
         exe: &std::path::Path,
-    ) -> Result<Self, String> {
-        BridgeInstance::spawn(info, sample_rate, max_frames, exe).map(Self::Bridged)
+    ) -> Result<Self, crate::error::PluginError> {
+        BridgeInstance::spawn(info, sample_rate, max_frames, exe)
+            .map(Self::Bridged)
+            .map_err(|e| crate::error::PluginError::from_wire(&e))
     }
 
     pub fn info(&self) -> &PluginInfo {
@@ -216,10 +222,12 @@ impl PluginHandle {
 
     /// Ein Preset aus [`Self::presets`] direkt im Plugin laden (Formate, deren Presets mehr als
     /// Parameterwerte sind; heute CLAP). Danach liefert [`Self::param_values`] die neuen Werte.
-    pub fn load_preset(&self, uri: &str) -> Result<(), String> {
+    pub fn load_preset(&self, uri: &str) -> Result<(), crate::error::PluginError> {
         match self {
             Self::Clap(h) => h.load_preset(uri),
-            _ => Err("Presets dieses Formats setzen Parameterwerte".into()),
+            _ => Err(crate::error::PluginError::Preset(
+                crate::error::PresetProblem::SetsParams,
+            )),
         }
     }
 
@@ -294,13 +302,15 @@ impl PluginHandle {
         }
     }
 
-    pub fn open_gui(&mut self, title: &str) -> Result<(), String> {
+    pub fn open_gui(&mut self, title: &str) -> Result<(), crate::error::PluginError> {
         match self {
             Self::Clap(h) => h.open_gui(title),
             Self::Lv2(h) => h.open_gui(title),
             Self::Vst3(h) => h.open_gui(title),
             Self::Au(h) => h.open_gui(title),
-            Self::Bridged(h) => h.open_gui(title),
+            Self::Bridged(h) => h
+                .open_gui(title)
+                .map_err(|e| crate::error::PluginError::from_wire(&e)),
         }
     }
 

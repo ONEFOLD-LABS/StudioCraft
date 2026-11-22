@@ -18,12 +18,15 @@ impl PluginInstance {
         sample_rate: u32,
         max_frames: u32,
         _exe: &std::path::Path,
-    ) -> Result<Self, String> {
+    ) -> Result<Self, crate::error::PluginError> {
         Self::new(info, sample_rate, max_frames)
     }
 
-    pub fn new(info: &PluginInfo, _: u32, _: u32) -> Result<Self, String> {
-        Err(format!("{}: Plugins gibt es im Browser nicht", info.name))
+    pub fn new(info: &PluginInfo, _: u32, _: u32) -> Result<Self, crate::error::PluginError> {
+        Err(crate::error::PluginError::Create {
+            plugin: info.name.clone(),
+            step: crate::error::Step::Browser,
+        })
     }
     pub fn info(&self) -> &PluginInfo {
         match self.0 {}
@@ -84,7 +87,7 @@ impl PluginHandle {
     pub fn preset_values(&self, _: &str) -> Vec<(u32, f64)> {
         match self.0 {}
     }
-    pub fn load_preset(&self, _: &str) -> Result<(), String> {
+    pub fn load_preset(&self, _: &str) -> Result<(), crate::error::PluginError> {
         match self.0 {}
     }
     pub fn param_values(&self) -> Vec<(u32, f64)> {
@@ -105,7 +108,7 @@ impl PluginHandle {
     pub fn take_dirty(&self) -> bool {
         match self.0 {}
     }
-    pub fn open_gui(&mut self, _: &str) -> Result<(), String> {
+    pub fn open_gui(&mut self, _: &str) -> Result<(), crate::error::PluginError> {
         match self.0 {}
     }
     pub fn close_gui(&mut self) {
@@ -134,8 +137,10 @@ pub fn scan(_: &[PathBuf]) -> (Vec<PluginInfo>, Vec<String>) {
     (Vec::new(), Vec::new())
 }
 
-pub fn scan_bundle(_: &Path) -> Result<Vec<PluginInfo>, String> {
-    Err("Plugins gibt es im Browser nicht".into())
+pub fn scan_bundle(_: &Path) -> Result<Vec<PluginInfo>, crate::error::PluginError> {
+    Err(crate::error::PluginError::Unavailable(
+        crate::error::Unavailable::Browser,
+    ))
 }
 
 pub fn scan_isolated(_: &[PathBuf], _: &ScanOptions) -> ScanReport {

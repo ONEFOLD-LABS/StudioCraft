@@ -1022,3 +1022,61 @@ Gerätewechsel fehlgeschlagen: {grund}	Switching the device failed: {grund}
 Kein Audio: {grund}	No audio: {grund}
  · Rückfall ({gruende})	 · fallback ({gruende})
 {grund}; Standardgerät verwendet	{grund}; using the default device
+Aktivieren fehlgeschlagen	activation failed
+Audio Unit ließ sich nicht erzeugen	the Audio Unit could not be created
+Audio Unit hat kein Fenster	The Audio Unit has no window
+Audio Unit nicht gefunden	Audio Unit not found
+Audio Units gibt es nur unter macOS	Audio Units exist only on macOS
+Fenster für das Plugin ließ sich nicht anlegen	The window for the plugin could not be created
+Fenster für das Plugin: {grund}	Window for the plugin: {grund}
+Fenster ohne Inhaltsansicht	Window without a content view
+Fensterklasse für Plugins ließ sich nicht anmelden	The window class for plugins could not be registered
+InitDll fehlgeschlagen	InitDll failed
+Komponente ließ sich nicht erzeugen	the component could not be created
+LV2 nicht verfügbar (lilv nicht installiert)	LV2 is not available (lilv is not installed)
+LV2-Fenster gibt es bisher nur unter X11	LV2 windows are only available under X11 so far
+LV2-Plugin ließ sich nicht erzeugen (fehlendes Host-Feature?)	the LV2 plugin could not be created (missing host feature?)
+LV2-Plugin nicht gefunden	LV2 plugin not found
+ModuleEntry fehlgeschlagen	ModuleEntry failed
+Oberfläche nicht in der Bibliothek gefunden	Interface not found in the library
+Plugin bietet kein passendes Fenster an	The plugin offers no suitable window
+Plugin hat kein eigenes Fenster	The plugin has no window of its own
+Plugin hat keine passende Oberfläche (X11)	The plugin has no suitable interface (X11)
+Plugin hat keinen Controller	The plugin has no controller
+Plugin konnte das Preset nicht laden	The plugin could not load the preset
+Plugin konnte sein Fenster nicht anlegen	The plugin could not create its window
+Plugin konnte sein Fenster nicht zeigen	The plugin could not show its window
+Plugin ließ sich nicht erzeugen	the plugin could not be created
+Plugin-Bibliothek ließ sich nicht initialisieren	The plugin library could not be initialized
+Plugin-Cache gesperrt	Plugin cache locked
+Plugin-Fabrik fehlt	Plugin factory missing
+Plugin-Fenster brauchen X11 (unter Wayland: XWayland)	Plugin windows need X11 (under Wayland: XWayland)
+Plugin-Fenster ließ sich nicht einbetten	The plugin window could not be embedded
+Plugin-Fenster lässt sich hier nicht einbetten	The plugin window cannot be embedded here
+Plugin-Fenster nur im Hauptthread	Plugin windows only on the main thread
+Plugin-Fenster werden auf diesem System nicht unterstützt	Plugin windows are not supported on this system
+Plugin-Oberfläche ließ sich nicht erzeugen	The plugin interface could not be created
+Plugins gibt es im Browser nicht	Plugins are not available in the browser
+Presets dieses Formats setzen Parameterwerte	Presets of this format set parameter values
+UI-Bibliotheken gesperrt	UI libraries locked
+VST3 auf diesem System noch nicht unterstützt	VST3 is not supported on this system yet
+VST3-Fabrik ist leer	VST3 factory is empty
+VST3-Module gesperrt	VST3 modules locked
+clap_entry ist leer	clap_entry is empty
+create_plugin fehlt	create_plugin missing
+init fehlgeschlagen	init failed
+init fehlt	init missing
+initialisieren fehlgeschlagen	initialization failed
+initialize fehlgeschlagen	initialize failed
+inkompatible CLAP-Version	incompatible CLAP version
+kein Audio-Ausgang	no audio output
+kein Audioprozessor	no audio processor
+kein CLAP-Preset	not a CLAP preset
+kein GetPluginFactory – keine VST3-Datei	no GetPluginFactory – not a VST3 file
+kein X11-Bildschirm	no X11 display
+kein clap_entry – keine CLAP-Datei	no clap_entry – not a CLAP file
+kein passendes Ausgabeformat	no suitable output format
+keine LV2-Oberfläche in der Bibliothek	no LV2 interface in the library
+setupProcessing fehlgeschlagen	setupProcessing failed
+ungültige VST3-Klassen-Id	invalid VST3 class ID
+unvollständige clap.gui-Erweiterung	incomplete clap.gui extension
