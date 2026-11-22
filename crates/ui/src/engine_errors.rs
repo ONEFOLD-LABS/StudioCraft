@@ -179,6 +179,12 @@ impl<T> TrErr<T> for Result<T, EngineError> {
     }
 }
 
+impl<T> TrErr<T> for Result<T, studiocraft_plugin_host::PluginError> {
+    fn tr_err(self) -> Result<T, String> {
+        self.map_err(|e| crate::plugin_errors::plugin_error_text(&e))
+    }
+}
+
 impl<T> TrErr<T> for Result<T, ClipError> {
     fn tr_err(self) -> Result<T, String> {
         self.map_err(|e| clip_error_text(&e))

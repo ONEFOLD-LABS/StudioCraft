@@ -272,16 +272,23 @@ mod embed {
             }
         }
 
-        pub(crate) fn open(controller: Obj, title: &str) -> Result<Self, String> {
+        pub(crate) fn open(
+            controller: Obj,
+            title: &str,
+        ) -> Result<Self, crate::error::PluginError> {
             if controller.is_null() {
-                return Err("Plugin hat keinen Controller".into());
+                return Err(crate::error::PluginError::Window(
+                    crate::error::WindowProblem::NoController,
+                ));
             }
             // SAFETY: Controller lebt; Aufrufe im Hauptthread in der vorgesehenen Reihenfolge.
             unsafe {
                 let view =
                     (vt::<EditControllerVt>(controller).create_view)(controller, EDITOR.as_ptr());
                 if view.is_null() {
-                    return Err("Plugin hat kein eigenes Fenster".into());
+                    return Err(crate::error::PluginError::Window(
+                        crate::error::WindowProblem::NoWindow,
+                    ));
                 }
                 // Manche Plugins liefern die Ansicht nur über queryInterface korrekt typisiert.
                 let view = match query(view, &IID_PLUG_VIEW) {
@@ -294,7 +301,9 @@ mod embed {
                 let pv = vt::<PlugViewVt>(view);
                 if (pv.is_platform_type_supported)(view, PLATFORM.as_ptr()) != RESULT_OK {
                     release(view);
-                    return Err("Plugin-Fenster lässt sich hier nicht einbetten".into());
+                    return Err(crate::error::PluginError::Window(
+                        crate::error::WindowProblem::CannotEmbedHere,
+                    ));
                 }
                 let mut state = Box::<LoopState>::default();
                 let sp: *mut LoopState = &mut *state;
@@ -328,7 +337,9 @@ mod embed {
                     (pv.set_frame)(view, ptr::null_mut());
                     release(view);
                     window.close();
-                    return Err("Plugin-Fenster ließ sich nicht einbetten".into());
+                    return Err(crate::error::PluginError::Window(
+                        crate::error::WindowProblem::CannotEmbed,
+                    ));
                 }
                 window.show();
                 let _ = &mut run_loop;

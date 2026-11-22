@@ -568,12 +568,21 @@ fn pad8(n: usize) -> usize {
 
 impl Lv2Instance {
     /// Erzeugt und aktiviert das Plugin. Nur im Hauptthread.
-    pub fn new(info: &PluginInfo, sample_rate: u32, max_frames: u32) -> Result<Self, String> {
+    pub fn new(
+        info: &PluginInfo,
+        sample_rate: u32,
+        max_frames: u32,
+    ) -> Result<Self, crate::error::PluginError> {
         let _main = main_thread_lock();
-        let w = world().ok_or("LV2 nicht verfügbar (lilv nicht installiert)")?;
-        let plugin = w
-            .plugin_by_uri(&info.id)
-            .ok_or_else(|| format!("{}: LV2-Plugin nicht gefunden", info.name))?;
+        let w = world().ok_or(crate::error::PluginError::Unavailable(
+            crate::error::Unavailable::Lv2NoLilv,
+        ))?;
+        let plugin =
+            w.plugin_by_uri(&info.id)
+                .ok_or_else(|| crate::error::PluginError::Create {
+                    plugin: info.name.clone(),
+                    step: crate::error::Step::Lv2NotFound,
+                })?;
         let max = max_frames.max(1) as usize;
 
         let mut map = Box::new(UridMap {
@@ -767,7 +776,10 @@ impl Lv2Instance {
             kinds.push(kind);
         }
         if a_out == 0 {
-            return Err(format!("{}: kein Audio-Ausgang", info.name));
+            return Err(crate::error::PluginError::Create {
+                plugin: info.name.clone(),
+                step: crate::error::Step::NoAudioOutput,
+            });
         }
         let info = w.info(plugin);
         // SAFETY: Plugin aus der Welt, Features nullterminiert und so lange gültig wie die
@@ -777,10 +789,10 @@ impl Lv2Instance {
         };
         drop(w);
         if inst.is_null() {
-            return Err(format!(
-                "{}: LV2-Plugin ließ sich nicht erzeugen (fehlendes Host-Feature?)",
-                info.name
-            ));
+            return Err(crate::error::PluginError::Create {
+                plugin: info.name.clone(),
+                step: crate::error::Step::Lv2Instantiate,
+            });
         }
         let words = ATOM_CAPACITY / 8;
         let mut me = Self {
@@ -1143,17 +1155,21 @@ impl Lv2Handle {
 
     /// Öffnet das Plugin-Fenster. Nur im Hauptthread; danach Werte mit
     /// [`Self::set_ui_value`] übergeben.
-    pub fn open_gui(&mut self, title: &str) -> Result<(), String> {
+    pub fn open_gui(&mut self, title: &str) -> Result<(), crate::error::PluginError> {
         if self.gui.is_some() {
             return Ok(());
         }
         if !crate::host::on_main_thread() {
-            return Err("Plugin-Fenster nur im Hauptthread".into());
+            return Err(crate::error::PluginError::Window(
+                crate::error::WindowProblem::MainThreadOnly,
+            ));
         }
         let info = self
             .ui_info()
             .cloned()
-            .ok_or("Plugin hat keine passende Oberfläche (X11)")?;
+            .ok_or(crate::error::PluginError::Window(
+                crate::error::WindowProblem::Lv2NoMatchingUi,
+            ))?;
         let _main = main_thread_lock();
         // SAFETY: Instanz lebt (Vertrag des Griffs); Beschreibung und Handle sind gültig.
         let (handle, ext) = unsafe {

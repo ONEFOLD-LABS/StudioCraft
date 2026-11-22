@@ -5,6 +5,7 @@
 //! geänderte Ketten werden neu erzeugt, sonst nur Bypass und Parameter gesendet.
 //! So stimmen Engine und Projekt auch nach Undo und beim Öffnen überein.
 
+use crate::engine_errors::TrErr;
 use crate::i18n::tr;
 use std::collections::HashMap;
 
@@ -218,9 +219,9 @@ impl ProjectWindow {
             let exe = PLUGIN_SCANNER
                 .get()
                 .ok_or_else(|| tr("Eigener Prozess ist hier nicht verfügbar").to_owned())?;
-            PluginInstance::new_isolated(&info, self.sample_rate, MAX_BLOCK, exe)?
+            PluginInstance::new_isolated(&info, self.sample_rate, MAX_BLOCK, exe).tr_err()?
         } else {
-            PluginInstance::new(&info, self.sample_rate, MAX_BLOCK)?
+            PluginInstance::new(&info, self.sample_rate, MAX_BLOCK).tr_err()?
         };
         if let Some(state) = slot.state.as_deref().and_then(|s| B64.decode(s).ok())
             && !inst.handle().load_state(&state)
@@ -599,6 +600,7 @@ impl ProjectWindow {
             if open {
                 h.close_gui();
             } else if let Err(e) = h.open_gui(&title) {
+                let e = crate::plugin_errors::plugin_error_text(&e);
                 self.message = Some(format!("{name}: {e}"));
             } else {
                 // Aktuelle Werte an das neue Fenster (sonst zeigt es Vorgaben).
@@ -1016,6 +1018,7 @@ impl ProjectWindow {
         let loaded = match self.handle_mut(track, k) {
             Some(h) => h
                 .load_preset(uri)
+                .tr_err()
                 .map(|()| (h.param_values(), h.save_state())),
             None => Err(tr("Plugin läuft nicht").into()),
         };

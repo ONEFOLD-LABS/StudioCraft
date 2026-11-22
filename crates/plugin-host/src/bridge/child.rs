@@ -318,7 +318,7 @@ impl BridgedMain for crate::PluginHandle {
         crate::PluginHandle::gui_open(self)
     }
     fn open_gui(&mut self, title: &str) -> Result<(), String> {
-        crate::PluginHandle::open_gui(self, title)
+        crate::PluginHandle::open_gui(self, title).map_err(|e| e.to_wire())
     }
     fn close_gui(&mut self) {
         crate::PluginHandle::close_gui(self);

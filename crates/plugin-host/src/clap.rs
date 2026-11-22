@@ -145,37 +145,46 @@ fn binary_path(bundle: &Path) -> PathBuf {
 
 impl Library {
     /// Lädt (oder teilt) die Bibliothek und ruft `init` auf. Nur im Hauptthread.
-    pub(crate) fn load(bundle: &Path) -> Result<Arc<Self>, String> {
+    pub(crate) fn load(bundle: &Path) -> Result<Arc<Self>, crate::error::PluginError> {
         let _main = main_thread_lock();
         let mut cache = library_cache()
             .lock()
-            .map_err(|_| "Plugin-Cache gesperrt".to_string())?;
+            .map_err(|_| crate::error::PluginError::Locked(crate::error::Lock::PluginCache))?;
         if let Some(lib) = cache.get(bundle).and_then(Weak::upgrade) {
             return Ok(lib);
         }
         // SAFETY: Laden fremden Codes ist der Zweck; Initialisierer der Bibliothek laufen hier.
-        let lib =
-            unsafe { libloading::Library::new(binary_path(bundle)) }.map_err(|e| e.to_string())?;
+        let lib = unsafe { libloading::Library::new(binary_path(bundle)) }
+            .map_err(|e| crate::error::PluginError::Library(e.to_string()))?;
         // SAFETY: `clap_entry` ist laut CLAP ein Datensymbol vom Typ `clap_plugin_entry`.
         let entry: *const clap_plugin_entry = unsafe {
-            let sym: libloading::Symbol<*const clap_plugin_entry> = lib
-                .get(b"clap_entry\0")
-                .map_err(|_| "kein clap_entry – keine CLAP-Datei".to_string())?;
+            let sym: libloading::Symbol<*const clap_plugin_entry> =
+                lib.get(b"clap_entry\0").map_err(|_| {
+                    crate::error::PluginError::BadFile(crate::error::BadFile::NoClapEntry)
+                })?;
             *sym
         };
         if entry.is_null() {
-            return Err("clap_entry ist leer".into());
+            return Err(crate::error::PluginError::BadFile(
+                crate::error::BadFile::EmptyClapEntry,
+            ));
         }
         // SAFETY: `entry` zeigt auf eine gültige Struktur der geladenen Bibliothek.
         unsafe {
             if !clap_version_is_compatible((*entry).clap_version) {
-                return Err("inkompatible CLAP-Version".into());
+                return Err(crate::error::PluginError::BadFile(
+                    crate::error::BadFile::IncompatibleClap,
+                ));
             }
-            let path =
-                CString::new(bundle.to_string_lossy().as_bytes()).map_err(|e| e.to_string())?;
-            let init = (*entry).init.ok_or("init fehlt")?;
+            let path = CString::new(bundle.to_string_lossy().as_bytes())
+                .map_err(|e| crate::error::PluginError::Library(e.to_string()))?;
+            let init = (*entry).init.ok_or(crate::error::PluginError::BadFile(
+                crate::error::BadFile::ClapInitMissing,
+            ))?;
             if !init(path.as_ptr()) {
-                return Err("Plugin-Bibliothek ließ sich nicht initialisieren".into());
+                return Err(crate::error::PluginError::BadFile(
+                    crate::error::BadFile::ClapInitFailed,
+                ));
             }
         }
         let lib = Arc::new(Self { entry, _lib: lib });
@@ -395,12 +404,13 @@ impl ClapHandle {
 
     /// Ein Preset aus [`Self::presets`] laden (Erweiterung `preset-load`). Hauptthread; laut
     /// CLAP parallel zur Verarbeitung erlaubt.
-    pub fn load_preset(&self, uri: &str) -> Result<(), String> {
+    pub fn load_preset(&self, uri: &str) -> Result<(), crate::error::PluginError> {
         use clap_sys::ext::preset_load::{
             CLAP_EXT_PRESET_LOAD, CLAP_EXT_PRESET_LOAD_COMPAT, clap_plugin_preset_load,
         };
-        let (kind, location, key) =
-            crate::clap_presets::parse_uri(uri).ok_or("kein CLAP-Preset")?;
+        let (kind, location, key) = crate::clap_presets::parse_uri(uri).ok_or(
+            crate::error::PluginError::Preset(crate::error::PresetProblem::NotClapPreset),
+        )?;
         let _main = main_thread_lock();
         let mut ext: *const clap_plugin_preset_load = self.extension(CLAP_EXT_PRESET_LOAD);
         if ext.is_null() {
@@ -420,7 +430,9 @@ impl ClapHandle {
         if ok {
             Ok(())
         } else {
-            Err("Plugin konnte das Preset nicht laden".into())
+            Err(crate::error::PluginError::Preset(
+                crate::error::PresetProblem::NotLoaded,
+            ))
         }
     }
 
@@ -615,18 +627,32 @@ unsafe impl Send for ClapInstance {}
 
 impl ClapInstance {
     /// Erzeugt, initialisiert und aktiviert das Plugin. Nur im Hauptthread.
-    pub fn new(info: &PluginInfo, sample_rate: u32, max_frames: u32) -> Result<Self, String> {
+    pub fn new(
+        info: &PluginInfo,
+        sample_rate: u32,
+        max_frames: u32,
+    ) -> Result<Self, crate::error::PluginError> {
         let _main = main_thread_lock();
         let lib = Library::load(&info.path)?;
-        let factory = lib.factory().ok_or("Plugin-Fabrik fehlt")?;
-        let create = factory.create_plugin.ok_or("create_plugin fehlt")?;
+        let factory = lib.factory().ok_or(crate::error::PluginError::BadFile(
+            crate::error::BadFile::NoFactory,
+        ))?;
+        let create = factory
+            .create_plugin
+            .ok_or(crate::error::PluginError::BadFile(
+                crate::error::BadFile::NoCreate,
+            ))?;
         let shared = Arc::new(HostShared::default());
         let host = new_host(&shared);
-        let id = CString::new(info.id.as_bytes()).map_err(|e| e.to_string())?;
+        let id = CString::new(info.id.as_bytes())
+            .map_err(|e| crate::error::PluginError::Library(e.to_string()))?;
         // SAFETY: Fabrik, Host und Id sind gültig; der Host lebt so lange wie die Instanz.
         let plugin = unsafe { create(factory, &*host, id.as_ptr()) };
         if plugin.is_null() {
-            return Err(format!("{}: Plugin ließ sich nicht erzeugen", info.name));
+            return Err(crate::error::PluginError::Create {
+                plugin: info.name.clone(),
+                step: crate::error::Step::Create,
+            });
         }
         let mut inst = Self {
             plugin,
@@ -654,7 +680,10 @@ impl ClapInstance {
                     d(plugin);
                 }
                 inst.plugin = ptr::null();
-                return Err(format!("{}: init fehlgeschlagen", info.name));
+                return Err(crate::error::PluginError::Create {
+                    plugin: info.name.clone(),
+                    step: crate::error::Step::Init,
+                });
             }
             inst.read_ports();
             inst.read_params();
@@ -662,11 +691,17 @@ impl ClapInstance {
                 .activate
                 .is_some_and(|f| f(plugin, f64::from(sample_rate), 1, max_frames))
             {
-                return Err(format!("{}: Aktivieren fehlgeschlagen", info.name));
+                return Err(crate::error::PluginError::Create {
+                    plugin: info.name.clone(),
+                    step: crate::error::Step::Activate,
+                });
             }
         }
         if inst.outputs.main_channels() == 0 {
-            return Err(format!("{}: kein Audio-Ausgang", info.name));
+            return Err(crate::error::PluginError::Create {
+                plugin: info.name.clone(),
+                step: crate::error::Step::NoAudioOutput,
+            });
         }
         Ok(inst)
     }
@@ -1150,7 +1185,12 @@ mod tests {
         let mut h = inst.handle();
         assert!(h.has_gui());
         // Testthreads heißen nicht „main“: CLAP verlangt den Hauptthread.
-        assert!(h.open_gui("x").unwrap_err().contains("Hauptthread"));
+        assert!(
+            h.open_gui("x")
+                .unwrap_err()
+                .to_string()
+                .contains("Hauptthread")
+        );
         assert!(!h.idle(), "ohne Fenster nichts zu bedienen");
     }
 

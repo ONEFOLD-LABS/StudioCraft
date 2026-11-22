@@ -61,8 +61,10 @@ mod other {
     }
 
     impl AuInstance {
-        pub fn new(_: &PluginInfo, _: u32, _: u32) -> Result<Self, String> {
-            Err("Audio Units gibt es nur unter macOS".into())
+        pub fn new(_: &PluginInfo, _: u32, _: u32) -> Result<Self, crate::error::PluginError> {
+            Err(crate::error::PluginError::Unavailable(
+                crate::error::Unavailable::AudioUnitsMacOnly,
+            ))
         }
         pub fn handle(&self) -> AuHandle {
             AuHandle
@@ -96,8 +98,10 @@ mod other {
         pub fn gui_open(&self) -> bool {
             false
         }
-        pub fn open_gui(&mut self, _: &str) -> Result<(), String> {
-            Err("Audio Units gibt es nur unter macOS".into())
+        pub fn open_gui(&mut self, _: &str) -> Result<(), crate::error::PluginError> {
+            Err(crate::error::PluginError::Unavailable(
+                crate::error::Unavailable::AudioUnitsMacOnly,
+            ))
         }
         pub fn close_gui(&mut self) {}
         pub fn idle(&mut self) -> bool {
@@ -533,18 +537,24 @@ mod mac {
 
     impl AuInstance {
         /// Erzeugt und initialisiert die Audio Unit. Nur im Hauptthread.
-        pub fn new(info: &PluginInfo, sample_rate: u32, max_frames: u32) -> Result<Self, String> {
+        pub fn new(
+            info: &PluginInfo,
+            sample_rate: u32,
+            max_frames: u32,
+        ) -> Result<Self, crate::error::PluginError> {
             let _main = main_thread_lock();
-            let comp = find(&info.id)
-                .ok_or_else(|| format!("{}: Audio Unit nicht gefunden", info.name))?;
+            let comp = find(&info.id).ok_or_else(|| crate::error::PluginError::Create {
+                plugin: info.name.clone(),
+                step: crate::error::Step::AuNotFound,
+            })?;
             let max = max_frames.max(1) as usize;
             let mut unit: Unit = ptr::null_mut();
             // SAFETY: Komponente aus der Registry; Ausgabezeiger gültig.
             if unsafe { AudioComponentInstanceNew(comp, &mut unit) } != 0 || unit.is_null() {
-                return Err(format!(
-                    "{}: Audio Unit ließ sich nicht erzeugen",
-                    info.name
-                ));
+                return Err(crate::error::PluginError::Create {
+                    plugin: info.name.clone(),
+                    step: crate::error::Step::AuCreate,
+                });
             }
             let mut me = Self {
                 unit,
@@ -573,8 +583,12 @@ mod mac {
                     (&frames as *const u32).cast(),
                     4,
                 );
-                me.out_channels = set_format(unit, SCOPE_OUTPUT, sample_rate)
-                    .ok_or_else(|| format!("{}: kein passendes Ausgabeformat", info.name))?;
+                me.out_channels = set_format(unit, SCOPE_OUTPUT, sample_rate).ok_or_else(|| {
+                    crate::error::PluginError::Create {
+                        plugin: info.name.clone(),
+                        step: crate::error::Step::AuNoOutputFormat,
+                    }
+                })?;
                 if !info.is_instrument() {
                     set_format(unit, SCOPE_INPUT, sample_rate);
                     let cb = RenderCallbackStruct {
@@ -591,7 +605,10 @@ mod mac {
                     );
                 }
                 if AudioUnitInitialize(unit) != 0 {
-                    return Err(format!("{}: initialisieren fehlgeschlagen", info.name));
+                    return Err(crate::error::PluginError::Create {
+                        plugin: info.name.clone(),
+                        step: crate::error::Step::AuInit,
+                    });
                 }
             }
             me.initialized = true;
@@ -871,7 +888,7 @@ mod mac {
         }
 
         /// Öffnet das Fenster der Audio Unit. Nur im Hauptthread.
-        pub fn open_gui(&mut self, title: &str) -> Result<(), String> {
+        pub fn open_gui(&mut self, title: &str) -> Result<(), crate::error::PluginError> {
             if self.gui.is_some() {
                 return Ok(());
             }
@@ -1131,10 +1148,10 @@ mod mac {
         }
 
         impl AuGui {
-            pub(super) fn open(unit: Unit, title: &str) -> Result<Self, String> {
-                let view = cocoa_view(unit)
-                    .or_else(|| generic_view(unit))
-                    .ok_or("Audio Unit hat kein Fenster")?;
+            pub(super) fn open(unit: Unit, title: &str) -> Result<Self, crate::error::PluginError> {
+                let view = cocoa_view(unit).or_else(|| generic_view(unit)).ok_or(
+                    crate::error::PluginError::Window(crate::error::WindowProblem::AuNoWindow),
+                )?;
                 let frame = view.frame();
                 let (w, h) = (
                     frame.size.width.clamp(200.0, 4000.0) as u32,
@@ -1145,7 +1162,9 @@ mod mac {
                 // SAFETY: Inhaltsansicht des lebenden Fensters (das Fenster hält sie).
                 let Some(content) = (unsafe { content.as_ref() }) else {
                     window.close();
-                    return Err("Fenster ohne Inhaltsansicht".into());
+                    return Err(crate::error::PluginError::Window(
+                        crate::error::WindowProblem::AuNoContentView,
+                    ));
                 };
                 content.addSubview(&view);
                 window.show();

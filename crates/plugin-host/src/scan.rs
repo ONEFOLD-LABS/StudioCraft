@@ -104,11 +104,11 @@ pub(crate) fn scan_bundle_then<R>(
 ) -> R {
     if crate::vst3::is_vst3(bundle) {
         // VST3-Module bleiben bis zum Prozessende geladen.
-        return f(crate::vst3::descriptors(bundle));
+        return f(crate::vst3::descriptors(bundle).map_err(|e| e.to_string()));
     }
     let lib = match Library::load(bundle) {
         Ok(lib) => lib,
-        Err(e) => return f(Err(e)),
+        Err(e) => return f(Err(e.to_string())),
     };
     let list = lib
         .descriptors()

@@ -65,6 +65,7 @@ mod noteinfo;
 mod panel_undo;
 #[cfg(test)]
 mod perf_tests;
+mod plugin_errors;
 mod pre_ui;
 mod processes_ui;
 mod quantize;
@@ -116,6 +117,7 @@ pub struct LoadedClip {
 
 pub use engine_errors::{clip_error_text, engine_error_text, wasapi_text};
 pub use inserts::enable_isolated_plugin_scan;
+pub use plugin_errors::plugin_error_text;
 pub use studiocraft_plugin_host::run_bridge_child as run_plugin_bridge_child;
 pub use studiocraft_plugin_host::run_scan_child as run_plugin_scan_child;
 pub use tools::{Grid, Tool};

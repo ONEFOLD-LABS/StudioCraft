@@ -155,11 +155,15 @@ impl ClapHandle {
     }
 
     /// Öffnet (oder zeigt) das Plugin-Fenster. Nur im Hauptthread.
-    pub fn open_gui(&mut self, title: &str) -> Result<(), String> {
+    pub fn open_gui(&mut self, title: &str) -> Result<(), crate::error::PluginError> {
         if !on_main_thread() {
-            return Err("Plugin-Fenster nur im Hauptthread".into());
+            return Err(crate::error::PluginError::Window(
+                crate::error::WindowProblem::MainThreadOnly,
+            ));
         }
-        let vt = self.gui_ext().ok_or("Plugin hat kein eigenes Fenster")?;
+        let vt = self.gui_ext().ok_or(crate::error::PluginError::Window(
+            crate::error::WindowProblem::NoWindow,
+        ))?;
         let p = self.plugin;
         if self.gui.created {
             if let Some(show) = vt.show {
@@ -169,10 +173,14 @@ impl ClapHandle {
             return Ok(());
         }
         let (Some(supported), Some(create)) = (vt.is_api_supported, vt.create) else {
-            return Err("unvollständige clap.gui-Erweiterung".into());
+            return Err(crate::error::PluginError::Window(
+                crate::error::WindowProblem::IncompleteGui,
+            ));
         };
         if window_api().is_none() {
-            return Err("Plugin-Fenster werden auf diesem System nicht unterstützt".into());
+            return Err(crate::error::PluginError::Window(
+                crate::error::WindowProblem::UnsupportedSystem,
+            ));
         }
         // SAFETY: Plugin lebt; `api` ist statisch und nullterminiert; Hauptthread.
         let mode = plan(wayland_session(), |api, floating| unsafe {
@@ -181,12 +189,18 @@ impl ClapHandle {
         let api = match mode {
             Some(Mode::Embedded(api)) => return self.open_embedded(vt, api, title),
             Some(Mode::Floating(api)) => api,
-            None => return Err("Plugin bietet kein passendes Fenster an".into()),
+            None => {
+                return Err(crate::error::PluginError::Window(
+                    crate::error::WindowProblem::NoMatchingApi,
+                ));
+            }
         };
         self.shared.gui_closed.store(false, Ordering::Relaxed);
         // SAFETY: wie oben; noch keine GUI.
         if !unsafe { create(p, api.as_ptr(), true) } {
-            return Err("Plugin konnte sein Fenster nicht anlegen".into());
+            return Err(crate::error::PluginError::Window(
+                crate::error::WindowProblem::CannotCreate,
+            ));
         }
         self.gui.created = true;
         if let (Some(f), Ok(t)) = (vt.suggest_title, CString::new(title)) {
@@ -197,7 +211,9 @@ impl ClapHandle {
         // SAFETY: GUI existiert.
         if !vt.show.is_some_and(|f| unsafe { f(p) }) {
             self.close_gui();
-            return Err("Plugin konnte sein Fenster nicht zeigen".into());
+            return Err(crate::error::PluginError::Window(
+                crate::error::WindowProblem::CannotShow,
+            ));
         }
         Ok(())
     }
@@ -228,15 +244,19 @@ impl ClapHandle {
         vt: clap_plugin_gui,
         api: &CStr,
         title: &str,
-    ) -> Result<(), String> {
+    ) -> Result<(), crate::error::PluginError> {
         let p = self.plugin;
         let (Some(create), Some(set_parent)) = (vt.create, vt.set_parent) else {
-            return Err("unvollständige clap.gui-Erweiterung".into());
+            return Err(crate::error::PluginError::Window(
+                crate::error::WindowProblem::IncompleteGui,
+            ));
         };
         self.shared.resize.store(0, Ordering::Relaxed);
         // SAFETY: Plugin lebt; Hauptthread; noch keine GUI.
         if !unsafe { create(p, api.as_ptr(), false) } {
-            return Err("Plugin konnte sein Fenster nicht anlegen".into());
+            return Err(crate::error::PluginError::Window(
+                crate::error::WindowProblem::CannotCreate,
+            ));
         }
         self.gui.created = true;
         if let Some(f) = vt.set_scale {
@@ -278,13 +298,17 @@ impl ClapHandle {
         if !unsafe { set_parent(p, &parent) } {
             win.close();
             self.close_gui();
-            return Err("Plugin-Fenster ließ sich nicht einbetten".into());
+            return Err(crate::error::PluginError::Window(
+                crate::error::WindowProblem::CannotEmbed,
+            ));
         }
         // SAFETY: GUI existiert und ist eingebettet.
         if vt.show.is_some_and(|f| !unsafe { f(p) }) {
             win.close();
             self.close_gui();
-            return Err("Plugin konnte sein Fenster nicht zeigen".into());
+            return Err(crate::error::PluginError::Window(
+                crate::error::WindowProblem::CannotShow,
+            ));
         }
         win.show();
         self.gui.window = Some(win);
@@ -461,7 +485,9 @@ pub(crate) mod x11win {
             .setup()
             .roots
             .get(screen)
-            .ok_or("kein X11-Bildschirm")?;
+            .ok_or(crate::error::PluginError::Window(
+                crate::error::WindowProblem::NoX11Display,
+            ))?;
         let (root, visual) = (s.root, s.root_visual);
         let atom = |name: &[u8]| -> Result<u32, Box<dyn std::error::Error>> {
             Ok(conn.intern_atom(false, name)?.reply()?.atom)
@@ -486,9 +512,15 @@ pub(crate) mod x11win {
     }
 
     impl HostWindow {
-        pub fn new(title: &str, w: u32, h: u32) -> Result<Self, String> {
-            let x = x().ok_or("Plugin-Fenster brauchen X11 (unter Wayland: XWayland)")?;
-            let err = |e: &dyn std::fmt::Display| format!("Fenster für das Plugin: {e}");
+        pub fn new(title: &str, w: u32, h: u32) -> Result<Self, crate::error::PluginError> {
+            let x = x().ok_or(crate::error::PluginError::Window(
+                crate::error::WindowProblem::NeedsX11,
+            ))?;
+            let err = |e: &dyn std::fmt::Display| {
+                crate::error::PluginError::Window(crate::error::WindowProblem::HostWindow(
+                    e.to_string(),
+                ))
+            };
             let id = x.conn.generate_id().map_err(|e| err(&e))?;
             let aux = CreateWindowAux::new().event_mask(EventMask::STRUCTURE_NOTIFY);
             let (w, h) = (w.clamp(1, 16_384) as u16, h.clamp(1, 16_384) as u16);
@@ -804,8 +836,10 @@ pub(crate) mod win32win {
     }
 
     impl HostWindow {
-        pub fn new(title: &str, w: u32, h: u32) -> Result<Self, String> {
-            let class = class().ok_or("Fensterklasse für Plugins ließ sich nicht anmelden")?;
+        pub fn new(title: &str, w: u32, h: u32) -> Result<Self, crate::error::PluginError> {
+            let class = class().ok_or(crate::error::PluginError::Window(
+                crate::error::WindowProblem::HostClass,
+            ))?;
             let title = wide(title);
             let (ow, oh) = outer(w, h);
             // SAFETY: Klasse angemeldet; Zeichenketten nullterminiert und während des Aufrufs gültig.
@@ -826,7 +860,9 @@ pub(crate) mod win32win {
                 )
             };
             if hwnd.is_null() {
-                return Err("Fenster für das Plugin ließ sich nicht anlegen".into());
+                return Err(crate::error::PluginError::Window(
+                    crate::error::WindowProblem::HostCreate,
+                ));
             }
             let closed = Box::new(AtomicBool::new(false));
             // SAFETY: Fenster gehört uns; das Flag lebt so lange wie das Fenster (close setzt
@@ -894,8 +930,10 @@ pub(crate) mod cocoawin {
     }
 
     impl HostWindow {
-        pub fn new(title: &str, w: u32, h: u32) -> Result<Self, String> {
-            let mtm = MainThreadMarker::new().ok_or("Plugin-Fenster nur im Hauptthread")?;
+        pub fn new(title: &str, w: u32, h: u32) -> Result<Self, crate::error::PluginError> {
+            let mtm = MainThreadMarker::new().ok_or(crate::error::PluginError::Window(
+                crate::error::WindowProblem::MainThreadOnly,
+            ))?;
             let size = NSSize::new(f64::from(w.clamp(1, 16_384)), f64::from(h.clamp(1, 16_384)));
             let rect = NSRect::new(NSPoint::new(200.0, 200.0), size);
             let style = NSWindowStyleMask::Titled

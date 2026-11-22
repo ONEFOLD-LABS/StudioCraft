@@ -1321,18 +1321,21 @@ fn binary_path(bundle: &Path) -> Option<PathBuf> {
     Some(bundle.join("Contents").join(dir).join(name))
 }
 
-fn module(bundle: &Path) -> Result<Obj, String> {
+fn module(bundle: &Path) -> Result<Obj, crate::error::PluginError> {
     static MODULES: OnceLock<Mutex<HashMap<PathBuf, Module>>> = OnceLock::new();
     let mut mods = MODULES
         .get_or_init(Default::default)
         .lock()
-        .map_err(|_| "VST3-Module gesperrt".to_string())?;
+        .map_err(|_| crate::error::PluginError::Locked(crate::error::Lock::Vst3Modules))?;
     if let Some(m) = mods.get(bundle) {
         return Ok(m.factory);
     }
-    let path = binary_path(bundle).ok_or("VST3 auf diesem System noch nicht unterstützt")?;
+    let path = binary_path(bundle).ok_or(crate::error::PluginError::Unavailable(
+        crate::error::Unavailable::Vst3System,
+    ))?;
     // SAFETY: Laden fremden Codes ist der Zweck; Initialisierer der Bibliothek laufen hier.
-    let lib = unsafe { libloading::Library::new(&path) }.map_err(|e| e.to_string())?;
+    let lib = unsafe { libloading::Library::new(&path) }
+        .map_err(|e| crate::error::PluginError::Library(e.to_string()))?;
     // Einstieg laut Formatbeschreibung: Linux `ModuleEntry(handle)`, Windows `InitDll()`.
     #[cfg(unix)]
     {
@@ -1342,7 +1345,9 @@ fn module(bundle: &Path) -> Result<Obj, String> {
         if let Some(entry) = entry {
             // SAFETY: wie oben. Ein Griff ist nicht nötig; Plugins nutzen ihn nur für Pfade.
             if !unsafe { entry(ptr::null_mut()) } {
-                return Err("ModuleEntry fehlgeschlagen".into());
+                return Err(crate::error::PluginError::BadFile(
+                    crate::error::BadFile::ModuleEntry,
+                ));
             }
         }
     }
@@ -1354,19 +1359,24 @@ fn module(bundle: &Path) -> Result<Obj, String> {
         if let Some(entry) = entry {
             // SAFETY: wie oben.
             if !unsafe { entry() } {
-                return Err("InitDll fehlgeschlagen".into());
+                return Err(crate::error::PluginError::BadFile(
+                    crate::error::BadFile::InitDll,
+                ));
             }
         }
     }
     // SAFETY: `GetPluginFactory` liefert laut Formatbeschreibung eine Fabrik (mit Referenz).
     let factory = unsafe {
-        let get: libloading::Symbol<unsafe extern "system" fn() -> Obj> = lib
-            .get(b"GetPluginFactory\0")
-            .map_err(|_| "kein GetPluginFactory – keine VST3-Datei".to_string())?;
+        let get: libloading::Symbol<unsafe extern "system" fn() -> Obj> =
+            lib.get(b"GetPluginFactory\0").map_err(|_| {
+                crate::error::PluginError::BadFile(crate::error::BadFile::NoVst3Factory)
+            })?;
         get()
     };
     if factory.is_null() {
-        return Err("VST3-Fabrik ist leer".into());
+        return Err(crate::error::PluginError::BadFile(
+            crate::error::BadFile::EmptyVst3Factory,
+        ));
     }
     // Bibliothek nie entladen (Plugins mit eigenen Threads stürzen sonst ab).
     std::mem::forget(lib);
@@ -1375,7 +1385,7 @@ fn module(bundle: &Path) -> Result<Obj, String> {
 }
 
 /// Klassen eines Bundles als Plugin-Beschreibungen (nur Audio-Klassen).
-pub(crate) fn descriptors(bundle: &Path) -> Result<Vec<PluginInfo>, String> {
+pub(crate) fn descriptors(bundle: &Path) -> Result<Vec<PluginInfo>, crate::error::PluginError> {
     let _main = main_thread_lock();
     let f = module(bundle)?;
     let mut out = Vec::new();
@@ -1496,9 +1506,15 @@ unsafe impl Send for Vst3Instance {}
 
 impl Vst3Instance {
     /// Erzeugt, initialisiert und aktiviert das Plugin. Nur im Hauptthread.
-    pub fn new(info: &PluginInfo, sample_rate: u32, max_frames: u32) -> Result<Self, String> {
+    pub fn new(
+        info: &PluginInfo,
+        sample_rate: u32,
+        max_frames: u32,
+    ) -> Result<Self, crate::error::PluginError> {
         let _main = main_thread_lock();
-        let cid = unhex(&info.id).ok_or("ungültige VST3-Klassen-Id")?;
+        let cid = unhex(&info.id).ok_or(crate::error::PluginError::BadFile(
+            crate::error::BadFile::InvalidClassId,
+        ))?;
         let f = module(&info.path)?;
         let max = max_frames.max(1) as usize;
         let shared = Arc::new(Shared::default());
@@ -1533,19 +1549,26 @@ impl Vst3Instance {
             if (vt::<FactoryVt>(f).create_instance)(f, &cid, &IID_COMPONENT, &mut c) != RESULT_OK
                 || c.is_null()
             {
-                return Err(format!(
-                    "{}: Komponente ließ sich nicht erzeugen",
-                    info.name
-                ));
+                return Err(crate::error::PluginError::Create {
+                    plugin: info.name.clone(),
+                    step: crate::error::Step::Component,
+                });
             }
             me.component = c;
             if (vt::<PluginBaseVt>(c).initialize)(c, host_app()) != RESULT_OK {
                 (vt::<UnknownVt>(c).release)(c);
                 me.component = ptr::null_mut();
-                return Err(format!("{}: initialize fehlgeschlagen", info.name));
+                return Err(crate::error::PluginError::Create {
+                    plugin: info.name.clone(),
+                    step: crate::error::Step::Initialize,
+                });
             }
-            me.processor = query(c, &IID_AUDIO_PROCESSOR)
-                .ok_or_else(|| format!("{}: kein Audioprozessor", info.name))?;
+            me.processor = query(c, &IID_AUDIO_PROCESSOR).ok_or_else(|| {
+                crate::error::PluginError::Create {
+                    plugin: info.name.clone(),
+                    step: crate::error::Step::NoProcessor,
+                }
+            })?;
             // Controller: die Komponente selbst oder eine eigene Klasse.
             if let Some(ctl) = query(c, &IID_EDIT_CONTROLLER) {
                 me.controller = ctl;
@@ -1594,7 +1617,10 @@ impl Vst3Instance {
                 sample_rate: f64::from(sample_rate),
             };
             if (vt::<AudioProcessorVt>(p).setup_processing)(p, &mut setup) != RESULT_OK {
-                return Err(format!("{}: setupProcessing fehlgeschlagen", info.name));
+                return Err(crate::error::PluginError::Create {
+                    plugin: info.name.clone(),
+                    step: crate::error::Step::SetupProcessing,
+                });
             }
             (vt::<ComponentVt>(c).set_active)(c, 1);
             me.active = true;
@@ -1645,7 +1671,7 @@ impl Vst3Instance {
     ///
     /// # Safety
     /// Komponente und Prozessor müssen leben; Hauptthread.
-    unsafe fn setup_buses(&mut self, frames: usize) -> Result<(), String> {
+    unsafe fn setup_buses(&mut self, frames: usize) -> Result<(), crate::error::PluginError> {
         let (c, p) = (self.component, self.processor);
         // SAFETY: laut Vertrag.
         unsafe {
@@ -1653,7 +1679,10 @@ impl Vst3Instance {
             let n_in = (cvt.get_bus_count)(c, MEDIA_AUDIO, DIR_IN).clamp(0, 16);
             let n_out = (cvt.get_bus_count)(c, MEDIA_AUDIO, DIR_OUT).clamp(0, 16);
             if n_out == 0 {
-                return Err(format!("{}: kein Audio-Ausgang", self.info.name));
+                return Err(crate::error::PluginError::Create {
+                    plugin: self.info.name.clone(),
+                    step: crate::error::Step::NoAudioOutput,
+                });
             }
             // Stereo für die Hauptbusse vorschlagen; lehnt das Plugin ab, gilt seine Vorgabe.
             let mut ins: Vec<u64> = (0..n_in)
@@ -1954,12 +1983,14 @@ impl Vst3Handle {
 
     /// Öffnet das Plugin-Fenster. Nur im Hauptthread; danach Werte mit
     /// [`Self::set_ui_value`] übergeben.
-    pub fn open_gui(&mut self, title: &str) -> Result<(), String> {
+    pub fn open_gui(&mut self, title: &str) -> Result<(), crate::error::PluginError> {
         if self.gui.is_some() {
             return Ok(());
         }
         if !crate::host::on_main_thread() {
-            return Err("Plugin-Fenster nur im Hauptthread".into());
+            return Err(crate::error::PluginError::Window(
+                crate::error::WindowProblem::MainThreadOnly,
+            ));
         }
         let _main = main_thread_lock();
         let gui = crate::vst3_gui::Vst3Gui::open(self.any_controller, title)?;

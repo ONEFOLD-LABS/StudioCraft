@@ -18,6 +18,7 @@
     )
 )]
 
+pub mod error;
 mod info;
 #[cfg(target_arch = "wasm32")]
 mod web;
@@ -56,6 +57,7 @@ pub use bridge::{
     BRIDGE_FLAG, BridgeArgs, BridgeHandle, BridgeInstance, BridgedAudio, BridgedMain, Hosted,
     run_bridge_child, run_bridge_child_with,
 };
+pub use error::{BadFile, Lock, PluginError, PresetProblem, Step, Unavailable, WindowProblem};
 #[cfg(not(target_arch = "wasm32"))]
 pub use gui::{MainWindow, set_main_window};
 pub use info::{
